@@ -35,10 +35,9 @@ sub run {
     assert_script_run "curl -f -v " . data_url("virt_autotest/libvirtd.conf") . " >> /etc/libvirt/libvirtd.conf";
     systemctl 'restart libvirtd';
 
-    if (script_run("virsh net-list --all | grep default") != 0) {
-        assert_script_run "curl " . data_url("virt_autotest/default_network.xml") . " -o ~/default_network.xml";
-        assert_script_run "virsh net-define --file ~/default_network.xml";
-    }
+    assert_script_run "curl " . data_url("virt_autotest/default_network.xml") . " -o ~/default_network.xml";
+    assert_script_run "virsh net-define --file ~/default_network.xml";
+
     assert_script_run "virsh net-start default || true", 90;
     assert_script_run "virsh net-autostart default", 90;
 
