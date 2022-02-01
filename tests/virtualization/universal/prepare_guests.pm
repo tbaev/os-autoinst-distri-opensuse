@@ -35,6 +35,8 @@ sub run {
     assert_script_run "curl -f -v " . data_url("virt_autotest/libvirtd.conf") . " >> /etc/libvirt/libvirtd.conf";
     systemctl 'restart libvirtd';
 
+    assert_script_run "virsh net-undefine default";
+
     assert_script_run "curl " . data_url("virt_autotest/default_network.xml") . " -o ~/default_network.xml";
     assert_script_run "virsh net-define --file ~/default_network.xml";
 
