@@ -1417,4 +1417,14 @@
       <username>openslp</username>
     </user>
   </users>
+  <scripts>
+   <post-scripts config:type="list">
+  <script>
+   <filename>test_script.sh</filename>
+    <source>
+     <![CDATA[mkdir test!]]>
+    </source>
+   </script>
+  </post-scripts>
+ </scripts>
 </profile>
