@@ -107,8 +107,12 @@ sub run {
     # script_retry("! ps x | grep -v 'grep' | grep 'virt-install'", retry => 120, delay => 10);
     # Unfortunately this doesn't cover the second step of the installation, where ssh is available
     my $sleep_delay = 1200;
-    $sleep_delay = 1800 if (is_xen_host);    # XEN has more guests
-    sleep($sleep_delay);    # XXX Get rid of this sleep!
+    foreach my $guest (keys %virt_autotest::common::guests) {
+    record_info "$guest", "Check if first and second stage of install is done of $guest";
+    exec_and_insert_password("ssh root\@$guest hostname -f");
+    }
+    # $sleep_delay = 1800 if (is_xen_host);    # XEN has more guests
+    # sleep($sleep_delay);    # XXX Get rid of this sleep!
     record_info("guests installed", "Guest installation completed");
 
     # Adding the PCI bridges requires the guests to be shutdown
