@@ -323,6 +323,10 @@ if (get_var("REGRESSION", '') =~ /xen/) {
             name => 'sles15sp3',
             ip => 'win2k19-sle15-SP3.qa.suse.cz',
         },
+        sles15sp4 => {
+            name => 'sles15sp3',
+            ip => 'dhcp18.qa.suse.cz',
+        },
     );
 
     delete($guests{sles12sp2}) if (!is_sle('=12-SP2'));
