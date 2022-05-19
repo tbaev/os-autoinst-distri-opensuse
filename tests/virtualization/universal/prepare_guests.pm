@@ -54,20 +54,21 @@ sub run {
     script_run("set +m");
 
     # Install or import defined guests
-    foreach my $guest (values %virt_autotest::common::guests) {
-        my $method = $guest->{method} // 'virt-install'; # by default install guest using virt-install. SLES11 gets installed via importing a pre-installed guest however
-        if ($method eq "virt-install") {
-            create_guest($guest, $method);
-        } elsif ($method eq "import") {
-            # Download the diskimage. Note: this could be merged with download_image.pm at some point
-            my $source = $guest->{source};
-            my $disk = $guest->{disk};
-            script_retry("curl $source -o $disk", retry => 3, delay => 60, timeout => 300);
-            import_guest($guest);
-        } else {
-            die "Unsupported method '$method' for guest $guest";
-        }
-    }
+    #foreach my $guest (values %virt_autotest::common::guests) {
+    #    my $method = $guest->{method} // 'virt-install'; # by default install guest using virt-install. SLES11 gets installed via importing a pre-installed guest however
+    #    if ($method eq "virt-install") {
+    #        create_guest($guest, $method);
+    #    } elsif ($method eq "import") {
+    #        # Download the diskimage. Note: this could be merged with download_image.pm at some point
+    #        my $source = $guest->{source};
+    #        my $disk = $guest->{disk};
+    #        script_retry("curl $source -o $disk", retry => 3, delay => 60, timeout => 300);
+    #        import_guest($guest);
+    #    } else {
+    #        die "Unsupported method '$method' for guest $guest";
+    #    }
+    #}
+    record_info("monitor guest install WIP", "monitor guest install WIP");
 
     script_run 'history -a';
     assert_script_run('cat ~/virt-install*', 30);
