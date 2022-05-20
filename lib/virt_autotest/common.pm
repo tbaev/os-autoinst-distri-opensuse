@@ -272,7 +272,7 @@ if (get_var("REGRESSION", '') =~ /xen/) {
             name => 'sles15sp3',
         },
         sles15sp4 => {
-            name => 'sles15sp3',
+            name => 'sles15sp4',
         },
     );
 
@@ -320,6 +320,7 @@ if (get_var("REGRESSION", '') =~ /xen/) {
         },
         sles15sp4 => {
             name => 'sles15sp4',
+            ip => 'win2k19-sle15-SP4.qa.suse.cz',
         },
     );
 
