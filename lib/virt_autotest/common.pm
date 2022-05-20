@@ -319,7 +319,7 @@ if (get_var("REGRESSION", '') =~ /xen/) {
             ip => 'win2k19-sle15-SP3.qa.suse.cz',
         },
         sles15sp4 => {
-            name => 'sles15sp3',
+            name => 'sles15sp4',
             ip => 'dhcp18.qa.suse.cz',
         },
     );
