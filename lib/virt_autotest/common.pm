@@ -320,7 +320,6 @@ if (get_var("REGRESSION", '') =~ /xen/) {
         },
         sles15sp4 => {
             name => 'sles15sp4',
-            ip => 'dhcp18.qa.suse.cz',
         },
     );
 
