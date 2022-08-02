@@ -102,10 +102,11 @@ sub guests_vnc_screenshot {
         if ($guest_vnc ne '') {
             enter_cmd "vncviewer -fullscreen $guest_vnc";
             wait_still_screen 1;
-            sleep 6;
+            sleep 15;
             record_info "$guest", "$guest screenshot";
             save_screenshot();
             send_key 'f8';
+            sleep 15;
             assert_screen 'vncviewer-menu';
             send_key 'x';
         }
