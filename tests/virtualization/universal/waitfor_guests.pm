@@ -100,14 +100,14 @@ sub guests_vnc_screenshot {
 
         # Only start vncviewer if available for guest
         if ($guest_vnc ne '') {
-        enter_cmd "vncviewer -fullscreen $guest_vnc";
-        wait_still_screen 1;
-        sleep 6;
-        record_info "$guest", "$guest screenshot";
-        save_screenshot();
-        send_key 'f8';
-        assert_screen 'vncviewer-menu';
-        send_key 'x';
+            enter_cmd "vncviewer -fullscreen $guest_vnc";
+            wait_still_screen 1;
+            sleep 6;
+            record_info "$guest", "$guest screenshot";
+            save_screenshot();
+            send_key 'f8';
+            assert_screen 'vncviewer-menu';
+            send_key 'x';
         }
     }
 }
