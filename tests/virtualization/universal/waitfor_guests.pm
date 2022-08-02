@@ -32,7 +32,7 @@ sub add_pci_bridge {
 
     assert_script_run("virsh dumpxml $guest > $xml");
 
-    # There are two different approaches, one for q35 and one for i440fx machine type
+    # There are two different approaches, one for q35 and one for i440fx machine typei
     if (script_run("grep machine '$xml' | grep 'i440fx'") == 0) {
         # on i440fx add a pci-bridge:
         # "<controller type='pci' model='pci-bridge'/>"
