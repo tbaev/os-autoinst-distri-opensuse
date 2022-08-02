@@ -32,7 +32,7 @@ sub add_pci_bridge {
 
     assert_script_run("virsh dumpxml $guest > $xml");
 
-    # There are two different approaches, one for q35 and one for i440fx machine typei
+    # There are two different approaches, one for q35 and one for i440fx machine type
     if (script_run("grep machine '$xml' | grep 'i440fx'") == 0) {
         # on i440fx add a pci-bridge:
         # "<controller type='pci' model='pci-bridge'/>"
@@ -92,6 +92,26 @@ sub upload_machine_definitions {
     }
 }
 
+# Open vncviewer and take screenshot of guests
+sub guests_vnc_screenshot {
+    select_console('root-console');
+    foreach my $guest (keys %virt_autotest::common::guests) {
+        my $guest_vnc = script_output("virsh vncdisplay --domain $guest 2>1 | head --lines 1", proceed_on_failure => 1);
+
+        # Only start vncviewer if available for guest
+        if ($guest_vnc ne '') {
+        enter_cmd "vncviewer -fullscreen $guest_vnc";
+        wait_still_screen 1;
+        sleep 6;
+        record_info "$guest", "$guest screenshot";
+        save_screenshot();
+        send_key 'f8';
+        assert_screen 'vncviewer-menu';
+        send_key 'x';
+        }
+    }
+}
+
 sub run {
     my $self = shift;
     select_console('root-console');
@@ -133,6 +153,7 @@ sub run {
 
 sub post_fail_hook {
     my ($self) = @_;
+    guests_vnc_screenshot();
     collect_virt_system_logs();
     $self->SUPER::post_fail_hook;
 }
