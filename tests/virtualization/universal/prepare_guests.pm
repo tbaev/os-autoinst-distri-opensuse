@@ -84,6 +84,7 @@ sub run {
     systemctl("restart libvirtd");
     assert_script_run('for i in $(virsh list --name|grep -v Domain-0);do virsh destroy $i;done');
     assert_script_run('for i in $(virsh list --name --inactive); do if [[ $i == win* ]]; then virsh undefine $i; else virsh undefine $i --remove-all-storage; fi; done');
+    script_run 'virt-manager';
     script_run("[ -f /root/.ssh/known_hosts ] && > /root/.ssh/known_hosts");
     script_run 'rm -rf /tmp/guests_ip';
 
