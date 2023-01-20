@@ -28,7 +28,7 @@ sub add_virtual_network_interface {
     my ($sles_running_version, $sles_running_sp) = get_os_release;
 
     my $mac = "$MAC_PREFIX:" . (int(rand(89)) + 10) . ':' . (int(rand(89)) + 10);
-    unless ($guest =~ m/hvm/i && is_sle('<=12-SP2') && is_xen_host) {
+    unless ($guest eq "sles12sp5PV" ) {
         my $persistent_config_option = '';
         my $interface_model_option = '';
         if (get_var('VIRT_AUTOTEST') && is_xen_host) {
@@ -47,7 +47,7 @@ sub add_virtual_network_interface {
             assert_script_run("virsh detach-interface $guest bridge --mac " . $mac);
         }
     } else {
-        record_soft_failure 'bsc#959325 - Live NIC attachment on <=12-SP2 Xen hypervisor with HVM guests does not work correctly.';
+        record_soft_failure 'bsc#1206698 - Live NIC attachment for guest 12-SP5 on Xen hypervisor does not work correctly.';
     }
     return $mac;
 }
