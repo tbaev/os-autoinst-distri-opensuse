@@ -37,6 +37,10 @@ sub run_test {
     my ($mac, $model, $affecter, $exclusive, $skip_type);
     my $gate = '192.168.128.1';
     foreach my $guest (keys %virt_autotest::common::guests) {
+       if ($guest eq "sles12sp5PV" || $guest eq "sles12sp5HVM") {
+        record_soft_failure 'bsc#1206698 - Live NIC attachment for guest 12-SP5 on Xen hypervisor does not work correctly.';
+        next;
+        }
         record_info "$guest", "NAT BASED NETWORK for $guest";
         #Just only 15-SP5 PV guest system have a rebooting problem due to bsc#1206250
         $skip_type = ($guest =~ m/sles-15-sp5-64-pv-def-net/i) ? 'skip_ping' : 'skip_network';

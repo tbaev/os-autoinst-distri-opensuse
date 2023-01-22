@@ -28,7 +28,7 @@ sub add_virtual_network_interface {
     my ($sles_running_version, $sles_running_sp) = get_os_release;
 
     my $mac = "$MAC_PREFIX:" . (int(rand(89)) + 10) . ':' . (int(rand(89)) + 10);
-    unless ($guest eq "sles12sp5PV" ) {
+    unless ($guest eq "sles12sp5PV" || $guest eq "sles12sp5HVM") {
         my $persistent_config_option = '';
         my $interface_model_option = '';
         if (get_var('VIRT_AUTOTEST') && is_xen_host) {
