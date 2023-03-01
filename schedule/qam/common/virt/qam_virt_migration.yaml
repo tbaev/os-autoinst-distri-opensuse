@@ -31,5 +31,3 @@ conditional_schedule:
       '1':
         - virtualization/universal/prepare_guests
         - virtualization/universal/waitfor_guests
-        - virtualization/universal/kernel
-        - virtualization/universal/finish
