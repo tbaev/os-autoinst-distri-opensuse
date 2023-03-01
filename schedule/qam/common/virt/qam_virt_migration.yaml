@@ -5,7 +5,8 @@ description:    >
 schedule:
   - virt_autotest/login_console
 conditional_schedule:
-  VIRT_NEW_GUEST_MIGRATION_SOURCE:
+  install_guests:
+    VIRT_NEW_GUEST_MIGRATION_SOURCE:
       '1':
         - virtualization/universal/prepare_guests
         - virtualization/universal/waitfor_guests
