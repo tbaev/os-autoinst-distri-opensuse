@@ -4,15 +4,11 @@ description:    >
   Install guest VMs for virtualization tests.
 schedule:
   - virt_autotest/login_console
+  - '{{install_guests}}'
+  - '{{patch_host_guest_zypper}}'
+  - virtualization/universal/kernel
+  - virtualization/universal/finish
 conditional_schedule:
-  install_guests:
-    VIRT_NEW_GUEST_MIGRATION_SOURCE:
-      '1':
-        - virtualization/universal/prepare_guests
-        - virtualization/universal/waitfor_guests
-        - '{{patch_host_guest_zypper}}'
-        - virtualization/universal/kernel
-        - virtualization/universal/finish
   patch_host_guest_zypper:
     PATCH_WITH_ZYPPER:
       '1':
@@ -30,3 +26,10 @@ conditional_schedule:
       'qemu':
         - virt_autotest/login_console
         - virtualization/universal/list_guests
+  install_guests:
+    VIRT_NEW_GUEST_MIGRATION_SOURCE:
+      '1':
+        - virtualization/universal/prepare_guests
+        - virtualization/universal/waitfor_guests
+        - virtualization/universal/kernel
+        - virtualization/universal/finish
