@@ -106,6 +106,7 @@ sub run {
 
     # Install or import defined guests
     foreach my $guest (values %virt_autotest::common::guests) {
+        sleep 13;
         my $method = $guest->{method} // 'virt-install'; # by default install guest using virt-install. SLES11 gets installed via importing a pre-installed guest however
         if ($method eq "virt-install") {
             $guest->{autoyast} = create_profile($guest->{name}, "x86_64", $guest->{macaddress}, $guest->{ip});
