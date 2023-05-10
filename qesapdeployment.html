@@ -42,6 +42,11 @@
           <li><a href="#qesap_cluster_logs">qesap_cluster_logs</a></li>
           <li><a href="#qesap_get_vnet">qesap_get_vnet</a></li>
           <li><a href="#qesap_get_az_resource_group">qesap_get_az_resource_group</a></li>
+          <li><a href="#qesap_calculate_az_address_range">qesap_calculate_az_address_range</a></li>
+          <li><a href="#qesap_az_vnet_peering">qesap_az_vnet_peering</a></li>
+          <li><a href="#qesap_delete_az_peering">qesap_delete_az_peering</a></li>
+          <li><a href="#qesap_get_peering_name">qesap_get_peering_name</a></li>
+          <li><a href="#qesap_add_server_to_hosts">qesap_add_server_to_hosts</a></li>
         </ul>
       </li>
     </ul>
@@ -316,13 +321,78 @@ Return total time of retry loop in case of pass.</code></pre>
 </dd>
 </dl>
 
+<h3 id="qesap_calculate_az_address_range">qesap_calculate_az_address_range</h3>
+
+<p>Calculate the vnet and subnet address ranges. The format is 10.ip2.ip3.0/21 and /24 respectively. ip2 and ip3 are calculated using the slot number as seed.</p>
+
+<dl>
+
+<dt id="SLOT---integer-to-be-used-as-seed-in-calculating-addresses"><b>SLOT</b> - integer to be used as seed in calculating addresses</dt>
+<dd>
+
+</dd>
+</dl>
+
+<h3 id="qesap_az_vnet_peering">qesap_az_vnet_peering</h3>
+
+<pre><code>Performs peering between the cluster and IBS mirror on Azure.</code></pre>
+
+<dl>
+
+<dt id="SOURCE_GROUP---resource-group-of-source"><b>SOURCE_GROUP</b> - resource group of source</dt>
+<dd>
+
+</dd>
+<dt id="TARGET_GROUP---resource-group-of-target"><b>TARGET_GROUP</b> - resource group of target</dt>
+<dd>
+
+</dd>
+</dl>
+
+<h3 id="qesap_delete_az_peering">qesap_delete_az_peering</h3>
+
+<pre><code>Performs peering between the cluster and IBS mirror on Azure.</code></pre>
+
+<dl>
+
+<dt id="SOURCE_GROUP---resource-group-of-source1"><b>SOURCE_GROUP</b> - resource group of source</dt>
+<dd>
+
+</dd>
+<dt id="TARGET_GROUP---resource-group-of-target1"><b>TARGET_GROUP</b> - resource group of target</dt>
+<dd>
+
+</dd>
+</dl>
+
+<h3 id="qesap_get_peering_name">qesap_get_peering_name</h3>
+
+<pre><code>Returns the peering name for the current job, or
+empty string if a peering doesn&#39;t exist</code></pre>
+
+<h3 id="qesap_add_server_to_hosts">qesap_add_server_to_hosts</h3>
+
+<pre><code>Adds a &#39;ip -&gt; name&#39; pair in the end of /etc/hosts in the hosts</code></pre>
+
+<dl>
+
+<dt id="IP---ip-of-server-to-add-to-hosts"><b>IP</b> - ip of server to add to hosts</dt>
+<dd>
+
+</dd>
+<dt id="NAME---name-of-server-to-add-to-hosts"><b>NAME</b> - name of server to add to hosts</dt>
+<dd>
+
+</dd>
+</dl>
+
 <h1 id="POD-ERRORS">POD ERRORS</h1>
 
 <p>Hey! <b>The above document had some coding errors, which are explained below:</b></p>
 
 <dl>
 
-<dt id="Around-line-712">Around line 712:</dt>
+<dt id="Around-line-716">Around line 716:</dt>
 <dd>
 
 <p>&#39;=item&#39; outside of any &#39;=over&#39;</p>
