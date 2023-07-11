@@ -37,6 +37,23 @@
   </suse_register>
     % unless ($check_var->('PATCH_WITH_ZYPPER', '1')) {
   <add-on>
+<addon>
+<name>sle-module-desktop-applications</name>
+<version>15.4</version>
+<arch>x86_64</arch>
+<release_type/>
+</addon>
+<addon>
+<name>sle-module-server-applications</name>
+<version>15.4</version>
+<arch>x86_64</arch>
+<release_type/>
+</addon>
+<addon>
+<name>sle-module-basesystem</name>
+<version>15.4</version>
+<arch>x86_64</arch>
+<release_type/>
     <add_on_products config:type="list">
       % my $n =0;
       % for my $repo (@$repos) {
