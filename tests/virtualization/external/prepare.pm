@@ -34,9 +34,9 @@ sub run {
             my $ip = script_output(qq(ssh -o StrictHostKeyChecking=no Administrator\@win2k19.qa.suse.cz 'powershell "get-vm -Name $vm_name | select -ExpandProperty networkadapters | select ipaddresses"' | awk -F '[{,]' '{print \$2}'));
             record_info("$guest: $ip");
             assert_script_run(qq(echo "$ip $guest" >> /etc/hosts));
-    }
-    assert_script_run "cat /etc/hosts";
         }
+        assert_script_run "cat /etc/hosts";
+    }
 }
 sub test_flags {
     return {fatal => 1, milestone => 1};
