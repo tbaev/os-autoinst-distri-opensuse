@@ -64,7 +64,7 @@ sub gen_osinfo {
     my $h_version = get_var("VERSION") =~ s/-SP/./r;
     my $g_version = $vm_name =~ /sp/ ? $vm_name =~ s/\D*(\d+)sp(\d)\D*/$1.$2/r : $vm_name =~ s/\D*(\d+)\D*/$1/r;
     my $info_op = $h_version > 15.2 ? "--osinfo" : "--os-variant";
-    my $info_val = $g_version > 12.5 ? $vm_name =~ s/HVM|PV//r =~ s/sles/sle/r : $vm_name =~ s/PV|HVM//r;
+    my $info_val = $g_version > 12.5 ? $vm_name =~ s/HVM|PV|teradata//gr =~ s/sles/sle/r : $vm_name =~ s/PV|HVM|teradata//gr;
     if ($h_version == 12.3) {
         $info_val = "sle15-unknown" if ($g_version > 15.1);
         $info_val = "sles12-unknown" if ($g_version == 12.5);

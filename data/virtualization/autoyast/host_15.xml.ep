@@ -1,6 +1,7 @@
 <?xml version="1.0"?>
 <!DOCTYPE profile>
 <profile xmlns="http://www.suse.com/1.0/yast2ns" xmlns:config="http://www.suse.com/1.0/configns">
+ % unless ($check_var->('SCC_ADDONS', 'teradata')) {
   <suse_register>
     <do_registration config:type="boolean">true</do_registration>
     <email><%= $get_var->('SCC_EMAIL') %></email>
@@ -31,6 +32,7 @@
     </addons>
     %}
   </suse_register>
+    % }
     % unless ($check_var->('PATCH_WITH_ZYPPER', '1')) {
   <add-on>
     <add_on_products config:type="list">
@@ -41,9 +43,18 @@
         <alias>TEST_<%= $n++ %></alias>
       </listentry>
       % }
+      % if ($check_var->('SCC_ADDONS', 'teradata')) {
+      <%= `cat /var/lib/openqa/share/tests/sle/data/virtualization/autoyast/15sp4teradata.xml`; %>
+      % }
     </add_on_products>
   </add-on>
-      % }
+  % } elsif ($check_var->('SCC_ADDONS', 'teradata')) {
+  <add-on>
+    <add_on_products config:type="list">
+      <%= `cat /var/lib/openqa/share/tests/sle/data/virtualization/autoyast/15sp4teradata.xml`; %>
+    </add_on_products>
+  </add-on>
+  % }
   <bootloader>
     <global>
       <activate>true</activate>
@@ -207,6 +218,9 @@
     <install_recommended config:type="boolean">true</install_recommended>
     <instsource/>
     <packages config:type="list">
+      % if ($check_var->('SCC_ADDONS', 'teradata')) {
+      <package>sles-teradata-release</package>
+      % }
       <package>dhcp-client</package>
       <package>guestfs-tools</package>
     </packages>

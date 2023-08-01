@@ -1,0 +1,25 @@
+<listentry>
+  <media_url><![CDATA[http://download.suse.de/ibs/SUSE/Products/SLE-Module-Server-Applications/15-SP4/x86_64/product/]]></media_url>
+  <product>sle-module-server-applications</product>
+  <product_dir/>
+</listentry>
+<listentry>
+  <media_url><![CDATA[http://download.suse.de/ibs/SUSE/Products/SLE-Module-Basesystem/15-SP4/x86_64/product/]]></media_url>
+  <product>sle-module-basesystem</product>
+  <product_dir/>
+</listentry>
+<listentry>
+  <media_url><![CDATA[http://download.suse.de/ibs/SUSE/Products/SLE-Module-Development-Tools/15-SP4/x86_64/product/]]></media_url>
+  <product>sle-module-development-tools</product>
+  <product_dir/>
+</listentry>
+<listentry>
+  <media_url><![CDATA[http://download.suse.de/ibs/SUSE/Products/SLE-Module-Desktop-Applications/15-SP4/x86_64/product/]]></media_url>
+  <product>sle-module-desktop-applications</product>
+  <product_dir/>
+</listentry>
+<listentry>
+  <media_url><![CDATA[http://download.suse.de/ibs/SUSE/Updates/SLE-Product-SLES/15-SP4-TERADATA/x86_64/update/]]></media_url>
+  <product>15-SP4-TERADATA</product>
+  <product_dir/>
+</listentry>

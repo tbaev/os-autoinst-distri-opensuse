@@ -1,6 +1,7 @@
 <?xml version="1.0"?>
 <!DOCTYPE profile>
 <profile xmlns="http://www.suse.com/1.0/yast2ns" xmlns:config="http://www.suse.com/1.0/configns">
+ % unless ($vm_name =~ /sles15sp4teradata/) {
   <suse_register>
     <do_registration config:type="boolean">true</do_registration>
     <email/>
@@ -48,6 +49,7 @@
       % }
     </addons>
   </suse_register>
+  % }
   <add-on>
     <add_on_products config:type="list">
       <listentry>
@@ -61,7 +63,12 @@
         <alias>TEST_<%= $n++ %></alias>
       </listentry>
      % }
+     % if ($vm_name =~ /sles15sp4teradata/) {
+     <%= `cat /var/lib/openqa/share/tests/sle/data/virtualization/autoyast/15sp4teradata.xml`; %>
     % }
+   % } elsif ($vm_name =~ /sles15sp4teradata/) {
+      <%= `cat /var/lib/openqa/share/tests/sle/data/virtualization/autoyast/15sp4teradata.xml`; %>
+  % }
     </add_on_products>
   </add-on>
   <bootloader>
@@ -250,6 +257,9 @@
     <install_recommended config:type="boolean">true</install_recommended>
     <instsource/>
     <packages config:type="list">
+    % if ($vm_name =~ /sles15sp4teradata/) {
+      <package>sles-teradata-release</package>
+    % }
       <package>apache2</package>
     </packages>
     <products config:type="list">
