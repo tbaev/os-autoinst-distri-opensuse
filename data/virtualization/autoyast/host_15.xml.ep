@@ -3,7 +3,7 @@
 <profile xmlns="http://www.suse.com/1.0/yast2ns" xmlns:config="http://www.suse.com/1.0/configns">
   <suse_register>
     % if ($check_var->('SCC_ADDONS', 'teradata')) {
- <%= `ls`; %>
+ <%= `pwd`; %>
     % }
     <do_registration config:type="boolean">true</do_registration>
     <email><%= $get_var->('SCC_EMAIL') %></email>
