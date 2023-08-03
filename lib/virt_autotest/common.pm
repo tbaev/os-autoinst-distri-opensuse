@@ -375,6 +375,9 @@ if (get_var("REGRESSION", '') =~ /xen/) {
         sles15sp4 => {
             name => 'sles15sp4',
         },
+        sles15sp4teradata => {
+            name => 'sles15sp4teradata',
+        },
         sles15sp5 => {
             name => 'sles15sp5',
         },
@@ -410,6 +413,9 @@ if (get_var("REGRESSION", '') =~ /xen/) {
         },
         sles15sp4 => {
             vm_name => 'sles-15.4_openQA-virtualization-maintenance',
+        },
+        sles15sp4teradata => {
+            vm_name => 'sles-15.4_teradata_openQA-virtualization-maintenance',
         },
         sles15sp5 => {
             vm_name => 'sles-15.5_openQA-virtualization-maintenance',
