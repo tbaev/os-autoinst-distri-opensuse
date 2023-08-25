@@ -4,6 +4,7 @@
 # Package: nmap iputils bind-utils
 # Summary: This test prepares environment
 # Maintainer: QE-Virtualization <qe-virt@suse.de>
+# this is a test
 
 use base "consoletest";
 use virt_autotest::common;
