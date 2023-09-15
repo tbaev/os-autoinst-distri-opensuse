@@ -302,8 +302,6 @@
   <software t="map">
     <install_recommended t="boolean">true</install_recommended>
     <instsource/>
-    <packages config:type="list">
-    </packages>
     % if ($check_var->('PATTERNS', 'all')) {
     <patterns t="list">
       <pattern>32bit</pattern>
