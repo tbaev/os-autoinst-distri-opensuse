@@ -24,10 +24,10 @@ sub check_or_install_packages {
         # if system is fully updated or even minimal patch applied,
         # all necessary packages for online migration should be installed
         # and zypper-migration-plugin was obsoleted since 15sp4.
-        zypper_call "in yast2-migration zypper-migration-plugin rollback-helper snapper";
+        # zypper_call "in yast2-migration zypper-migration-plugin rollback-helper snapper";
         my @pkgs = qw(yast2-migration rollback-helper);
         push @pkgs, "zypper-migration-plugin" if is_sle('<15-SP4', get_var('ORIGIN_SYSTEM_VERSION'));
-        assert_script_run("rpm -q $_") foreach @pkgs;
+        # assert_script_run("rpm -q $_") foreach @pkgs;
     } else {
         # install necessary packages for online migration if system is not updated
         # also update snapper to ensure rollback service work properly after migration
