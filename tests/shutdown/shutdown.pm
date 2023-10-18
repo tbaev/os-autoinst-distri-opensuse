@@ -16,6 +16,9 @@ sub run {
     my $self = shift;
     select_console('root-console');
     systemctl 'list-timers --all';
+    script_run('shutdown now');
+    sleep 60;
+    script_run('shutdown now');
     power_action('poweroff');
 }
 
