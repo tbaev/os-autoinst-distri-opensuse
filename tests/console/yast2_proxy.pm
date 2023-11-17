@@ -254,7 +254,7 @@ sub run {
     #	move to miscellaneous now for change language into de-de and admin email
     select_sub_menu 'log_timeouts', 'miscellaneous';
     wait_screen_change { send_key 'alt-l'; };
-    for (1 .. 5) {
+    for (1 .. 2) {
         wait_screen_change { send_key 'up'; };
     }
     wait_screen_change { send_key 'ret'; };
