@@ -287,6 +287,15 @@ if (get_var("REGRESSION", '') =~ /xen/) {
             distro => 'SLE_15',
             location => 'http://mirror.suse.cz/install/SLP/SLE-15-SP5-Full-LATEST/x86_64/DVD1/',
             linuxrc => 'ifcfg="eth0=192.168.122.109/24,192.168.122.1,192.168.122.1"'
+        },
+        sles15sp6 => {
+            name => 'sles15sp6',
+            extra_params => '--os-variant sle15-unknown',    # problems after kernel upgrade
+            macaddress => '52:54:00:78:73:a8',
+            ip => '192.168.122.110',
+            distro => 'SLE_15',
+            location => 'http://mirror.suse.cz/install/SLP/SLE-15-SP6-Full-Snapshot-202402-1/x86_64/DVD1/',
+            linuxrc => 'ifcfg="eth0=192.168.122.110/24,192.168.122.1,192.168.122.1"'
         }
     );
     # Filter out guests not allowed for the detected SLE version
@@ -327,6 +336,11 @@ if (get_var("REGRESSION", '') =~ /xen/) {
         }
     } elsif (is_sle('=15-SP5')) {
         my @allowed_guests = qw(sles12sp5 sles15sp5);
+        foreach my $guest (keys %guests) {
+            delete $guests{$guest} unless grep { $_ eq $guest } @allowed_guests;
+        }
+    } elsif (is_sle('=15-SP6')) {
+        my @allowed_guests = qw(sles12sp5 sles15sp5 sles15sp6);
         foreach my $guest (keys %guests) {
             delete $guests{$guest} unless grep { $_ eq $guest } @allowed_guests;
         }
