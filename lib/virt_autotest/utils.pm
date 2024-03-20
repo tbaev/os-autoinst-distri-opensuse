@@ -29,7 +29,7 @@ use Carp;
 our @EXPORT = qw(is_vmware_virtualization is_hyperv_virtualization is_fv_guest is_pv_guest guest_is_sle is_guest_ballooned is_xen_host is_kvm_host reset_log_cursor check_failures_in_journal check_host_health check_guest_health
   is_monolithic_libvirtd turn_on_libvirt_debugging_log
   print_cmd_output_to_file ssh_setup ssh_copy_id create_guest import_guest install_default_packages upload_y2logs ensure_default_net_is_active ensure_guest_started
-  ensure_online add_guest_to_hosts restart_libvirtd check_libvirtd remove_additional_disks remove_additional_nic collect_virt_system_logs shutdown_guests wait_guest_online start_guests restore_downloaded_guests save_original_guest_xmls restore_original_guests
+  ensure_online add_guest_to_hosts restart_libvirtd check_libvirtd remove_additional_disks remove_additional_nic collect_virt_system_logs shutdown_guests wait_guest_online start_guests restore_downloaded_guests save_original_guest_xmls restore_original_guests save_guests_xml_for_change restore_xml_changed_guests
   is_guest_online wait_guests_shutdown remove_vm setup_common_ssh_config add_alias_in_ssh_config parse_subnet_address_ipv4 backup_file manage_system_service setup_rsyslog_host
   check_port_state subscribe_extensions_and_modules download_script download_script_and_execute is_sev_es_guest upload_virt_logs recreate_guests download_vm_import_disks enable_nm_debug check_activate_network_interface set_host_bridge_interface_with_nm upload_nm_debug_log restart_modular_libvirt_daemons check_modular_libvirt_daemons);
 
@@ -252,30 +252,55 @@ sub reset_log_cursor {
     }
 }
 
-#check kernels by grep keywords from journals
-#support x86_64 only
-#welcome everybody to extend this function
+# Grep keywords from journals and report warnings, support x86_64 only
+# Usage: check_failures_in_journal([machine], [no_cursor => 0]);
+# [machine]: an IP or QUDN of ssh accesible machine. "localhost" ie. the SUT itself, by default.
+# [no_cursor => 0]: value '0' means grep keywords from incremenal journal output only,
+# ie. Start searching from the place you previously searched.
+# value '1' means searching in the entire journal output(also including previous boots)
+# keywords: only "Coredump" and "Call trace" have been included so far
+# Work flow:
+# - save journal output to a tmp file
+# - get cursor from the saved file unless you'd like to search in the entire journals
+# - grep each keywords in the saved file
+# - if keywords are found, give warnings and upload the saved log
 sub check_failures_in_journal {
     return unless is_x86_64 and (is_sle or is_opensuse);
-    my $machine = shift;
+    my ($machine, %args) = @_;
     $machine //= 'localhost';
+    $args{no_cursor} //= 0;
 
+    # Save journal log to a tmp file
+    my $logfile = "/tmp/journalctl-$machine.log";
+    my $failures = "";
+    reset_log_cursor if $args{no_cursor} == 1;
     my $cursor = $log_cursors{$machine};
     my $cmd = "journalctl --show-cursor ";
-    $cmd .= defined($cursor) ? "--cursor='$cursor'" : "-b";
+    $cmd .= "--cursor='$cursor'" if defined($cursor);
+    $cmd .= " > $logfile";
     $cmd = "ssh -o UserKnownHostsFile=/dev/null -o StrictHostKeyChecking=no root\@$machine " . "\"$cmd\"" if $machine ne 'localhost';
-
-    my $log = script_output($cmd, type_command => 1, proceed_on_failure => 1);
-    my $failures = "";
-    my @warnings = ('Started Process Core Dump', 'Call Trace');
-
-    $log_cursors{$machine} = $1 if $log =~ m/-- cursor:\s*(\S+)\s*$/i;
-
-    foreach my $warn (@warnings) {
-        my $cmd = "journalctl | grep '$warn'";
-        $cmd = "ssh -o UserKnownHostsFile=/dev/null -o StrictHostKeyChecking=no root\@$machine " . "\"$cmd\"" if $machine ne 'localhost';
-        $failures .= "\"$warn\" in journals on $machine \n" if script_run("timeout --kill-after=3 --signal=9 120 $cmd") == 0;
+    if (script_run($cmd) != 0) {
+        $failures = "Fail to get journal logs from $machine";
+        record_info("Warning", "$failures when checking its health", result => 'softfail');
+        return $failures;
     }
+
+    # Get the cursor of the journal log file
+    unless ($args{no_cursor}) {
+        $cmd = "grep -oe \'-- cursor: *[^ ]*\' $logfile | cut -d ' ' -f3";
+        $cmd = "ssh -o UserKnownHostsFile=/dev/null -o StrictHostKeyChecking=no root\@$machine " . "\"$cmd\"" if $machine ne 'localhost';
+        $log_cursors{$machine} = script_output("$cmd", type_command => 1);
+    }
+
+    # Search warnings from the journal log file
+    my @warnings = ('Started Process Core Dump', 'Call Trace');
+    foreach (@warnings) {
+        $cmd = "grep '$_' $logfile";
+        $cmd = "ssh -o UserKnownHostsFile=/dev/null -o StrictHostKeyChecking=no root\@$machine " . "\"$cmd\"" if $machine ne 'localhost';
+        $failures .= "\"$_\" in journals on $machine \n" if script_run("$cmd") == 0;
+    }
+
+    # In case of failures, print message and upload journal log
     if ($failures) {
         if (get_var('KNOWN_BUGS_FOUND_IN_JOURNAL')) {
             record_soft_failure("Found failures: \n" . $failures . "There are known kernel bugs " . get_var('KNOWN_BUGS_FOUND_IN_JOURNAL') . ". Please look into journal files to determine if it is a known bug. If it is a new issue, please take action as described in poo#151361.");
@@ -283,11 +308,7 @@ sub check_failures_in_journal {
         else {
             record_soft_failure("Found new failures: " . $failures . " please take actions as described in poo#151361.\n");
         }
-
-        my $logfile = "/tmp/journalctl-$machine.log";
-
-        script_run("rm -f $logfile");
-        print_cmd_output_to_file('journalctl -b', $logfile, $machine);
+        script_run("rsync root\@$machine:$logfile $logfile", die_on_timeout => 0) if $machine ne 'localhost';
         upload_logs($logfile);
     }
     return $failures;
@@ -299,7 +320,8 @@ sub check_failures_in_journal {
 # Welcome everybody to extend this function
 sub check_host_health {
     return unless is_x86_64 and (is_sle or is_opensuse);
-    my $failures = check_failures_in_journal;
+
+    my $failures = caller 0 eq 'validate_system_health' ? check_failures_in_journal('localhost', no_cursor => 1) : check_failures_in_journal();
     unless ($failures) {
         record_info("Healthy host!");
         return 'pass';
@@ -322,17 +344,17 @@ sub check_guest_health {
     if (script_run("virsh list --all | grep \"$vm \"") == 0) {
         $vmstate = "ok" if (script_run("virsh domstate $vm | grep running") == 0);
     }
-    if (is_xen_host and script_run("xl list $vm") == 0) {
+    elsif (is_xen_host and script_run("xl list $vm") == 0) {
         script_retry("xl list $vm | grep \"\\-b\\-\\-\\-\\-\"", delay => 10, retry => 1, die => 0) for (0 .. 3);
         $vmstate = "ok" if script_run("xl list $vm | grep \"\\-b\\-\\-\\-\\-\"");
     }
     if ($vmstate eq "ok") {
-        $failures = check_failures_in_journal($vm);
+        $failures = caller 0 eq 'validate_system_health' ? check_failures_in_journal($vm, no_cursor => 1) : check_failures_in_journal($vm);
         return 'fail' if $failures;
         record_info("Healthy guest!", "$vm looks good so far!");
     }
     else {
-        record_info("Skip check_failures_in_journal for $vm", "$vm is not in desired state judged by either virsh or xl tool stack");
+        record_info("Skip check_failures_in_journal for $vm", "$vm is not in desired state judged by either virsh or xl tool stack", result => 'softfail');
     }
     return 'pass';
 }
@@ -1012,13 +1034,39 @@ sub restore_original_guests {
         if (script_run("ls $save_dir/$guest.xml") == 0) {
             restore_downloaded_guests($guest, $save_dir);
             record_info "Guest $guest is restored.";
+            assert_script_run "virsh start $guest";
+            wait_guest_online($guest);
         }
         else {
             record_info("Fail to restore guest!", "$guest", result => 'softfail');
         }
     }
     script_run("virsh list --all");
-    save_screenshot;
+}
+
+
+#save the guest configuration files into a folder
+#create a dir for storing changed guest configuration files only
+sub save_guests_xml_for_change {
+    my ($save_dir, @guests) = @_;
+    $save_dir //= "/tmp/download_vm_xml";
+    save_original_guest_xmls($save_dir, @guests);
+    my $changed_xml_dir = "$save_dir/changed_xml";
+    script_run("[ -d $changed_xml_dir ] && rm -rf $changed_xml_dir/*");
+    script_run("mkdir -p $changed_xml_dir");
+}
+
+#restore guest which xml configuration files were changed in a test
+sub restore_xml_changed_guests {
+    my $changed_xml_dir = shift;
+    $changed_xml_dir //= "/tmp/download_vm_xml/changed_xml";
+    my @changed_guests = split('\n', script_output("ls -1 $changed_xml_dir | cut -d '.' -f1"));
+    foreach my $guest (@changed_guests) {
+        remove_vm($guest);
+        restore_downloaded_guests($guest, $changed_xml_dir);
+        assert_script_run "virsh start $guest";
+        wait_guest_online($guest);
+    }
 }
 
 sub upload_virt_logs {

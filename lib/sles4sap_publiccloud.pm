@@ -65,6 +65,7 @@ our @EXPORT = qw(
   pacemaker_version
   saphanasr_showAttr_version
   get_hana_site_names
+  wait_for_cluster
   wait_for_zypper
 );
 
@@ -85,13 +86,13 @@ sub run_cmd {
     my $title = $args{title} // $args{cmd};
     $title =~ s/[[:blank:]].+// unless defined $args{title};
     my $cmd = defined($args{runas}) ? "su - $args{runas} -c '$args{cmd}'" : "$args{cmd}";
-
     # Without cleaning up variables SSH commands get executed under wrong user
     delete($args{cmd});
     delete($args{title});
     delete($args{timeout});
     delete($args{runas});
 
+    $self->{my_instance}->wait_for_ssh(timeout => $timeout);
     my $out = $self->{my_instance}->run_ssh_command(cmd => "sudo $cmd", timeout => $timeout, %args);
     record_info("$title output - $self->{my_instance}->{instance_id}", $out) unless ($timeout == 0 or $args{quiet} or $args{rc_only});
     return $out;
@@ -201,6 +202,7 @@ sub sles4sap_cleanup {
 
 sub get_hana_topology {
     my ($self) = @_;
+    $self->run_cmd(cmd => 'cs_wait_for_idle --sleep 5', timeout => 120);
     my $cmd_out = $self->run_cmd(cmd => 'SAPHanaSR-showAttr --format=script', quiet => 1);
     return calculate_hana_topology(input => $cmd_out);
 }
@@ -280,6 +282,7 @@ sub stop_hana {
     record_info("Stopping HANA", "CMD:$cmd");
     if ($method eq "crash") {
         # Crash needs to be executed as root and wait for host reboot
+        $self->{my_instance}->wait_for_ssh(timeout => $timeout);
         $self->{my_instance}->run_ssh_command(cmd => "sudo su -c sync", timeout => "0", %args);
         $self->{my_instance}->run_ssh_command(cmd => 'sudo su -c "' . $cmd . '"',
             timeout => "0",
@@ -637,7 +640,7 @@ sub create_instance_data {
                 public_ip => $type_data->{$vm_label}->{ansible_host},
                 instance_id => $vm_label,
                 username => get_required_var('PUBLIC_CLOUD_USER'),
-                ssh_key => '~/.ssh/id_rsa',
+                ssh_key => get_ssh_private_key_path(),
                 provider => $provider,
                 region => $provider->provider_client->region,
                 type => get_required_var('PUBLIC_CLOUD_INSTANCE_TYPE'),
@@ -748,6 +751,7 @@ sub create_playbook_section_list {
           sap-hana-system-replication-hooks.yaml
         );
         push @playbook_list, $hana_cluster_playbook;
+        push @playbook_list, 'post-sap-hana-cluster.yaml';
     }
     return (\@playbook_list);
 }
@@ -848,7 +852,7 @@ sub display_full_status {
 
     $self->list_cluster_nodes()
 
-    Returns list of hostnames that are part of a cluster using cmr shell command from one of the cluster nodes.
+    Returns list of hostnames that are part of a cluster using crm shell command from one of the cluster nodes.
 
 =cut
 
@@ -998,10 +1002,52 @@ sub saphanasr_showAttr_version {
     }
 }
 
+=head2 wait_for_cluster
+
+    Verifies that nodes are online, resources are started and DB is in sync
+
+=over 2
+
+=item B<WAIT_TIME> - time to wait before retry in seconds, default 10
+
+=item B<MAX_RETRIES> - maximum number of retries, default 7
+
+=back
+=cut
+
+sub wait_for_cluster {
+    my ($self, $wait_time, $max_retries) = @_;
+    $wait_time //= 10;
+    $max_retries //= 7;
+
+    while ($max_retries > 0) {
+        my $hanasr_output = $self->run_cmd(cmd => 'SAPHanaSR-showAttr --format=script', quiet => 1);
+        my $crm_output = $self->run_cmd(cmd => $crm_mon_cmd, quiet => 1);
+
+        my $hanasr_ready = check_hana_topology(input => calculate_hana_topology(input => $hanasr_output));
+        my $crm_ok = check_crm_output(input => $crm_output);
+
+        if ($hanasr_ready && $crm_ok) {
+            record_info("OK", "Cluster is healthy: All nodes are online with one node in 'PRIM' and the other in 'SOK' state.");
+            return;
+        }
+
+        $max_retries--;
+        if ($max_retries > 0) {
+            sleep($wait_time);
+        } else {
+            record_info('NOT OK', "Cluster or DB data synchronization issue detected after retrying.");
+            record_info('HANASR STATUS', $hanasr_output);
+            record_info('CRM STATUS', $crm_output);
+            die "Cluster is not ready after specified retries.";
+        }
+    }
+}
+
 =head2 wait_for_zypper
 
     The function attempts to run 'zypper ref' to check for a lock. If Zypper is locked, it waits for a specified delay before retrying.
-    Returns normally if Zypper is not locked, or dies after a maximum number of retries if Zypper remains locked.
+    Returns normally if Zypper is not locked or dies after a maximum number of retries if Zypper remains locked.
 
 =over 4
 
@@ -1013,26 +1059,29 @@ sub saphanasr_showAttr_version {
 
 =item B<TIMEOUT> - The number of seconds to wait before aborting zypper ref
 
+=item B<runas> - If 'runas' defined, command will be executed as specified user, otherwise it will be executed as cloudadmin.
+
 =back
 =cut
 
 sub wait_for_zypper {
     my ($self, %args) = @_;
     croak("Argument <instance> missing") unless ($args{instance});
-    $args{max_retries} //= 10;
-    $args{retry_delay} //= 20;
-    $args{timeout} //= 600;
-    my $retries = 0;
+    my $max_retries = $args{max_retries} // 10;
+    my $retry_delay = $args{retry_delay} // 20;
+    my $timeout = $args{timeout} // 600;
+    my $runas = $args{runas} // "cloudadmin";
+    my $retry = 0;
 
-    while ($retries < $args{max_retries}) {
-        my $ret = $args{instance}->run_ssh_command(cmd => 'sudo zypper ref', username => 'cloudadmin', proceed_on_failure => 1, rc_only => 1, quiet => 1, timeout => $args{timeout});
+    while ($retry < $max_retries) {
+        my $ret = $args{instance}->run_ssh_command(cmd => 'sudo zypper ref', username => $runas, proceed_on_failure => 1, rc_only => 1, quiet => 1, timeout => $timeout);
         if ($ret == 7) {
-            record_info("ZYPPER LOCK", "Zypper is locked, waiting for the lock to be released. Retry $retries/$args{max_retries}");
-            sleep $args{retry_delay};
-            $retries++;
+            record_info("ZYPPER LOCK", "Zypper is locked, waiting for the lock to be released. Retry $retry/$max_retries");
+            sleep $retry_delay;
+            $retry++;
         } else {
             if ($ret == 126) {
-                record_info("ZYPPER TIMEOUT", "zypper command timed out after $args{timeout}s - consider increasing the timeout.");
+                record_info("ZYPPER TIMEOUT", "zypper command timed out after $timeout - consider increasing the timeout.");
             }
             if ($ret != 0) {
                 record_info("ZYPPER PROBLEM", "Zypper is not locked, but it returned $ret");
@@ -1041,7 +1090,7 @@ sub wait_for_zypper {
         }
     }
 
-    die "Zypper is still locked after $args{max_retries} retries, aborting (rc: 7)" if $retries >= $args{max_retries};
+    die "Zypper is still locked after $max_retries retries, aborting (rc: 7)" if $retry >= $max_retries;
 }
 
 1;

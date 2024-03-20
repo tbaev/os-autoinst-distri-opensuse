@@ -14,6 +14,7 @@ use Mojo::File 'path';
 use Mojo::JSON;
 use publiccloud::utils qw(is_ondemand is_hardened);
 use publiccloud::ssh_interactive 'select_host_console';
+use version_utils 'is_sle';
 
 sub run {
     my ($self, $args) = @_;
@@ -56,6 +57,12 @@ sub run {
         assert_script_run "cp -r usr/* /usr";
     }
 
+    if (is_sle('=15-SP6')) {
+        record_soft_failure('poo#156763 - Rebuild the PC Tools image when python3.11-paramiko is available and drop the SSH-RSA SHA-1');
+        $instance->ssh_assert_script_run('echo PubkeyAcceptedKeyTypes=+ssh-rsa | sudo tee -a /etc/ssh/sshd_config');
+        $instance->ssh_assert_script_run('sudo systemctl restart sshd');
+    }
+
     my $img_proof = $provider->img_proof(
         instance => $instance,
         tests => $tests,
@@ -91,6 +98,13 @@ sub run {
         upload_logs('/tmp/rpm_qa.txt');
         $instance->run_ssh_command(cmd => 'sudo journalctl -b > /tmp/journalctl_b.txt', no_quote => 1);
         upload_logs('/tmp/journalctl_b.txt');
+    }
+
+    if (is_hardened) {
+        # Upload SCAP profile used by img-proof
+        my $url = "https://ftp.suse.com/pub/projects/security/oval/suse.linux.enterprise.15.xml.gz";
+        assert_script_run("curl --fail -LO $url");
+        upload_logs("suse.linux.enterprise.15.xml.gz");
     }
 }
 

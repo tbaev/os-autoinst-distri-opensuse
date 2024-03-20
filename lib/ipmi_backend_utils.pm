@@ -49,11 +49,11 @@ my $grub_ver = "grub2";
 
 sub get_dom0_serialdev {
     my $dom0_serialdev;
-    if (get_var("XEN") || check_var("HOST_HYPERVISOR", "xen")) {
+    if (get_var("XEN") || check_var("HOST_HYPERVISOR", "xen") || check_var("SYSTEM_ROLE", "xen")) {
         $dom0_serialdev = "hvc0";
     }
     else {
-        $dom0_serialdev = get_var("LINUX_CONSOLE_OVERRIDE", "ttyS1");
+        $dom0_serialdev = get_var('LINUX_CONSOLE_OVERRIDE', get_var("SERIALCONSOLE", "ttyS1"));
     }
     enter_cmd("echo \"Debug info: hypervisor serial dev should be $dom0_serialdev.\"");
     return $dom0_serialdev;
@@ -76,24 +76,20 @@ sub setup_console_in_grub {
         #grub2
         $grub_cfg_file = "${root_dir}/boot/grub2/grub.cfg";
         if (${virt_type} eq "xen") {
-            $com_settings = get_var('IPMI_CONSOLE') ? "com2=" . get_var('IPMI_CONSOLE') : "";
+            # On some special beremetal machines, such as unreal2/3, their serial console:
+            # SERIALDEV='ttyS2', XEN_SERIAL_CONSOLE="com1=115200,8n1,0x3e8,5 console=com1"
+            $com_settings = get_var("XEN_SERIAL_CONSOLE", "console=com2,115200");
             $bootmethod = "module";
             $search_pattern = "vmlinuz";
 
-            # autoballoning is disabled since sles15sp1 beta2. we use default dom0_ram which is '10% of total ram + 1G'
-            # while for older release, bsc#1107572 "This dom0 memory amount works well with hosts having 4 to 8 Gigs of RAM"
-            # considering of one SUT in OSD with 4G ram only, we set dom0_mem=2G
             my $dom0_options = "";
-            if (is_sle('<=12-SP4') || is_sle('=15')) {
-                $dom0_options = "dom0_mem=2048M,max:2048M";
-            }
             if (get_var("ENABLE_SRIOV_NETWORK_CARD_PCI_PASSTHROUGH")) {
-                $dom0_options .= " iommu=on";
+                $dom0_options = "iommu=on";
             }
             $cmd
               = "sed -ri '/multiboot/ "
               . "{s/(console|loglevel|loglvl|guest_loglvl)=[^ ]*//g; "
-              . "/multiboot/ s/\$/ $dom0_options console=com2,115200 loglvl=all guest_loglvl=all sync_console $com_settings/;}; "
+              . "/multiboot/ s/\$/ $dom0_options $com_settings loglvl=all guest_loglvl=all sync_console/;}; "
               . "' $grub_cfg_file";
             assert_script_run($cmd);
             save_screenshot;
@@ -145,15 +141,6 @@ sub setup_console_in_grub {
         assert_script_run($cmd);
         save_screenshot;
         upload_logs($grub_default_file);
-    }
-    elsif ($grub_ver eq "grub1") {
-        $grub_cfg_file = "${root_dir}/boot/grub/menu.lst";
-        $cmd
-          = "cp $grub_cfg_file ${grub_cfg_file}.org \&\&  sed -i 's/timeout=-{0,1}[0-9]{1,}/timeout=30/g; /module \\\/boot\\\/vmlinuz/{s/console=.*,115200/console=$ipmi_console,115200/g;}; /kernel .*xen/{s/\$/ dom0_mem=2048M,max:2048M/;}' $grub_cfg_file";
-        assert_script_run($cmd);
-        save_screenshot;
-        $cmd = "sed -rn '/module \\\/boot\\\/vmlinuz/p' $grub_cfg_file";
-        assert_script_run($cmd);
     }
     else {
         die "Not supported grub version!";

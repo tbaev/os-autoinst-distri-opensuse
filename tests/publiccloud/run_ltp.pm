@@ -48,38 +48,13 @@ sub instance_log_args
 sub upload_ltp_logs
 {
     my ($self) = @_;
-    my $ltp_testsuite = get_required_var('LTP_COMMAND_FILE');
-    my $log_file = Mojo::File::path('ulogs/result.json');
     record_info('LTP Logs', 'upload');
-    upload_logs("$root_dir/result.json", log_name => $log_file->basename, failok => 1);
+    assert_script_run("test -f $root_dir/result.json || echo No result log");
+    parse_extra_log('LTP', "$root_dir/result.json");
     # debug file in the standart LTP log-dir. structure:
     assert_script_run("test -f /tmp/runltp.\$USER/latest/debug.log || echo No debug log");
     upload_logs("/tmp/runltp.\$USER/latest/debug.log", failok => 1);
 
-    return unless -e $log_file->to_string;
-
-    local @INC = ($ENV{OPENQA_LIBPATH} // testapi::OPENQA_LIBPATH, @INC);
-    eval {
-        require OpenQA::Parser::Format::LTP;
-
-        my $ltp_log = Mojo::JSON::decode_json($log_file->slurp());
-        my $parser = OpenQA::Parser::Format::LTP->new()->load($log_file->to_string);
-        my %ltp_log_results = map { $_->{test_fqn} => $_->{test} } @{$ltp_log->{results}};
-        my $whitelist = LTP::WhiteList->new();
-
-        for my $result (@{$parser->results()}) {
-            if ($whitelist->override_known_failures($self, {%{$self->{ltp_env}}, retval => $ltp_log_results{$result->{test_fqn}}->{retval}}, $ltp_testsuite, $result->{test_fqn})) {
-                $result->{result} = 'softfail';
-            }
-        }
-
-        $parser->write_output(bmwqemu::result_dir());
-        $parser->write_test_result(bmwqemu::result_dir());
-
-        $parser->tests->each(sub {
-                $autotest::current_test->register_extra_test_results([$_->to_openqa]);
-        });
-    };
     die $@ if $@;
 }
 
@@ -147,16 +122,19 @@ sub run {
     assert_script_run($log_start_cmd);
 
     # LTP command line preparation
-    zypper_call("in -y python3-paramiko python3-scp");
+    # The python3-paramiko is too old (2.4 on 15-SP6)
+    # The python311-paramiko is from SLE-Module-Python3-15-SP5-Updates which we have in PC tools image
+    zypper_call("in python311-paramiko python311-scp");
+
     my $sut = ':user=' . $instance->username;
     $sut .= ':sudo=1';
-    $sut .= ':key_file=' . $instance->provider->ssh_key;
+    $sut .= ':key_file=$(realpath ' . $instance->provider->ssh_key . ')';
     $sut .= ':host=' . $instance->public_ip;
     $sut .= ':reset_command=\'' . $reset_cmd . '\'';
     $sut .= ':hostkey_policy=missing';
     $sut .= ':known_hosts=/dev/null';
 
-    my $cmd = 'python3 runltp-ng/runltp-ng ';
+    my $cmd = 'python3.11 runltp-ng/runltp-ng ';
     $cmd .= "--json-report=$root_dir/result.json ";
     $cmd .= '--verbose ';
     $cmd .= '--exec-timeout=1200 ';

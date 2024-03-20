@@ -18,7 +18,7 @@ use strict;
 use warnings;
 use testapi;
 use utils;
-use version_utils qw(is_sle is_public_cloud get_version_id is_transactional);
+use version_utils qw(is_sle is_public_cloud get_version_id is_transactional is_openstack);
 use transactional qw(check_reboot_changes trup_call process_reboot);
 use registration;
 use maintenance_smelt qw(is_embargo_update);
@@ -43,6 +43,7 @@ our @EXPORT = qw(
   register_openstack
   register_addons_in_pc
   gcloud_install
+  get_ssh_private_key_path
   prepare_ssh_tunnel
   kill_packagekit
   allow_openqa_port_selinux
@@ -254,12 +255,18 @@ sub gcloud_install {
     record_info('GCE', script_output('gcloud version'));
 }
 
+sub get_ssh_private_key_path {
+    # Paramiko needs to be updated for ed25519 https://stackoverflow.com/a/60791079
+    return (is_azure() || is_openstack() || get_var('PUBLIC_CLOUD_LTP')) ? "~/.ssh/id_rsa" : '~/.ssh/id_ed25519';
+}
+
 sub prepare_ssh_tunnel {
-    my $instance = shift;
+    my ($instance) = @_;
 
     # configure ssh client
     my $ssh_config_url = data_url('publiccloud/ssh_config');
     assert_script_run("curl $ssh_config_url -o ~/.ssh/config");
+    file_content_replace("~/.ssh/config", "%SSH_KEY%" => get_ssh_private_key_path());
 
     # Create the ssh alias
     assert_script_run(sprintf(q(echo -e 'Host sut\n  Hostname %s' >> ~/.ssh/config), $instance->public_ip));

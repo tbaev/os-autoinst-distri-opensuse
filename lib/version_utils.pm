@@ -315,7 +315,7 @@ Returns true if called on tumbleweed
 sub is_tumbleweed {
     # Tumbleweed and its stagings
     return 0 unless check_var('DISTRI', 'opensuse');
-    return 1 if get_var('VERSION') =~ /Tumbleweed/;
+    return 1 if get_var('VERSION') =~ /Tumbleweed|Slowroll/;
     return 1 if is_gnome_next;
     return get_var('VERSION') =~ /^Staging:/;
 }
@@ -432,7 +432,7 @@ Returns true if called on a real time system
 =cut
 
 sub is_rt {
-    return (check_var('SLE_PRODUCT', 'rt') || get_var('FLAVOR') =~ /rt/i);
+    return (check_var('SLE_PRODUCT', 'rt') || get_var('FLAVOR') =~ /-rt/i);
 }
 
 =head2 is_hpc
@@ -805,8 +805,10 @@ Returns true if the SUT uses Plasma 6.
 =cut
 
 sub is_plasma6 {
-    # Currently only krypton has it
-    return check_var('FLAVOR', 'Krypton-Live');
+    return 0 unless check_var('DESKTOP', 'kde');
+    return 1 if is_krypton_argon;
+    return 0 if is_leap("<16.0");
+    return 1;
 }
 
 

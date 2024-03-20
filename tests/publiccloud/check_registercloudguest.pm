@@ -23,14 +23,18 @@ use version_utils 'is_sle';
 
 sub run {
     my ($self, $args) = @_;
+    my ($provider, $instance);
     select_host_console();
 
-    my $provider = $args->{my_provider};
-    my $instance = $args->{my_instance};
+    if (get_var('PUBLIC_CLOUD_QAM', 0)) {
+        $instance = $self->{my_instance} = $args->{my_instance};
+        $provider = $self->{provider} = $args->{my_provider};    # required for cleanup
+    } else {
+        $provider = $self->provider_factory();
+        $instance = $self->{my_instance} = $provider->create_instance(check_guestregister => is_openstack ? 0 : 1);
+    }
 
     my $regcode_param = (is_byos()) ? "-r " . get_required_var('SCC_REGCODE') : '';
-
-    select_host_console();    # select console on the host, not the PC instance
     my $path = is_sle('>15') && is_sle('<15-SP3') ? '/usr/sbin/' : '';
 
     if (check_var('PUBLIC_CLOUD_SCC_ENDPOINT', 'SUSEConnect')) {
@@ -49,7 +53,7 @@ sub run {
             $instance->ssh_assert_script_run(cmd => "sudo ${path}registercloudguest --clean", fail_message => 'Failed to deregister the previously registered BYOS system');
             $instance->ssh_script_run(cmd => 'sudo rm /etc/zypp/repos.d/*.repo');
         } else {
-            if ($instance->ssh_script_output(cmd => 'sudo zypper lr', proceed_on_failure => 1) !~ /No repositories defined/gm) {
+            if ($instance->ssh_script_output(cmd => 'zypper lr', proceed_on_failure => 1) !~ /No repositories defined/gm) {
                 die 'The BYOS instance should be unregistered and report "Warning: No repositories defined.".';
             }
 
@@ -72,8 +76,8 @@ sub run {
             $instance->ssh_assert_script_run(cmd => '! sudo SUSEConnect -d', fail_message => 'SUSEConnect succeeds but it is not supported should fail on BYOS');
         }
     } else {
-        if ($instance->ssh_script_output(cmd => 'sudo zypper lr | wc -l', timeout => 360) < 5) {
-            record_info('zypper lr', $instance->ssh_script_output(cmd => 'sudo zypper lr'));
+        if ($instance->ssh_script_output(cmd => 'zypper -x lr | grep "<repo" | wc -l', timeout => 300) < 3) {
+            record_info('zypper lr', $instance->ssh_script_output(cmd => 'zypper lr'));
             die 'The list of zypper repositories is too short.';
         }
 
@@ -91,7 +95,13 @@ sub run {
     }
 
     $instance->ssh_assert_script_run(cmd => "sudo ${path}registercloudguest --clean");
-    if ($instance->ssh_script_output(cmd => 'sudo zypper lr | wc -l', timeout => 600) > 2) {
+    # It might take a bit for the system to remove the repositories
+    foreach my $i (1 .. 4) {
+        last if ($instance->ssh_script_output(cmd => 'zypper -x lr | grep "<repo" | wc -l', timeout => 300) == 0);
+        sleep 15;
+    }
+    if ($instance->ssh_script_output(cmd => 'zypper lr | grep "<repo" | wc -l', timeout => 300) > 0) {
+        record_info('zypper lr', $instance->ssh_script_output(cmd => 'zypper lr'));
         die('The list of zypper repositories is not empty.');
     }
     if ($instance->ssh_script_output(cmd => 'sudo ls /etc/zypp/credentials.d/ | wc -l') != 0) {
@@ -107,7 +117,8 @@ sub run {
 
     $instance->ssh_script_retry(cmd => "sudo ${path}registercloudguest $regcode_param", timeout => 300, retry => 3, delay => 120);
 
-    if ($instance->ssh_script_output(cmd => 'sudo zypper lr | wc -l', timeout => 600) == 0) {
+    if ($instance->ssh_script_output(cmd => 'zypper -x lr | grep "<repo" | wc -l', timeout => 300) == 0) {
+        record_info('zypper lr', $instance->ssh_script_output(cmd => 'zypper lr'));
         die('The list of zypper repositories is empty.');
     }
     if ($instance->ssh_script_output(cmd => 'sudo ls /etc/zypp/credentials.d/ | wc -l') == 0) {
@@ -115,7 +126,8 @@ sub run {
     }
 
     $instance->ssh_script_retry(cmd => "sudo ${path}registercloudguest $regcode_param --force-new", timeout => 300, retry => 3, delay => 120);
-    if ($instance->ssh_script_output(cmd => 'sudo zypper lr | wc -l', timeout => 600) == 0) {
+    if ($instance->ssh_script_output(cmd => 'zypper -x lr | grep "<repo" | wc -l', timeout => 300) == 0) {
+        record_info('zypper lr', $instance->ssh_script_output(cmd => 'zypper lr'));
         die('The list of zypper repositories is empty.');
     }
     if ($instance->ssh_script_output(cmd => 'sudo ls /etc/zypp/credentials.d/ | wc -l') == 0) {
