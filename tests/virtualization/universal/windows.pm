@@ -36,7 +36,9 @@ sub run {
     add_guest_to_hosts $_, $virt_autotest::common::imports{$_}->{ip} foreach (keys %virt_autotest::common::imports);
 
     # Check if SSH is open because of that means that the guest is installed
+    assert_script_run "virsh domifaddr win2k19";
     ensure_online $_, skip_ssh => 1 foreach (keys %virt_autotest::common::imports);
+    assert_script_run "virsh domifaddr win2k19";
 
     ssh_copy_id $_, username => $username, authorized_keys => 'C:\ProgramData\ssh\administrators_authorized_keys', scp => 1 foreach (keys %virt_autotest::common::imports);
 
