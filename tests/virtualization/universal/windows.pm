@@ -34,8 +34,8 @@ sub run {
 
     import_guest $_, 'virt-install' foreach (values %virt_autotest::common::imports);
     script_retry("virsh domifaddr win2k19 | awk '/ipv4/ {print $4}' | cut -d '/' -f 1", delay => 60, retry => 6, timeout => 60);
-    assert_script_run "sed -i '/ $hostname /d' /etc/hosts";
-    assert_script_run "echo '$address $hostname # virtualization' >> /etc/hosts";
+    # assert_script_run "sed -i '/ $hostname /d' /etc/hosts";
+    # assert_script_run "echo '$address $hostname # virtualization' >> /etc/hosts";
 
     # Check if SSH is open because of that means that the guest is installed
     ensure_online $_, skip_ssh => 1 foreach (keys %virt_autotest::common::imports);
