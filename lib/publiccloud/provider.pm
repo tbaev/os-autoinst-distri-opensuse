@@ -13,13 +13,15 @@ use Mojo::Base -base;
 use publiccloud::instance;
 use publiccloud::instances;
 use publiccloud::ssh_interactive 'select_host_console';
-use publiccloud::utils qw(is_azure is_gce is_ec2);
+use publiccloud::utils qw(is_azure is_gce is_ec2 is_hardened get_ssh_private_key_path);
 use Carp;
 use List::Util qw(max);
 use Data::Dumper;
 use Mojo::JSON qw(decode_json encode_json);
 use utils qw(file_content_replace script_retry);
 use mmapi;
+use db_utils qw(is_ok_url);
+use version_utils qw(is_openstack);
 
 use constant TERRAFORM_DIR => get_var('PUBLIC_CLOUD_TERRAFORM_DIR', '/root/terraform');
 use constant TERRAFORM_TIMEOUT => 30 * 60;
@@ -30,7 +32,7 @@ has terraform_applied => 0;
 has resource_name => sub { get_var('PUBLIC_CLOUD_RESOURCE_NAME', 'openqa-vm') };
 has provider_client => undef;
 
-has ssh_key => '/root/.ssh/id_rsa';
+has ssh_key => get_ssh_private_key_path();
 
 =head1 METHODS
 
@@ -154,11 +156,13 @@ Creates an ssh keypair in a given file path by $args{ssh_private_key_file}
 =cut
 
 sub create_ssh_key {
-    my ($self, %args) = @_;
-    $args{ssh_private_key_file} //= '/root/.ssh/id_rsa';
-    if (script_run('test -f ' . $args{ssh_private_key_file}) != 0) {
-        assert_script_run('SSH_DIR=`dirname ' . $args{ssh_private_key_file} . '`; mkdir -p $SSH_DIR');
-        assert_script_run('ssh-keygen -b 2048 -t rsa -q -N "" -C "" -m pem -f ' . $args{ssh_private_key_file});
+    my ($self) = @_;
+    my $alg = $self->ssh_key;
+    $alg =~ s@[a-z0-9/-_~.]*id_@@;
+    record_info($alg, "The $alg key will be generated.");
+    if (script_run('test -f ' . $self->ssh_key) != 0) {
+        assert_script_run('SSH_DIR=`dirname ' . $self->ssh_key . '`; mkdir -p $SSH_DIR');
+        assert_script_run('ssh-keygen -t ' . $alg . ' -q -N "" -C "" -m pem -f ' . $self->ssh_key);
     }
 }
 
@@ -194,9 +198,9 @@ sub run_img_proof {
     $cmd .= '--service-account-file "' . $args{credentials_file} . '" ' if ($args{credentials_file});
     #TODO: this if is just dirty hack which needs to be replaced with something more sane ASAP.
     $cmd .= '--access-key-id $AWS_ACCESS_KEY_ID --secret-access-key $AWS_SECRET_ACCESS_KEY ' if (is_ec2());
-    $cmd .= "--ssh-key-name '" . $args{key_name} . "' " if ($args{key_name});
+    $cmd .= '--ssh-key-name $(realpath ' . $args{key_name} . ') ' if ($args{key_name});
     $cmd .= '-u ' . $args{user} . ' ' if ($args{user});
-    $cmd .= '--ssh-private-key-file "' . $self->ssh_key . '" ';
+    $cmd .= '--ssh-private-key-file $(realpath ' . $self->ssh_key . ') ';
     $cmd .= '--running-instance-id "' . ($args{running_instance_id} // $args{instance}->instance_id) . '" ';
     $cmd .= "--beta " if ($beta);
     if ($exclude) {
@@ -206,6 +210,9 @@ sub run_img_proof {
             $cmd .= "--exclude $excl ";
         }
     }
+
+    # Tell img-proof to generate SCAP report on hardened images
+    $cmd = "SCAP_REPORT=/var/tmp/report.html " . $cmd if is_hardened;
 
     $cmd .= $args{tests};
     record_info("img-proof cmd", $cmd);
@@ -313,8 +320,9 @@ sub create_instances {
     my ($self, %args) = @_;
     $args{check_connectivity} //= 1;
     $args{check_guestregister} //= 1;
-
     my @vms = $self->terraform_apply(%args);
+    my $url = get_var('PUBLIC_CLOUD_PERF_DB_URI', 'http://publiccloud-ng.qa.suse.de:8086');
+
     foreach my $instance (@vms) {
         record_info("INSTANCE", $instance->{instance_id});
         if ($args{check_connectivity}) {
@@ -326,8 +334,16 @@ sub create_instances {
         # check guestregister conditional, default yes:
         $instance->wait_for_guestregister() if ($args{check_guestregister});
         # Performance data: boottime
-        my $btime = $instance->measure_boottime($instance, 'first');
-        $instance->store_boottime_db($btime);
+        if (!is_openstack && is_ok_url($url)) {
+            local $@;
+            eval {
+                my $btime = $instance->measure_boottime($instance, 'first');
+                $instance->store_boottime_db($btime, $url);
+            };
+            record_info("WARN", "Boottime measures cannot be provided", result => 'fail') if ($@);
+        } else {
+            record_info("WARN", "Cannot connect url:" . $url, result => 'fail');
+        }
     }
     return @vms;
 }
@@ -472,7 +488,7 @@ sub terraform_apply {
         }
         if (is_ec2) {
             my $vpc_security_group_ids = script_output("aws ec2 describe-security-groups --region '" . $self->provider_client->region . "' --filters 'Name=group-name,Values=tf-sg' --query 'SecurityGroups[0].GroupId' --output text");
-            my $availability_zone = script_output("aws ec2 describe-instance-type-offerings --location-type availability-zone  --filters Name=instance-type,Values=m6g.medium  --region '" . $self->provider_client->region . "' --query 'InstanceTypeOfferings[0].Location' --output 'text'");
+            my $availability_zone = script_output("aws ec2 describe-instance-type-offerings --location-type availability-zone  --filters Name=instance-type,Values=" . $instance_type . "  --region '" . $self->provider_client->region . "' --query 'InstanceTypeOfferings[0].Location' --output 'text'");
             my $subnet_id = script_output("aws ec2 describe-subnets --region '" . $self->provider_client->region . "' --filters 'Name=tag:Name,Values=tf-subnet' 'Name=availabilityZone,Values=" . $availability_zone . "' --query 'Subnets[0].SubnetId' --output text");
             my $ipv6_address_count = get_var('PUBLIC_CLOUD_EC2_IPV6_ADDRESS_COUNT', 1);
             $cmd .= "-var 'vpc_security_group_ids=$vpc_security_group_ids' ";
@@ -506,6 +522,9 @@ sub terraform_apply {
     }
     if (get_var('PUBLIC_CLOUD_NVIDIA')) {
         $cmd .= "-var gpu=true ";
+    }
+    unless (is_openstack) {
+        $cmd .= "-var 'ssh_public_key=" . $self->ssh_key . ".pub' ";
     }
     $cmd .= "-out myplan";
     record_info('TFM cmd', $cmd);
@@ -587,16 +606,16 @@ sub terraform_destroy {
 
     select_host_console(force => 1);
 
-    my $cmd;
+    my $cmd = 'terraform destroy -no-color -auto-approve ';
     record_info('INFO', 'Removing terraform plan...');
     if (get_var('PUBLIC_CLOUD_SLES4SAP')) {
         assert_script_run('cd ' . TERRAFORM_DIR . '/' . $self->conv_openqa_tf_name);
-        $cmd = 'terraform destroy -no-color -auto-approve';
     }
     else {
         assert_script_run('cd ' . TERRAFORM_DIR);
         # Add region variable also to `terraform destroy` (poo#63604) -- needed by AWS.
-        $cmd = sprintf(q(terraform destroy -no-color -auto-approve -var 'region=%s'), $self->provider_client->region);
+        $cmd .= "-var 'region=" . $self->provider_client->region . "' ";
+        $cmd .= "-var 'ssh_public_key=" . $self->ssh_key . ".pub' ";
         # Add image_id, offer and sku on Azure runs, if defined.
         if (is_azure) {
             my $image = $self->get_image_id();
@@ -604,15 +623,15 @@ sub terraform_destroy {
             my $offer = get_var('PUBLIC_CLOUD_AZURE_OFFER');
             my $sku = get_var('PUBLIC_CLOUD_AZURE_SKU');
             my $storage_account = get_var('PUBLIC_CLOUD_STORAGE_ACCOUNT');
-            $cmd .= " -var 'image_id=$image'" if ($image);
-            $cmd .= " -var 'image_uri=${image_uri}'" if ($image_uri);
-            $cmd .= " -var 'offer=$offer'" if ($offer);
-            $cmd .= " -var 'sku=$sku'" if ($sku);
-            $cmd .= " -var 'storage-account=$storage_account'" if ($storage_account);
+            $cmd .= "-var 'image_id=$image' " if ($image);
+            $cmd .= "-var 'image_uri=${image_uri}' " if ($image_uri);
+            $cmd .= "-var 'offer=$offer' " if ($offer);
+            $cmd .= "-var 'sku=$sku' " if ($sku);
+            $cmd .= "-var 'storage-account=$storage_account' " if ($storage_account);
         }
     }
     # Ignore lock to avoid "Error acquiring the state lock"
-    $cmd .= " -lock=false";
+    $cmd .= "-lock=false ";
     # Retry 3 times with considerable delay. This has been introduced due to poo#95932 (RetryableError)
     # terraform keeps track of the allocated and destroyed resources, so its safe to run this multiple times.
     my $ret = script_retry($cmd, retry => 3, delay => 60, timeout => get_var('TERRAFORM_TIMEOUT', TERRAFORM_TIMEOUT), die => 0);

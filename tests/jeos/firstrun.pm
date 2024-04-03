@@ -13,7 +13,7 @@ use base "opensusebasetest";
 use strict;
 use warnings;
 use testapi;
-use version_utils qw(is_jeos is_sle is_tumbleweed is_leap is_opensuse is_microos is_sle_micro is_vmware is_alp is_bootloader_sdboot);
+use version_utils qw(is_jeos is_sle is_tumbleweed is_leap is_opensuse is_microos is_sle_micro is_vmware is_bootloader_sdboot);
 use Utils::Architectures;
 use Utils::Backends;
 use jeos qw(expect_mount_by_uuid);
@@ -167,7 +167,7 @@ sub run {
     send_key 'ret';
 
     # Accept EULA if required
-    unless (is_tumbleweed || is_microos || is_leap('>=15.4')) {
+    if (is_sle || is_sle_micro) {
         assert_screen 'jeos-doyouaccept';
         send_key 'ret';
     }
@@ -205,8 +205,8 @@ sub run {
         send_key 'n';
     }
 
-    # Only execute this block on ALP when using the encrypted image.
-    if ((is_alp || is_sle_micro('>=6.0')) && get_var("ENCRYPTED_IMAGE")) {
+    # Only execute this block on SLE Micro 6.0+ when using the encrypted image.
+    if ((is_sle_micro('>=6.0')) && get_var("ENCRYPTED_IMAGE")) {
         # Select FDE with pass and tpm
         assert_screen "alp-fde-pass-tpm";
         # with the latest ALP 9.2/SLEM 3.4 build, this step takes more time than usual.
@@ -239,6 +239,16 @@ sub run {
 
     # release console and reattach to be used again as serial output
     if (is_s390x && is_svirt) {
+        # enable root ssh login, see poo#154309
+        if (is_sle_micro('>=6.0') || is_sle('15-SP6+')) {
+            record_info "enable root ssh login";
+            enter_cmd "root";    # login to serial console at first
+            wait_still_screen 1;
+            enter_cmd "$testapi::password";
+            wait_still_screen 1;
+            enter_cmd "echo 'PermitRootLogin yes' > /etc/ssh/sshd_config.d/root.conf";
+            enter_cmd "systemctl restart sshd";
+        }
         send_key('ctrl-^-]');
         $con->attach_to_running();
     }
@@ -267,6 +277,10 @@ sub run {
         assert_script_run "echo $username:$password | chpasswd";
     }
 
+    if (check_var('FLAVOR', 'JeOS-for-RaspberryPi')) {
+        assert_script_run("echo 'PermitRootLogin yes' > /etc/ssh/sshd_config.d/permit-root-login.conf");
+    }
+
     ensure_serialdev_permissions;
 
     prepare_serial_console;
@@ -285,7 +299,7 @@ sub run {
     verify_mounts unless is_leap('<15.2') && is_aarch64;
 
     verify_hypervisor unless is_generalhw;
-    verify_norepos unless is_opensuse || is_alp;
+    verify_norepos unless is_opensuse;
     verify_bsc if is_jeos;
 }
 

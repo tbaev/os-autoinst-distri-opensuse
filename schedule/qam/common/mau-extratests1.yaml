@@ -8,6 +8,7 @@ schedule:
   - console/consoletest_setup
   - console/check_os_release
   - console/ping
+  - console/man_pages
   - console/openvswitch
   - console/pam
   - console/sshd
@@ -41,10 +42,12 @@ conditional_schedule:
   version_specific:
     VERSION:
       15-SP5:
+        - console/openssl_nodejs
         - console/golang
         - console/redis
         - '{{arch_specific}}'
       15-SP4:
+        - console/openssl_nodejs
         - console/golang
         - console/redis
         - '{{arch_specific}}'

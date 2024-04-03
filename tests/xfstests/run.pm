@@ -25,11 +25,11 @@ use File::Basename;
 use testapi;
 use utils;
 use Utils::Backends 'is_pvm';
+use serial_terminal 'select_serial_terminal';
 use power_action_utils qw(power_action prepare_system_shutdown);
 use filesystem_utils qw(format_partition generate_xfstests_list);
 use lockapi;
 use mmapi;
-use version_utils 'is_alp';
 
 # Heartbeat variables
 my $HB_INTVL = get_var('XFSTESTS_HEARTBEAT_INTERVAL') || 30;
@@ -64,7 +64,7 @@ my $TEST_FOLDER = '/opt/test';
 my $SCRATCH_FOLDER = '/opt/scratch';
 
 # Create heartbeat script, directories(Call it only once)
-sub test_prepare {
+sub heartbeat_prepare {
     my $redir = " >> /dev/$serialdev";
     my $script = <<END_CMD;
 #!/bin/sh
@@ -85,7 +85,6 @@ while [[ ! -f $HB_EXIT_FILE ]]; do
 done
 END_CMD
     assert_script_run("cat > $HB_SCRIPT <<'END'\n$script\nEND\n( exit \$?)");
-    assert_script_run("mkdir -p $KDUMP_DIR $LOG_DIR");
 }
 
 # Start heartbeat, setup environment variables(Call it everytime SUT reboots)
@@ -95,7 +94,7 @@ sub heartbeat_start {
 
 # Stop heartbeat
 sub heartbeat_stop {
-    send_key 'ret';
+    check_var('VIRTIO_CONSOLE', '1') ? type_string "\n" : send_key 'ret';
     assert_script_run("touch $HB_EXIT_FILE");
 }
 
@@ -111,7 +110,7 @@ sub heartbeat_wait {
         }
         else {
             my $status;
-            send_key 'ret';
+            check_var('VIRTIO_CONSOLE', '1') ? type_string "\n" : send_key 'ret';
             my $ret = script_output("cat $HB_DONE_FILE; rm -f $HB_DONE_FILE");
             $ret =~ s/^\s+|\s+$//g;
             if ($ret == 0) {
@@ -163,11 +162,8 @@ sub log_add {
     my ($file, $test, $status, $time) = @_;
     my $name = test_name($test);
     unless ($name and $status) { return; }
-    my $cmd = "echo '$name ... ... $status (${time}s)' >> $file && sync $file";
-    send_key 'ret';
-    assert_script_run($cmd);
-    sleep 5;
-    my $ret = script_output("cat $file", 60);
+    my $cmd = "echo '$name ... ... $status (${time}s)' | tee -a $file";
+    my $ret = script_output($cmd);
     return $ret;
 }
 
@@ -191,6 +187,7 @@ sub tests_from_category {
 # If TEST_RANGES contain generic tests, then exclude tests from generic folder, else will exclude tests from filesystem type folder
 sub exclude_grouplist {
     my %tests_list = ();
+    return unless get_var('XFSTESTS_GROUPLIST');
     my $test_folder = $TEST_RANGES =~ /generic/ ? "generic" : $FSTYPE;
     my @group_list = split(/,/, get_var('XFSTESTS_GROUPLIST'));
     foreach my $group_name (@group_list) {
@@ -213,6 +210,7 @@ sub exclude_grouplist {
 # If TEST_RANGES contain generic tests, then include tests from generic folder, else will include tests from filesystem type folder
 sub include_grouplist {
     my @tests_list;
+    return unless get_var('XFSTESTS_GROUPLIST');
     my $test_folder = $TEST_RANGES =~ /generic/ ? "generic" : $FSTYPE;
     my @group_list = split(/,/, get_var('XFSTESTS_GROUPLIST'));
     foreach my $group_name (@group_list) {
@@ -460,7 +458,7 @@ sub test_run_without_heartbeat {
         if (get_var('RAW_DUMP', 0)) { raw_dump($category, $num); }
 
         prepare_system_shutdown;
-        send_key 'alt-sysrq-b';
+        check_var('VIRTIO_CONSOLE', '1') ? power('reset') : send_key 'alt-sysrq-b';
         reconnect_mgmt_console if is_pvm;
         $self->wait_boot;
 
@@ -496,7 +494,7 @@ sub test_run_without_heartbeat {
 
 sub run {
     my $self = shift;
-    select_console('root-console');
+    get_var('PUBLIC_CLOUD') ? select_console('root-console') : select_serial_terminal();
     return if get_var('XFSTESTS_NFS_SERVER');
     my $enable_heartbeat = 1;
     $enable_heartbeat = 0 if (check_var 'XFSTESTS_NO_HEARTBEAT', '1');
@@ -518,7 +516,8 @@ sub run {
         @tests = shuffle(@tests);
     }
 
-    test_prepare;
+    heartbeat_prepare if $enable_heartbeat == 1;
+    assert_script_run("mkdir -p $KDUMP_DIR $LOG_DIR");
 
     # wait until nfs service is ready
     if (get_var('PARALLEL_WITH')) {
@@ -538,7 +537,7 @@ sub run {
             next;
         }
 
-        umount_xfstests_dev;
+        umount_xfstests_dev unless get_var('XFSTESTS_HIGHSPEED');
 
         # Run test and wait for it to finish
         my ($category, $num) = split(/\//, $test);
@@ -571,7 +570,7 @@ sub run {
         # Here to reboot "again" to keep logic and real screen in the same page. After reboot to continue the rest tests.
         eval {
             prepare_system_shutdown;
-            send_key 'alt-sysrq-b';
+            check_var('VIRTIO_CONSOLE', '1') ? power('reset') : send_key 'alt-sysrq-b';
             reconnect_mgmt_console if is_pvm;
             $self->wait_boot;
         };

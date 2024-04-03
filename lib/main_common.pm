@@ -246,6 +246,14 @@ sub is_kde_live {
     return get_var('FLAVOR', '') =~ /KDE-Live/;
 }
 
+sub gnomestep_is_applicable {
+    return check_var("DESKTOP", "gnome");
+}
+
+sub kdestep_is_applicable {
+    return check_var("DESKTOP", "kde");
+}
+
 sub packagekit_available {
     return !check_var('FLAVOR', 'Rescue-CD');
 }
@@ -477,7 +485,12 @@ sub load_zdup_tests {
     loadtest 'installation/post_zdup';
     # Restrict version switch to sle until opensuse adopts it
     loadtest "migration/version_switch_upgrade_target" if is_sle and get_var("UPGRADE_TARGET_VERSION");
-    loadtest 'boot/boot_to_desktop';
+    if (get_var('ZDUP_IN_X')) {
+        loadtest 'x11/reboot_plasma5' if kdestep_is_applicable;
+        loadtest 'x11/reboot_gnome' if gnomestep_is_applicable;
+    } else {
+        loadtest 'boot/boot_to_desktop';
+    }
     loadtest "installation/opensuse_welcome" if opensuse_welcome_applicable();
     loadtest 'console/check_upgraded_service' if !is_desktop;
 }
@@ -616,6 +629,8 @@ sub load_jeos_tests {
     if (check_var('FIRST_BOOT_CONFIG', 'combustion')) {
         loadtest 'microos/verify_setup';
         loadtest 'microos/image_checks';
+    } elsif (check_var('FIRST_BOOT_CONFIG', 'cloud-init')) {
+        loadtest "boot/cloud_init";
     } else {
         loadtest "jeos/firstrun";
     }
@@ -669,16 +684,8 @@ sub chromiumstep_is_applicable {
     return chromestep_is_applicable() || (is_opensuse && is_aarch64);
 }
 
-sub gnomestep_is_applicable {
-    return check_var("DESKTOP", "gnome");
-}
-
 sub installyaststep_is_applicable {
     return !get_var("NOINSTALL") && !get_var("RESCUECD") && !get_var("ZDUP");
-}
-
-sub kdestep_is_applicable {
-    return check_var("DESKTOP", "kde");
 }
 
 # kdump is not supported on aarch64 (bsc#990418), and Xen PV (feature not implemented)
@@ -1761,6 +1768,7 @@ sub load_extra_tests_console {
     loadtest 'console/wpa_supplicant' unless (!is_x86_64 || is_sle('<15') || is_leap('<15.1') || is_jeos || is_public_cloud);
     loadtest 'console/python_scientific' unless (is_sle("<15"));
     loadtest "console/parsec" if is_tumbleweed;
+    loadtest "console/perl_bootloader" unless (get_var('PUBLIC_CLOUD') || is_bootloader_sdboot);
 }
 
 sub load_extra_tests_sdk {
@@ -2026,7 +2034,7 @@ sub load_x11_other {
             loadtest "x11/seahorse";
             loadtest "x11/gnome_music";
         }
-        loadtest 'x11/flatpak' if (is_opensuse);
+        loadtest 'x11/flatpak' if (is_opensuse || is_sle('15+'));
     }
     # shotwell was replaced by gnome-photos in SLE15 & yast_virtualization isn't in SLE15
     if (is_sle('>=12-sp2') && is_sle('<15')) {
@@ -2056,7 +2064,6 @@ sub load_x11_other {
 sub load_x11_webbrowser {
     loadtest "x11/firefox/firefox_smoke";
     loadtest "x11/firefox/firefox_urlsprotocols";
-    loadtest "x11/firefox/firefox_downloading";
     loadtest "x11/firefox/firefox_changesaving";
     loadtest "x11/firefox/firefox_fullscreen";
     loadtest "x11/firefox/firefox_localfiles";
@@ -2527,6 +2534,7 @@ sub load_extra_tests_syscontainer {
 sub load_extra_tests_kernel {
     loadtest "kernel/tuned";
     loadtest "kernel/fwupd" if is_sle('15+');
+    loadtest "hpc/rasdaemon" if ((is_sle('15+') && (!is_ppc64le)) || is_tumbleweed);
 
     # keep it on the latest place as it taints kernel
     loadtest "kernel/module_build";

@@ -57,10 +57,9 @@
     "bsc#1126272": {
         "description": "Failed unmounting \/\\S+\\.|-- Reboot --|pam_systemd.*Failed to release session",
         "products": {
-            "sle-micro": [ "5.0", "5.1", "5.2", "5.3" , "5.4" , "5.5"],
+            "sle-micro": [ "5.0", "5.1", "5.2", "5.3" , "5.4" , "5.5", "6.0"],
             "leap-micro": [ "5.2", "5.3", "5.4", "5.5" ],
-            "microos":  ["Tumbleweed"],
-            "alp":  ["0.1", "0.1:S:A", "0.1:S:B"]
+            "microos":  ["Tumbleweed"]
         },
         "type": "ignore"
     },
@@ -87,8 +86,7 @@
         "products": {
             "sle-micro": [ "5.0", "5.1", "5.2", "5.3", "5.4" , "5.5" ],
             "leap-micro": [ "5.2" ],
-            "microos":  ["Tumbleweed"],
-            "alp":  ["0.1", "0.1:S:A", "0.1:S:B"]
+            "microos":  ["Tumbleweed"]
         },
         "type": "bug"
     },
@@ -106,8 +104,7 @@
             "sle-micro": [ "5.0", "5.1", "5.2", "5.3", "5.4" , "5.5", "6.0" ],
             "opensuse": ["Tumbleweed", "15.2", "15.3"],
             "microos":  ["Tumbleweed"],
-            "sle": ["15-SP2", "15-SP3", "15-SP4", "15-SP5", "15-SP6"],
-            "alp":  ["1.0"]
+            "sle": ["15-SP2", "15-SP3", "15-SP4", "15-SP5", "15-SP6"]
         },
         "type": "bug"
     },
@@ -322,8 +319,7 @@
         "products": {
             "sle-micro": [ "5.0", "5.1", "5.2", "5.3", "5.4" , "5.5" ],
             "leap-micro": ["5.2", "5.3", "5.4", "5.5"],
-            "microos":  ["Tumbleweed"],
-            "alp":  ["0.1", "0.1:S:A", "0.1:S:B"]
+            "microos":  ["Tumbleweed"]
         },
         "type": "ignore"
     },
@@ -331,13 +327,12 @@
         "description": "health-checker/fail.sh check\" failed|Machine didn't come up correctly, do a rollback",
         "products": {
             "microos":  ["Tumbleweed"],
-            "sle-micro": ["6.0"],
-            "alp":  ["1.0"]
+            "sle-micro": ["6.0"]
         },
         "type": "ignore"
     },
     "chrony": {
-        "description": "chronyd.*Received KoD RATE from|System clock wrong by.*, adjustment started|System clock was stepped by.*",
+        "description": "chronyd.*Received KoD RATE from|System clock wrong by.*|System clock was stepped by.*",
         "products": {
             "sle-micro": [ "5.0", "5.1" ],
             "opensuse": ["Tumbleweed", "15.2", "15.3"],
@@ -346,10 +341,17 @@
         },
         "type": "ignore"
     },
+    "bsc#1219229": {
+        "description": "chronyd.*Could not add source.*",
+        "products": {
+            "sle-micro": [ "6.0" ]
+        },
+        "type": "ignore"
+    },
     "ssh-connection-close-by-remote": {
         "description": "error: kex_exchange_identification: Connection closed by remote host",
         "products": {
-            "sle-micro": [ "5.0", "5.1", "5.2", "5.3", "5.4" , "5.5" ],
+            "sle-micro": [ "5.0", "5.1", "5.2", "5.3", "5.4", "5.5", "6.0" ],
             "opensuse": ["Tumbleweed", "15.2", "15.3", "15.4", "15.5"],
             "microos":  ["Tumbleweed"],
             "sle": ["15-SP2", "15-SP3", "15-SP4", "15-SP5", "15-SP6"]
@@ -361,10 +363,9 @@
         "products": {
             "leap-micro": ["5.3"],
             "sle-micro": ["5.3", "5.4" , "5.5", "6.0"],
-            "microos":  ["Tumbleweed"],
-            "opensuse":  ["Tumbleweed"],
-            "sle": ["15-SP6"],
-            "alp":  ["1.0"]
+            "microos":  ["Tumbleweed", "Slowroll", "Slowroll:Staging"],
+            "opensuse":  ["Tumbleweed", "Slowroll", "Slowroll:Staging"],
+            "sle": ["15-SP6"]
         },
         "type": "ignore"
     },
@@ -416,8 +417,7 @@
     "boo#1203899": {
         "description": "NetworkManager.*kill child process 'helper'.* failed due to unexpected return value -1 by waitpid",
         "products": {
-            "sle-micro": ["5.4" , "5.5"],
-            "alp":  ["0.1", "0.1:S:A", "0.1:S:B"]
+            "sle-micro": ["5.4" , "5.5"]
         },
         "type": "bug"
     },
@@ -474,8 +474,7 @@
     "boo#1215367": {
         "description": "pam_wtmpdb\\(login:session\\): Failed to execute statement: database is locked",
         "products": {
-            "microos":  ["Tumbleweed"],
-            "alp": ["1.0"]
+            "microos":  ["Tumbleweed"]
         },
         "type": "bug"
     },
@@ -497,8 +496,7 @@
         "description": "plugin /usr/sbin/sedispatch terminated unexpectedly",
         "products": {
             "sle-micro": ["5.4" , "5.5", "6.0"],
-            "leap-micro": [ "5.5" ],
-	     "alp": ["1.0"]
+            "leap-micro": [ "5.5" ]
         },
         "type": "bug"
     },
@@ -525,12 +523,10 @@
         },
         "type": "bug"
     },
-    "bsc#1217872": {
-        "description": "sedispatch.*: Connection Error (Failed to connect to socket /run/dbus/system_bus_socket: Connection refused): AVC Will be dropped",
-
+    "bsc#1220361": {
+        "description": "setroubleshoot.*SELinux is preventing agetty from using the checkpoint_restore capability.*",
         "products": {
-            "sle-micro": ["5.4" , "5.5"],
-            "leap-micro": [ "5.5" ]
+            "sle-micro": ["5.5"]
         },
         "type": "bug"
     },
@@ -549,7 +545,7 @@
         "products": {
             "opensuse": ["Tumbleweed"],
             "microos":  ["Tumbleweed"],
-            "alp": ["1.0"]
+            "sle-micro": ["6.0"]
         },
         "type": "bug"
     },
@@ -565,7 +561,8 @@
         "description": "qgroup reserved space leaked",
         "products": {
             "opensuse": ["Tumbleweed"],
-            "microos":  ["Tumbleweed"]
+            "microos":  ["Tumbleweed"],
+            "sle-micro": ["6.0"]
         },
         "type": "bug"
     },
@@ -574,8 +571,14 @@
         "products": {
             "sle-micro": ["6.0"],
             "opensuse": ["Tumbleweed"],
-            "microos":  ["Tumbleweed"],
-            "alp":  ["1.0"]            
+            "microos":  ["Tumbleweed"]
+        },
+        "type": "bug"
+    },
+    "bsc#1217231": {
+        "description": "systemd-cryptsetup.*Failed to deactivate|systemd.*Timed out waiting for device",
+        "products": {
+            "sle-micro": ["6.0"]
         },
         "type": "bug"
     },
@@ -585,5 +588,26 @@
             "sle-micro": ["5.4"]
         },
         "type": "bug"
+    },
+    "bsc#1218181": {
+        "description": "Device luks is still in use",
+        "products": {
+            "sle-micro": ["6.0"]
+        },
+        "type": "bug"
+    },
+    "Truncating stdout of dmi_memory_id": {
+        "description": "Truncating stdout of 'dmi_memory_id' up to .* byte",
+        "products": {
+            "sle": ["15-SP6"]
+        },
+        "type": "ignore"
+    },
+    "skip watchdog check": {
+        "description": "clocksource: Long readout interval, skipping watchdog check:.*$",
+        "products": {
+            "sle": ["15-SP6"]
+        },
+        "type": "ignore"
     }
 }

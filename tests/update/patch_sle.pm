@@ -87,6 +87,11 @@ sub patching_sle {
     # Install salt packages as required
     install_salt_packages() if (check_var_array('SCC_ADDONS', 'asmm'));
 
+    # Install openldap package as required
+    if ((get_var('FLAVOR') =~ /Regression/) && check_var('HDDVERSION', '15-SP3') && is_x86_64) {
+        zypper_call("in sssd sssd-tools sssd-ldap openldap2 openldap2-client");
+    }
+
     # create btrfs subvolume for aarch64
     create_btrfs_subvolume() if (is_aarch64);
 
@@ -122,6 +127,7 @@ sub patching_sle {
         modify_kernel_multiversion("disable");
     }
 
+    workaround_bsc_1220091;
     # Record the installed rpm list
     assert_script_run 'rpm -qa > /tmp/rpm-qa.txt';
     upload_logs '/tmp/rpm-qa.txt';

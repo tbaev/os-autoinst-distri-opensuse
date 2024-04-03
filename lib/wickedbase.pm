@@ -529,8 +529,8 @@ sub unique_macaddr {
     $prefix =~ s/:/_/;
     $prefix = hex($prefix);
 
-    $self->{unique_macaddr_cnt} = $self->{unique_macaddr_cnt} ? 0 : $self->{unique_macaddr_cnt} + 1;
-    $prefix += $self->{unique_macaddr_cnt};
+    $self->{unique_macaddr_cnt} //= 0;
+    $prefix += $self->{unique_macaddr_cnt}++;
 
     my $w_id = get_required_var('WORKER_ID');
     die("WORKER_ID too big!") if ($w_id > 0xffffffff);
@@ -655,7 +655,8 @@ sub upload_wicked_logs {
     record_info('Logs', "Collecting logs in $logs_dir");
     script_run("mkdir -p $logs_dir");
     script_run("date +'%Y-%m-%d %T.%6N' > $logs_dir/date");
-    script_run("journalctl -b -o short-precise|tail -n +2 > $logs_dir/journalctl.log");
+    script_run('journalctl --sync');
+    script_run("journalctl -b -o short-precise > $logs_dir/journalctl.log");
     script_run("wicked ifstatus --verbose all > $logs_dir/wicked_ifstatus.log 2>&1");
     script_run("wicked show-config > $logs_dir/wicked_config.log 2>&1");
     script_run("wicked show-xml > $logs_dir/wicked_xml.log 2>&1");

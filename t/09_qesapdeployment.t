@@ -7,7 +7,6 @@ use Test::MockModule;
 use Test::Mock::Time;
 
 use List::Util qw(any none);
-use Data::Dumper;
 
 use testapi 'set_var';
 use qesapdeployment;
@@ -373,6 +372,55 @@ subtest '[qesap_execute] logname' => sub {
     ok $res[0] == $expected_res, 'The function return what is internally returned by the command call';
 };
 
+subtest '[qesap_execute_conditional_retry] retry after fail with expected error message' => sub {
+    my $qesap = Test::MockModule->new('qesapdeployment', no_auto => 1);
+    my @calls;
+    my @logs = ();
+    my $cmd = 'TIFA';
+    my $error_string = 'AERIS';
+    my $retry_log = '_retry.log.txt';
+    my $expected_res = 0;
+    my $expected_log_name = "qesap_exec_$cmd.log.txt";
+    $qesap->redefine(record_info => sub {
+            push @calls, join(' ', @_);
+            note(join(' # ', 'RECORD_INFO -->', @_)); });
+    $qesap->redefine(qesap_cluster_logs => sub { return 1; });
+    $qesap->redefine(qesap_execute => sub {
+            my (%args) = @_;
+            push @calls, $args{cmd};
+            $args{logname} //= "a log name";
+            push @calls, $args{logname};
+            if ($args{logname} =~ /\Q$retry_log\E/) {
+                return (0, 'log');
+            } else {
+                return (1, 'log');
+            }
+    });
+    $qesap->redefine(qesap_file_find_string => sub { return 1; });
+
+    my @res = qesap_execute_conditional_retry(cmd => $cmd, error_string => $error_string);
+
+    note("\n  -->  " . join("\n  -->  ", @calls));
+    ok $res[0] == 0, "Check if the rc of the result is 0";
+    ok(any { /$retry_log/ } @calls, "Check if retry log is mentioned in any call");
+    ok(any { /QESAP_EXECUTE RETRY PASS/ } @calls, "Check if QESAP_EXECUTE RETRY PASS is recorded");
+};
+
+subtest '[qesap_execute_conditional_retry] dies if expected error message is not found' => sub {
+    my $qesap = Test::MockModule->new('qesapdeployment', no_auto => 1);
+    my $cmd = 'TIFA';
+    my $error_string = 'AERIS';
+    $qesap->redefine(record_info => sub {
+            note(join(' # ', 'RECORD_INFO -->', @_)); });
+    $qesap->redefine(qesap_cluster_logs => sub { return 1; });
+    $qesap->redefine(qesap_execute => sub {
+            return (1, 'log');
+    });
+    $qesap->redefine(qesap_file_find_string => sub { return 0; });
+
+    dies_ok { qesap_execute_conditional_retry(cmd => $cmd, error_string => $error_string) } 'Expected die if string is not found';
+};
+
 subtest '[qesap_file_find_string] success' => sub {
     my $qesap = Test::MockModule->new('qesapdeployment', no_auto => 1);
     my @calls;
@@ -411,8 +459,6 @@ subtest '[qesap_file_find_string] fail' => sub {
 subtest '[qesap_get_nodes_number]' => sub {
     my $qesap = Test::MockModule->new('qesapdeployment', no_auto => 1);
     my @calls;
-    my $cloud_provider = 'NEMO';
-    set_var('PUBLIC_CLOUD_PROVIDER', $cloud_provider);
     my $str = <<END;
 all:
   children:
@@ -436,15 +482,12 @@ END
     $qesap->redefine(script_output => sub { push @calls, $_[0]; return $str; });
     $qesap->redefine(qesap_get_inventory => sub { return '/CRUSH'; });
 
-    my $res = qesap_get_nodes_number();
+    my $res = qesap_get_nodes_number(provider => 'NEMO');
 
-    set_var('PUBLIC_CLOUD_PROVIDER', undef);
     note("\n  C-->  " . join("\n  C-->  ", @calls));
     is $res, 3, 'Number of agents like expected';
     like $calls[0], qr/cat.*\/CRUSH/;
 };
-
-
 
 subtest '[qesap_remote_hana_public_ips]' => sub {
     my $qesap = Test::MockModule->new('qesapdeployment', no_auto => 1);
@@ -456,8 +499,8 @@ subtest '[qesap_remote_hana_public_ips]' => sub {
     my @ips = qesap_remote_hana_public_ips();
 
     set_var('PUBLIC_CLOUD_PROVIDER', undef);
-    note("\n  C-->  " . join("\n  C-->  ", @ips));
     note("\n  C-->  " . join("\n  C-->  ", @calls));
+    note("\n  IP-->  " . join("\n  IP-->  ", @ips));
     ok((any { /^10.0.1.1$/ } @ips), 'IP 1 matches');
     ok((any { /^10.0.1.2$/ } @ips), 'IP 2 matches');
 };
@@ -624,8 +667,8 @@ subtest '[qesap_upload_crm_report] ansible host query' => sub {
 
     note("\n  C-->  " . join("\n  C-->  ", @calls));
     note("\n  FETCH_FILENAME-->  " . join("\n  FETCH_FILENAME-->  ", @fetch_filename));
-    ok((any { /.*\/var\/log\/hana0\-crm_report/ } @calls), 'crm report file has the node name in it');
-    ok((any { /hana0\-crm_report\.tar\.gz/ } @fetch_filename), 'crm report fetch file is properly formatted');
+    ok((any { /.*\/var\/log\/vmhana01\-crm_report/ } @calls), 'crm report file has the node name in it');
+    ok((any { /vmhana01\-crm_report\.tar\.gz/ } @fetch_filename), 'crm report fetch file is properly formatted');
 };
 
 subtest '[qesap_calculate_deployment_name]' => sub {
@@ -994,25 +1037,69 @@ subtest '[qesap_is_job_finished]' => sub {
     ok($results[2] == 0, "Consider 'running' if the openqa job status response is 'running'");
 };
 
-subtest '[qesap_az_get_native_fencing_type]' => sub {
-    my $res_empty = qesap_az_get_native_fencing_type();
-    ok($res_empty eq 'msi', "Return 'msi' if openqa var is empty");
+subtest '[qesap_get_nodes_names]' => sub {
+    my $qesap = Test::MockModule->new('qesapdeployment', no_auto => 1);
+    my @calls;
+    my $str = <<END;
+all:
+  children:
+    hana:
+      hosts:
+        vmhana01:
+          ansible_host: 1.2.3.4
+          ansible_python_interpreter: /usr/bin/python3
+        vmhana02:
+          ansible_host: 1.2.3.5
+          ansible_python_interpreter: /usr/bin/python3
+
+    iscsi:
+      hosts:
+        vmiscsi01:
+          ansible_host: 1.2.3.6
+          ansible_python_interpreter: /usr/bin/python3
+
+  hosts: null
+END
+    $qesap->redefine(script_output => sub { push @calls, $_[0]; return $str; });
+    $qesap->redefine(qesap_get_inventory => sub { return '/CRUSH'; });
+
+    my @hosts = qesap_get_nodes_names(provider => 'NEMO');
+
+    note("\n  C-->  " . join("\n  C-->  ", @calls));
+    note("\n  H-->  " . join("\n  H-->  ", @hosts));
+    ok((scalar @hosts == 3), 'Exactly 3 hosts in the example inventory');
 };
 
-subtest '[qesap_az_get_native_fencing_type] wrong value for openqa variable' => sub {
+subtest '[qesap_add_server_to_hosts]' => sub {
     my $qesap = Test::MockModule->new('qesapdeployment', no_auto => 1);
-    $qesap->redefine(get_var => sub { return 'AEGEAN'; });
-    dies_ok { qesap_az_get_native_fencing_type(); } 'Expected die if value is unexpected';
+    my @calls;
+    $qesap->redefine(qesap_ansible_cmd => sub { my (%args) = @_; push @calls, $args{cmd}; });
+    set_var('PUBLIC_CLOUD_PROVIDER', 'NEMO');
+
+    qesap_add_server_to_hosts(
+        name => 'ISLAND.SEA',
+        ip => '1.2.3.4');
+
+    set_var('PUBLIC_CLOUD_PROVIDER', undef);
+    note("\n  C-->  " . join("\n  C-->  ", @calls));
+    ok((any { qr/sed.*\/etc\/hosts/ } @calls), 'AWS Region matches');
 };
 
-subtest '[qesap_az_get_native_fencing_type] correct variable' => sub {
+subtest '[qesap_terrafom_ansible_deploy_retry] generic Ansible failures, no retry' => sub {
     my $qesap = Test::MockModule->new('qesapdeployment', no_auto => 1);
-    $qesap->redefine(get_var => sub { return 'msi'; });
-    my $res_msi = qesap_az_get_native_fencing_type();
-    $qesap->redefine(get_var => sub { return 'spn'; });
-    my $res_spn = qesap_az_get_native_fencing_type();
-    ok($res_msi eq 'msi', "Return 'msi' if openqa var is 'msi'");
-    ok($res_spn eq 'spn', "Return 'spn' if openqa var is 'spn'");
+    my @calls;
+
+    $qesap->redefine(qesap_file_find_string => sub {
+            my (%args) = @_;
+            push @calls, $args{cmd};
+            #return 1 if $args{search_string} eq 'Missing sudo password';
+            return 0; });
+    $qesap->redefine(script_output => sub { return 'ALGA' });
+    $qesap->redefine(qesap_cluster_logs => sub { return; });
+    $qesap->redefine(record_info => sub { note(join(' ', 'RECORD_INFO -->', @_)); });
+
+    my $ret = qesap_terrafom_ansible_deploy_retry(error_log => 'CORAL');
+    ok $ret == 1;
 };
 
 done_testing;

@@ -1,6 +1,6 @@
 name:           textmode_svirt
 description:    >
-    Maintainer: nan.zhang@suse.com
+    Maintainer: nan.zhang@suse.com, qe-virt@suse.de
     Textmode installation with integration services and open-vm-tools test modules
 schedule:
     - installation/isosize

@@ -20,7 +20,7 @@ Redmine project. Look for tickets with [easy] or [easy-hack] tags.
 ## How to get this repository working
 
 Upon setting up a new openQA instance, it's also necessary to install some
-aditional dependencies that are inherent to this repository.
+additional dependencies that are inherent to this repository.
 
 * On openSUSE to install an openQA worker and all dependencies do:
 
@@ -112,9 +112,11 @@ and additionally the following rules:
   according schedule for Tumbleweed tests, e.g. in schedule/ or main.pm.
   Exceptions are any special SLE-specific behaviour or packages not in
   Tumbleweed or the case not being relevant otherwise.
-* Avoid "dead code": Don't add disabled code as nobody but you will understand
-  why this is not active. Better leave it out and keep in your local git
-  repository, either in `git stash` or a temporary "WIP"-commit.
+* Avoid "dead code": Is generally discouraged to add disabled code as others will lack
+  the context as to why this is not active. Better leave it out and keep in your local git
+  repository, either in `git stash` or a temporary "WIP"-commit. If it needs to
+  be added, it should come with an accompanying comment stating the reasons why
+  it must be there.
 * Details in commit messages: The commit message should have enough details,
   e.g. what issue is fixed, why this needs to change, to which versions of which
   product it applies, link to a bug or a feature entry, the choices you made,
@@ -145,7 +147,7 @@ and additionally the following rules:
   "why did we change it".
 * Consider "multi-tag `assert_screen` with `match_has_tag`": Please use a
   multi-tag `assert_screen` with `match_has_tag` instead of `check_screen`
-  with non-zero timeout to prevent introducing any timing dependant behaviour,
+  with non-zero timeout to prevent introducing any timing dependent behaviour,
   to save test execution time as well as state more explicitly from the testers
   point of view what are the expected alternatives. For example:
 * Avoid use of egrep and fgrep. The two commands are deprecated, so please use 
@@ -172,13 +174,17 @@ if (match_has_tag('yast2_missing_package')) {
 
 ### Preparing a new Pull Request
 * All code needs to be tidy, for this use `make prepare` the first time you
-  set up your local environment, use `make tidy` before commiting your changes,
+  set up your local environment, use `make tidy` before committing your changes,
   ensure your new code adheres to our coding style or use `make tidy-full` if
   you have already few commits.
 * Every pull request is tested by our CI system for different perl versions,
   if something fails, run `make test` (don't forget to `make prepare` if your setup is new)
   but the CI results are available too, in case they need to be investigated further
-* Whenever possible, [provide a verification run][1] of a job that runs the code [provided in the pull request][2]
+* Whenever possible, [provide a verification run][1] of a job that runs the code.
+  This can also be done by mentioning the job to be cloned via
+  `openqa: Clone https://openqa.opensuse.org/tests/<JOB_ID>` in the PR description.
+  This only works for jobs on https://openqa.opensuse.org. For other jobs you can
+  use the [openqa-clone-custom-git-refspec][2] script.
 
 Also see the [DoD/DoR][3] as a helpful (but not mandatory) guideline for new contributions.
 

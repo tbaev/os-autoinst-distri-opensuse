@@ -30,6 +30,7 @@ our @EXPORT = qw(
   set_scc_proxy_url
   set_zypp_single_rpmtrans
   remove_dropped_modules_packages
+  workaround_bsc_1220091
 );
 
 sub setup_sle {
@@ -114,7 +115,7 @@ sub deregister_dropped_modules {
     for my $name (grep($_, split(/,/, $droplist))) {
         record_info "deregister $name", "deregister $name module and remove it from SCC_ADDONS";
         if ($name eq 'ltss') {
-            if (check_var('SLE_PRODUCT', 'hpc')) {
+            if ((check_var('CROSS_PRODUCT_MIGRATION', 'from_hpc')) || (check_var('SLE_PRODUCT', 'hpc'))) {
                 remove_suseconnect_product('SLE_HPC-LTSS');
             } elsif ((is_sle('12+') && check_var('SLE_PRODUCT', 'sles')) || (check_var('SLE_PRODUCT', 'sles4sap'))) {
                 remove_suseconnect_product('SLES-LTSS');    # sles4sap also uses SLES-LTSS as its ltss
@@ -249,6 +250,19 @@ sub set_zypp_single_rpmtrans {
 
     assert_script_run 'export ZYPP_SINGLE_RPMTRANS=1 ' if get_var('ZYPP_SINGLE_RPMTRANS');
 
+}
+
+=head2 workaround_bsc_1220091
+    workaround_bsc_1220091()
+
+This function is used for removing libopenssl-1_1-devel for bsc#1220091
+We need to remove package libopenssl-1_1-devel before migration.
+
+=cut
+
+sub workaround_bsc_1220091 {
+    my $pkg = 'libopenssl-1_1-devel';
+    zypper_call("rm $pkg") unless script_run("rpm -q $pkg");
 }
 
 1;

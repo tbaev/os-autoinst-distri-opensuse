@@ -1,6 +1,6 @@
 # SUSE's SLES4SAP openQA tests
 #
-# Copyright 2019-2023 SUSE LLC
+# Copyright 2019-2024 SUSE LLC
 # SPDX-License-Identifier: FSFAP
 
 # Package: lvm2 util-linux parted device-mapper
@@ -45,7 +45,19 @@ sub download_hana_assets_from_server {
     # Each HANA asset is about 16GB. A ten minute timeout assumes a generous
     # 27.3MB/s download speed. Adjust according to expected server conditions.
     assert_script_run "wget -O - $hana_location | tar -xf -", timeout => $nettout;
-    assert_script_run "cd";
+    # Skip checksum check if DISABLE_CHECKSUM is set, or if checksum file is not
+    # part of the archive
+    my $sap_chksum_file = 'MD5FILE.DAT';
+    my $chksum_file = 'checksum.md5sum';
+    my $no_checksum_file = script_run "[[ -f $target/$chksum_file || -f $target/$sap_chksum_file ]]";
+    return 1 if (get_var('DISABLE_CHECKSUM') || $no_checksum_file);
+
+    # Switch to $target to verify copied contents are OK
+    assert_script_run "pushd $target";
+    # If SAP provided MD5 sum file is present convert it to the md5sum format
+    assert_script_run "[[ -f $sap_chksum_file ]] && awk '{print \$2\" \"\$1}' $target/$sap_chksum_file > $target/$chksum_file";
+    assert_script_run "md5sum -c --quiet $chksum_file", $nettout;
+    assert_script_run "popd";
 }
 
 
@@ -277,11 +289,7 @@ sub run {
       "--logpath=$mountpts{hanalog}->{mountpt}/$sid",
       "--sapmnt=$mountpts{hanashared}->{mountpt}";
     push @hdblcm_args, "--pmempath=$pmempath", "--use_pmem" if get_var('NVDIMM');
-    # NOTE: Remove when SAP releases HANA with a fix for bsc#1195133
-    if (get_var('NVDIMM')) {
-        push @hdblcm_args, "--ignore=check_signature_file";
-        record_soft_failure("Workaround for bsc#1195133");
-    }
+
     my $cmd = join(' ', $hdblcm, @hdblcm_args);
     record_info 'hdblcm command', $cmd;
     assert_script_run $cmd, $tout;

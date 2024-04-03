@@ -22,7 +22,7 @@ ADDONURL_*      | string    |               | Define url for the addons list def
 ASSERT_BSC1122804 | boolean | false | In some scenarios it is necessary to check if the mistyped full name still happens.
 ASSERT_Y2LOGS   | boolean   | false         | If set to true, we will parse YaST logs after installation and fail test suite in case unknown errors were detected.
 AUTOCONF        | boolean   | false         | Toggle automatic configuration
-AUTOYAST        | string    |               | Full url to the AY profile or relative path if in [data directory of os-autoinst-distri-opensuse repo](https://github.com/os-autoinst/os-autoinst-distri-opensuse/tree/master/data). If value starts with `aytests/`, these profiles are provided by suport server, source code is available in [aytests repo](https://github.com/yast/aytests-tests). If value is a folder ending in `/` rules and classes will be used.
+AUTOYAST        | string    |               | Full url to the AY profile or relative path if in [data directory of os-autoinst-distri-opensuse repo](https://github.com/os-autoinst/os-autoinst-distri-opensuse/tree/master/data). If value starts with `aytests/`, these profiles are provided by support server, source code is available in [aytests repo](https://github.com/yast/aytests-tests). If value is a folder ending in `/` rules and classes will be used.
 AUTOYAST_PREPARE_PROFILE | boolean | false | Enable variable expansion in the autoyast profile.
 AUTOYAST_VERIFY_TIMEOUT  | boolean | false | Enable validation of pop-up windows timeout.
 AY_EXPAND_VARS | string | | Commas separated list of variable names to be expanded in the provided autoyast profile. For example: REPO_SLE_MODULE_BASESYSTEM,DESKTOP,... Provided variables will replace `{{VAR}}` in the profile with the value of given variable. See also `AUTOYAST_PREPARE_PROFILE`.
@@ -53,7 +53,7 @@ CONTAINERS_NERDCTL_VERSION | string | 0.16.1 | The version of NerdCTL tool.
 CPU_BUGS | boolean | | Into Mitigations testing
 DESKTOP | string | | Indicates expected DM, e.g. `gnome`, `kde`, `textmode`, `xfce`, `lxde`. Does NOT prescribe installation mode. Installation is controlled by `VIDEOMODE` setting
 DEPENDENCY_RESOLVER_FLAG| boolean | false      | Control whether the resolve_dependecy_issues will be scheduled or not before certain modules which need it.
-DEV_IMAGE | boolean | false | This setting is used to set veriables properly when SDK or Development-Tools are required.
+DEV_IMAGE | boolean | false | This setting is used to set variables properly when SDK or Development-Tools are required.
 DISABLE_ONLINE_REPOS | boolean | false | Enables `installation/disable_online_repos` test module, relevant for openSUSE only. Test module explicitly disables online repos not to be used during installation.
 DISABLE_SECUREBOOT | boolean | false | Disable secureboot in firmware of the SUT or in hypervisor's guest VM settings
 DISABLE_SLE_UPDATES | boolean | false | Disables online updates for the installation.
@@ -92,6 +92,8 @@ HDDVERSION | string | | Indicates version of the system installed on the HDD.
 HTTPPROXY  |||
 HPC_WAREWULF_CONTAINER | string | | Set the container meant for warewulf test suite.
 HPC_WAREWULF_CONTAINER_NAME | string | The OS name which is expected to run from HPC_WAREWULF_CONTAINER.
+HPC_WAREWULF_CONTAINER_USERNAME | string | Defining username enables authentication for containers, needs valid HPC subscription on SCC for containers from registry.suse.com. If you want use default HPC subscription, just set same value as in SCC_EMAIL
+_SECRET_HPC_WAREWULF_CONTAINER_PASSWORD | string | Password for container, needs valid HPC subscription on SCC for containers from registry.suse.com. If not specified it will use code from SCC_REGCODE_HPC 
 INSTALL_KEYBOARD_LAYOUT | string | | Specify one of the supported keyboard layout to switch to during installation or to be used in autoyast scenarios e.g.: cz, fr
 INSTALL_SOURCE | string | | Specify network protocol to be used as installation source e.g. MIRROR_HTTP
 INSTALLATION_VALIDATION | string | | Comma separated list of modules to be used for installed system validation, should be used in combination with INSTALLONLY, to schedule only relevant test modules.
@@ -108,7 +110,7 @@ K3S_CHANNEL | string | | Set the release channel to pick the k3s version from. O
 KERNEL_FLAVOR | string | kernel-default | Set specific kernel flavor for test scenarios
 KUBECTL_CLUSTER | string | | Defines the cluster used to test `kubectl`. Currently only `k3s` is supported.
 KUBECTL_VERSION | string | v1.22.12 | Defines the kubectl version.
-KEEP_DISKS | boolean | false | Prevents disks wiping for remote backends without snaphots support, e.g. ipmi, powerVM, zVM
+KEEP_DISKS | boolean | false | Prevents disks wiping for remote backends without snapshots support, e.g. ipmi, powerVM, zVM
 KEEP_ONLINE_REPOS | boolean | false | openSUSE specific variable, not to replace original repos in the installed system with snapshot mirrors which are not yet published.
 KEEP_PERSISTENT_NET_RULES | boolean | false | Keep udev rules 70-persistent-net.rules, which are deleted on backends with image support (qemu, svirt) by default.
 LAPTOP |||
@@ -221,7 +223,7 @@ XFS_MKFS_OPTIONS | string | | Define additional mkfs parameters. Used only in pu
 XFS_TEST_DEVICE | string | | Define the device used for xfs tests. Used only in publiccloud test runs.
 XFS_TESTS_REFLINK | boolean | false | If set to true, the mkfsoption for using reflink will be added. Used only in publiccloud test runs.
 XFSTESTS_OVERLAY_BASE_FS | string | xfs | Define the base filesystem type of overlayfs
-YAML_SCHEDULE_DEFAULT | string | | Defines default yaml file to be overriden by test suite schedule.
+YAML_SCHEDULE_DEFAULT | string | | Defines default yaml file to be overridden by test suite schedule.
 YAML_SCHEDULE_FLOWS | string | | Defines a comma-separated values representing additional flows which overrides steps on the schedule specified in YAML_SCHEDULE_DEFAULT.
 YAML_SCHEDULE | string | | Defines yaml file containing test suite schedule.
 YAML_TEST_DATA | string | | Defines yaml file containing test data.
@@ -234,6 +236,7 @@ YUI_PARAMS | string | | libyui REST API params required to open YaST modules
 YUPDATE_GIT | string | | Github link used by yast help script yupdate, format is repo#branch such as yast/agama#main.
 TDUP | boolean | false | Prescribes zypper dup scenario (for transaction-update).
 ZDUP | boolean | false | Prescribes zypper dup scenario.
+ZDUP_IN_X | boolean | false | Prescribes zypper dup scenario, run in a graphical session.
 ZDUPREPOS | string | | Comma separated list of repositories to be added/used for zypper dup call, defaults to SUSEMIRROR or attached media, e.g. ISO.
 ZFCP_ADAPTERS | string | | Comma separated list of available ZFCP adapters in the machine (usually 0.0.fa00 and/or 0.0.fc00)
 LINUXRC_BOOT | boolean | true | To be used only in scenarios where we are booting an installed system from the installer medium (for example, a DVD) with the menu option "Boot Linux System" (not "boot From Hard Disk"). This option uses linuxrc.
@@ -372,7 +375,7 @@ PUBLIC_CLOUD_TOOLS_REPO | string | "" | cloud tools repo URL for azure_more_cli_
 PUBLIC_CLOUD_EMBARGOED_UPDATES_DETECTED | boolean | true | Internal variable written by the code and readed by the code . Should NOT be set manually
 
 
-### Wicked testsuite specifc variables
+### Wicked testsuite specific variables
 
 The following variables are relevant for the wicked testsuite
 
@@ -412,6 +415,7 @@ XFSTESTS_HEARTBEAT_TIMEOUT | integer | 200 | The timeout (seconds) of not receiv
 XFSTESTS_SUBTEST_MAXTIME | integer | 2400 | Define the max test time (seconds) for a single subtest. The test logic will take the time out as a hang, to reset SUT and continue the rest of the tests. Considering xfstests contain some fuzzing tests which take quite a long time to finish, I suggest this max time don't set too small
 XFSTESTS_NO_HEARTBEAT | boolean | 0 | set XFSTESTS_NO_HEARTBEAT=1 to enable non-heartbeat mode. The heartbeat mode is default, you could also unset this parameter
 XFSTESTS_TIMEOUT | integer | 2000 | set de timeout (seconds) for each subtest. It is only used in non-heartbeat mode. And it's the only time control strategy in that mode
+XFSTESTS_HIGHSPEED | boolean | 0 | set XFSTESTS_HIGHSPEED=1 to reduce the typing and waiting time. Suggest to set also VIRTIO_CONSOLE=1 and XFSTESTS_NO_HEARTBEAT=1 to getting highest performance. But beware system may hang in a crash because send_key 'alt-sysrq-b' not working in virtio console.
 
 
 Installation related: some optional setting to solve testsuite installation dependency issue
@@ -421,6 +425,7 @@ Variable        | Type      | Default value | Details
 XFSTESTS_REPO | string | | repo to install xfstests package
 DEPENDENCY_REPO | string | | ibs/obs repo to install related test package to solve dependency issues. e.g. fio
 XFSTESTS_DEVICE | string | | manually set a test disk for both TEST_DEV and SCRATCH_DEV
+XFSTESTS_INSTALL | boolean | false | Install xfstests and dependency package.
 
 
 Filesystem specific setting:

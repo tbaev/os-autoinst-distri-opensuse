@@ -26,11 +26,13 @@ sub run {
 
     # Needed to have peering and ansible state propagated in post_fail_hook
     $self->import_context($run_args);
-    croak('site_b is missing or undefined in run_args') if (!$run_args->{site_b});
+
+    my @hana_sites = get_hana_site_names();
+    croak("$hana_sites[1] is missing or undefined in run_args") if (!$run_args->{$hana_sites[1]});
 
     my $hana_start_timeout = bmwqemu::scale_timeout(600);
     # $site_b = $instance of secondary instance located in $run_args->{$instances}
-    my $site_b = $run_args->{site_b};
+    my $site_b = $run_args->{$hana_sites[1]};
     my $sbd_delay;
     select_serial_terminal;
 
@@ -83,6 +85,10 @@ sub run {
     # Check if DB started as primary
     die("Site B '$site_b->{instance_id}' did NOT start in replication mode.")
       if $self->get_promoted_hostname() eq $site_b->{instance_id};
+
+    # Cleanup the resource and check cluster
+    $self->cleanup_resource();
+    $self->wait_for_cluster();
 
     record_info("Done", "Test finished");
 }

@@ -327,11 +327,6 @@ sub power_action {
         $soft_fail_data = {bugref => 'bsc#1057637', soft_timeout => 60, timeout => $shutdown_timeout *= 3};
     }
 
-    # Kubeadm also requires some extra time
-    if (check_var 'SYSTEM_ROLE', 'kubeadm') {
-        $soft_fail_data = {bugref => 'poo#55127', soft_timeout => 90, timeout => $shutdown_timeout *= 2};
-    }
-
     # Sometimes QEMU CD-ROM pop-up is displayed on shutdown, see bsc#1137230
     if (is_opensuse && check_screen 'qemu-cd-rom-authentication-required') {
         $soft_fail_data = {bugref => 'bsc#1137230', soft_timeout => 60, timeout => $shutdown_timeout *= 5};
@@ -358,14 +353,14 @@ sub power_action {
         # instead of handling the still logged in system.
         handle_livecd_reboot_failure if get_var('LIVECD') && $action eq 'reboot';
         # Look aside before we are sure 'sut' console on VMware is ready, see poo#47150
-        select_console('svirt') if is_vmware && $action eq 'reboot';
+        select_console('svirt') if is_vmware && $action eq 'reboot' && !get_var('UEFI');
         reset_consoles;
         if ((check_var('VIRSH_VMM_FAMILY', 'xen') || get_var('S390_ZKVM')) && $action ne 'poweroff') {
             console('svirt')->start_serial_grab;
         }
         # When 'sut' is ready, select it
         # GRUB's serial terminal configuration relies on installation/add_serial_console.pm
-        if (is_vmware && $action eq 'reboot') {
+        if (is_vmware && $action eq 'reboot' && !get_var('UEFI')) {
             die 'GRUB not found on serial console' unless (is_jeos || wait_serial('GNU GRUB', 180));
             select_console('sut');
         }

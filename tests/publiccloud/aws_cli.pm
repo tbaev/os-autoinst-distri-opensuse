@@ -30,15 +30,13 @@ sub run {
         zypper_call 'in aws-cli jq';
     }
 
-    set_var 'PUBLIC_CLOUD_PROVIDER' => 'EC2';
-    set_var 'PUBLIC_CLOUD_REGION' => 'eu-central-1';
     my $provider = $self->provider_factory();
 
     my $image_id = script_output("aws ec2 describe-images --filters 'Name=name,Values=suse-sles-15-sp5-v*-x86_64' 'Name=state,Values=available' --query 'Images[?Name != `ecs`]|[0].ImageId' --output=text", 240);
     record_info("EC2 AMI", "EC2 AMI query: " . $image_id);
 
     my $ssh_key = "openqa-cli-test-key-$job_id";
-    assert_script_run("aws ec2 import-key-pair --key-name '$ssh_key' --public-key-material fileb://~/.ssh/id_rsa.pub");
+    assert_script_run("aws ec2 import-key-pair --key-name '$ssh_key' --public-key-material fileb://" . $provider->ssh_key . ".pub");
 
     my $machine_name = "openqa-cli-test-vm-$job_id";
     my $security_group_name = "openqa-cli-test-sg-$job_id";

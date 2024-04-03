@@ -126,13 +126,14 @@ sub build_with_zypper_docker {
     zypper_call("in zypper-docker") if (script_run("which zypper-docker") != 0);
 
     my $log = "/tmp/zypper-docker-list-updates.log";
-    script_retry("zypper-docker list-updates $image >$log", timeout => 300, retry => 3, delay => 60);
+    my $zypper_docker = 'zypper-docker --gpg-auto-import-keys';
+    my $rc = script_retry("$zypper_docker list-updates $image | tee $log", timeout => 300, retry => 3, delay => 60);
     return if script_run("grep 'No updates found.' $log");
 
-    script_retry("zypper-docker up $image $derived_image", timeout => 300, retry => 3, delay => 60);
+    script_retry("$zypper_docker up $image $derived_image", timeout => 300, retry => 3, delay => 60);
 
     # If zypper-docker list-updates lists no updates then derived image was successfully updated
-    script_retry("zypper-docker list-updates $derived_image | grep 'No updates found'", timeout => 300, retry => 3, delay => 60);
+    validate_script_output_retry("$zypper_docker list-updates $derived_image", qr/No updates found/, timeout => 300, retry => 3, delay => 60);
 
     my $local_images_list = script_output("$runtime image ls");
     die("$runtime $derived_image not found") unless ($local_images_list =~ $derived_image);
@@ -216,7 +217,7 @@ sub test_zypper_on_container {
     }
     validate_script_output_retry("$runtime run -i --entrypoint '' $image zypper lr -s", sub { m/.*Alias.*Name.*Enabled.*GPG.*Refresh.*Service/ }, timeout => 180);
     assert_script_run("$runtime run -t -d --name 'refreshed' --entrypoint '' $image bash", timeout => 300);
-    script_retry("$runtime exec refreshed zypper -nv ref", timeout => 600, retry => 3, delay => 60);
+    script_retry("$runtime exec refreshed zypper -nv --gpg-auto-import-keys ref", timeout => 600, retry => 3, delay => 60);
     assert_script_run("$runtime commit refreshed refreshed-image", timeout => 120);
     assert_script_run("$runtime rm -f refreshed");
     script_retry("$runtime run -i --rm --entrypoint '' refreshed-image zypper -nv ref", timeout => 300, retry => 3, delay => 60);
@@ -251,17 +252,22 @@ sub test_systemd_install {
     my %args = @_;
     my $image = $args{image};
     my $runtime = $args{runtime};
-
     die 'Argument $image not provided!' unless $image;
     die 'Argument $runtime not provided!' unless $runtime;
-
+    # reference values:
+    my $leap_vmin = '15.4';
+    my $sle_vmin = '15-SP4';
+    my $bci_vmin = '15-SP5';
+    # release
     my ($image_version, $image_sp, $image_id) = get_os_release("$runtime run --entrypoint '' $image");
     # TW and starting with SLE 15-SP4/Leap15.4 systemd's dependency with udev has been dropped
     if ($image_id eq 'opensuse-tumbleweed' ||
-        ($image_id eq 'opensuse-leap' && check_version('>=15.4', "$image_version.$image_sp", qr/\d{2}\.\d/)) ||
-        ($image_id eq 'sles' && check_version('>=15-SP4', "$image_version-SP$image_sp", qr/\d{2}-sp\d/))) {
+        ($image_id eq 'opensuse-leap' && check_version('>=' . $leap_vmin, "$image_version.$image_sp", qr/\d{2}\.\d/)) ||
+        ($image_id eq 'sles' && check_version('>=' . $sle_vmin, "$image_version-SP$image_sp", qr/\d{2}-sp\d/))) {
+        # Skip run case:
+        return 0 if ($image_id eq 'sles' && check_version('<' . $bci_vmin, "$image_version-SP$image_sp", qr/\d{2}-sp\d/));
         # lock to SLE_BCI repo for SLES versions not under LTSS (LTSS has no BCI repo anymore)
-        my $repo = ($image_id eq 'sles' && check_version('>=15-SP5', "$image_version-SP$image_sp", qr/\d{2}-sp\d/)) ? '-r SLE_BCI' : '';
+        my $repo = ($image_id eq 'sles' && check_version('>=' . $bci_vmin, "$image_version-SP$image_sp", qr/\d{2}-sp\d/)) ? '-r SLE_BCI' : '';
         assert_script_run("$runtime run $image /bin/bash -c 'zypper al udev && zypper -n in $repo systemd'", timeout => 300);
     }
 }

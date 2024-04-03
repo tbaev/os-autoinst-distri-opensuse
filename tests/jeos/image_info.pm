@@ -47,8 +47,6 @@ sub run {
         $hdd = get_required_var('HDD_1');
     }
 
-    record_info('HDD', $hdd);
-
     if ($hdd =~ /\.xz/) {
         # We want to monitor the size of uncompressed images.
         my $cmd = "nice ionice unxz -k $hdd -c > hdd_uncompressed";
@@ -61,10 +59,11 @@ sub run {
         $image = $hdd;
         $image_size = -s $hdd;
     }
+    record_info('HDD', "Image:   $hdd\nSize:    $image_size Bytes");
 
     # DB availability check
     unless (check_postgres_db) {
-        record_soft_failure("poo#110221 - DB is not available!");
+        record_info('DB check', 'DB is not available!', result => 'softfail');
         return 1;
     }
 

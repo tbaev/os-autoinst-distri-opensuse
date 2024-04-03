@@ -27,7 +27,7 @@ use mm_network;
 use nfs_common;
 use Utils::Systemd 'disable_and_stop_service';
 use registration;
-use version_utils qw(is_alp is_transactional);
+use version_utils qw(is_transactional);
 use transactional;
 
 my $INST_DIR = '/opt/xfstests';
@@ -350,6 +350,23 @@ sub install_dependencies_nfs {
     }
 }
 
+sub install_dependencies_overlayfs {
+    my @deps = qw(
+      overlayfs-tools
+      unionmount-testsuite
+      libcap-progs
+    );
+    script_run('zypper --gpg-auto-import-keys ref');
+    if (is_transactional) {
+        # Excluding libcap-progs since install issue
+        trup_install(join(' ', @deps[0 .. $#deps - 1]));
+        reboot_on_changes;
+    }
+    else {
+        zypper_call('in ' . join(' ', @deps));
+    }
+}
+
 sub setup_nfs_server {
     my $nfsversion = shift;
     assert_script_run('mkdir -p /opt/export/test /opt/export/scratch /opt/nfs/test /opt/nfs/scratch && chown nobody:nogroup /opt/export/test /opt/export/scratch && echo \'/opt/export/test *(rw,no_subtree_check,no_root_squash)\' >> /etc/exports && echo \'/opt/export/scratch *(rw,no_subtree_check,no_root_squash,fsid=1)\' >> /etc/exports');
@@ -386,6 +403,10 @@ sub run {
     my %para;
     if (check_var('XFSTESTS', 'ocfs2')) {
         install_dependencies_ocfs2;
+    }
+    if (check_var('XFSTESTS', 'overlay')) {
+        install_dependencies_overlayfs;
+        script_run("echo export UNIONMOUNT_TESTSUITE=/opt/unionmount-testsuite >> $CONFIG_FILE");
     }
     if (check_var('XFSTESTS', 'nfs')) {
         disable_and_stop_service('firewalld');

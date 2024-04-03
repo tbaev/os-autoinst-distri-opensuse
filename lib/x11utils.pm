@@ -230,11 +230,7 @@ sub handle_additional_polkit_windows {
         # expected that polkit authentication window can open for first time login.
         # see bsc#1177446 for more information.
         # Base latest feedback of bsc#1192992,authentication should never open if is_sle  >= 15SP4
-        if (is_sle('>=15-sp4')) {
-            record_soft_failure 'bsc#1192992 - authentication should never open if is_sle >= 15SP4';
-        } else {
-            record_info('authentication open for first time login');
-        }
+        record_info('authentication open for first time login, for bsc#1192992, authentication should never open if is_sle>=154');
         wait_still_screen(5);
         my $counter = 5;
         while (check_screen('authentication-required-user-settings', 10) && $counter) {
@@ -545,7 +541,12 @@ sub untick_welcome_on_next_startup {
         assert_and_click_until_screen_change("opensuse-welcome-show-on-boot", 5, 5);
         # Moving the cursor already causes screen changes - do not fail the check
         # immediately but allow some time to reach the final state
-        last if check_screen("opensuse-welcome-show-on-boot-unselected", timeout => 5);
+        check_screen([qw(discover-close opensuse-welcome-show-on-boot-unselected)], timeout => 5);
+        # With Plasma 6, it can happen that the "updates available" notification appears underneath
+        # the cursor in between matching and clicking. Addressing this after the fact is more
+        # reliable than trying to avoid it, which would be racy on its own.
+        click_lastmatch if match_has_tag("discover-close");
+        last if match_has_tag("opensuse-welcome-show-on-boot-unselected");
         die "Unable to untick 'Show on next startup'" if $retry == 5;
     }
     for my $retry (1 .. 5) {

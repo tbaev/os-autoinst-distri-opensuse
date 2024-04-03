@@ -12,14 +12,15 @@ use qesapdeployment;
 
 sub run {
     my ($self) = @_;
-    my @ret = qesap_execute(cmd => 'terraform', verbose => 1, timeout => 1800);
-    die "'qesap.py terraform' return: $ret[0]" if ($ret[0]);
-    my $inventory = qesap_get_inventory(provider => get_required_var('PUBLIC_CLOUD_PROVIDER'));
+    my $provider = get_required_var('PUBLIC_CLOUD_PROVIDER');
+    my @ret = qesap_execute_conditional_retry(cmd => 'terraform', verbose => 1, timeout => 1800, retries => 1, error_string => 'An internal execution error occurred. Please retry later');
+
+    my $inventory = qesap_get_inventory(provider => $provider);
     upload_logs($inventory, failok => 1);
 
     # Set up azure native fencing
-    if (get_var('QESAPDEPLOY_FENCING') eq 'native' && get_var('PUBLIC_CLOUD_PROVIDER') eq 'AZURE') {
-        my @nodes = qesap_get_nodes_names();
+    if (get_var('QESAPDEPLOY_FENCING') eq 'native' && $provider eq 'AZURE') {
+        my @nodes = qesap_get_nodes_names(provider => $provider);
         foreach my $host_name (@nodes) {
             if ($host_name =~ /hana/) {
                 qesap_az_setup_native_fencing_permissions(
@@ -49,11 +50,18 @@ sub test_flags {
 
 sub post_fail_hook {
     my ($self) = shift;
+    qesap_cluster_logs();
     qesap_upload_logs();
     my $inventory = qesap_get_inventory(provider => get_required_var('PUBLIC_CLOUD_PROVIDER'));
     qesap_execute(cmd => 'ansible', cmd_options => '-d', verbose => 1, timeout => 300) unless (script_run("test -e $inventory"));
     qesap_execute(cmd => 'terraform', cmd_options => '-d', verbose => 1, timeout => 1200);
     $self->SUPER::post_fail_hook;
+}
+
+sub post_run_hook {
+    my ($self) = shift;
+    qesap_cluster_logs();
+    $self->SUPER::post_run_hook;
 }
 
 1;

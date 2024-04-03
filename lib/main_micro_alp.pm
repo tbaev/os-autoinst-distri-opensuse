@@ -3,7 +3,7 @@
 # Copyright 2022 SUSE LLC
 # SPDX-License-Identifier: FSFAP
 
-# Summary: module loader for MicroOS, SLE Micro, Leap Micro and ALP.
+# Summary: module loader for MicroOS, SLE Micro and Leap Micro.
 # Maintainer: qa-c@suse.de
 
 package main_micro_alp;
@@ -22,7 +22,7 @@ use Utils::Architectures;
 use Utils::Backends;
 
 sub is_image {
-    return get_required_var('FLAVOR') =~ /image|default|kvm/i;
+    return get_required_var('FLAVOR') =~ /image|default|kvm|base/i;
 }
 
 sub is_dvd {
@@ -53,6 +53,7 @@ sub load_boot_from_disk_tests {
     } else {
         loadtest 'microos/disk_boot';
     }
+    loadtest 'boot/cloud_init' if (check_var('FIRST_BOOT_CONFIG', 'cloud-init'));
 
     loadtest 'installation/system_workarounds' if (is_aarch64 && is_microos);
     replace_opensuse_repos_tests if is_repo_replacement_required;
@@ -177,12 +178,10 @@ sub load_common_tests {
     loadtest 'microos/one_line_checks';
     loadtest 'microos/services_enabled';
     # MicroOS -old images use wicked, but cockpit-wicked is no longer supported in TW
-    loadtest 'microos/cockpit_service' unless (is_microos('Tumbleweed') && is_staging) || (is_microos('Tumbleweed') && get_var('HDD_1', '') =~ /-old/) || !get_var('SCC_REGISTER') || is_alp;
+    loadtest 'microos/cockpit_service' unless (is_microos('Tumbleweed') && is_staging) || (is_microos('Tumbleweed') && get_var('HDD_1', '') =~ /-old/) || !get_var('SCC_REGISTER');
     # Staging has no access to repos and the MicroOS-DVD does not contain ansible
     # Ansible test needs Packagehub in SLE and it can't be enabled in SLEM
-    loadtest 'console/ansible' unless (is_staging || is_sle_micro || is_leap_micro || is_alp);
-    loadtest 'console/kubeadm' if (check_var('SYSTEM_ROLE', 'kubeadm'));
-    # SLE Micro is not 2038-proof, so it doesn't apply here, but it does for ALP.
+    loadtest 'console/ansible' unless (is_staging || is_sle_micro || is_leap_micro);
     # On s390x zvm setups we need more time to wait for system to boot up.
     # Skip this test with sd-boot. The reason is not what you'd think though:
     # With sd-boot, host_config does not perform a reboot and a snapshot is made while the serial terminal
@@ -207,7 +206,6 @@ sub load_network_tests {
     loadtest 'microos/networking';
     loadtest 'microos/networkmanager';
     loadtest 'microos/libzypp_config';
-    # This method is only loaded in ALP
     loadtest 'console/firewalld';
 }
 
@@ -240,9 +238,8 @@ sub load_fips_tests {
 sub load_selinux_tests {
     loadtest 'security/selinux/selinux_setup';
     loadtest 'security/selinux/sestatus';
-    # ALP has selinux enabled and in enforcing mode by default
-    loadtest 'security/selinux/selinux_smoke' unless is_alp;
-    loadtest 'security/selinux/enforcing_mode_setup' unless is_alp;
+    loadtest 'security/selinux/selinux_smoke';
+    loadtest 'security/selinux/enforcing_mode_setup';
     loadtest 'security/selinux/semanage_fcontext';
     loadtest 'security/selinux/semanage_boolean';
     loadtest 'security/selinux/fixfiles';
@@ -275,22 +272,18 @@ sub load_slem_on_pc_tests {
     my $args = OpenQA::Test::RunArgs->new();
     if (get_var('PUBLIC_CLOUD_DOWNLOAD_TESTREPO')) {
         load_publiccloud_download_repos();
+    } elsif (get_var('PUBLIC_CLOUD_UPLOAD_IMG')) {
+        loadtest("boot/boot_to_desktop");
+        loadtest("publiccloud/upload_image");
     } else {
+        # SLEM basic test
         loadtest("boot/boot_to_desktop");
         loadtest("publiccloud/prepare_instance", run_args => $args);
         loadtest("publiccloud/registration", run_args => $args);
         # 2 next modules of pubcloud needed for sle-micro incidents/repos verification
         loadtest("publiccloud/transfer_repos", run_args => $args);
         loadtest("publiccloud/patch_and_reboot", run_args => $args);
-
-        loadtest("publiccloud/ssh_interactive_start", run_args => $args);
-        loadtest("publiccloud/instance_overview", run_args => $args);
-        loadtest("publiccloud/slem_prepare", run_args => $args);
-        loadtest("transactional/enable_selinux") if (get_var('ENABLE_SELINUX'));
-        if (get_var("PUBLIC_CLOUD_CONTAINERS")) {
-            load_container_tests() if is_container_test;
-        }
-        loadtest("publiccloud/ssh_interactive_end", run_args => $args);
+        loadtest("publiccloud/slem_basic", run_args => $args);
     }
 }
 

@@ -134,6 +134,7 @@ sub investigate_yast2_failure {
         "<3>.*setOptions:Empty map" => 'bsc#1158186 -> WONTFIX',
         "<3>.*Unmounting media failed" => 'bsc#1158186 -> WONTFIX',
         "<3>.*No base product has been found" => 'bsc#1158186 -> WONTFIX',
+        "<3>.*SystemCmd.cc\\(step_fork_and_exec\\)" => 'bsc#1219294 -> WONTFIX',
         "<3>.*Error output: dracut:" => 'https://trello.com/c/5qTQZKH3/2918-sp2-logs-cleanup',
         "<3>.*Reading install.inf" => 'https://trello.com/c/5qTQZKH3/2918-sp2-logs-cleanup',
         "<3>.*shellcommand" => 'https://trello.com/c/5qTQZKH3/2918-sp2-logs-cleanup',
@@ -385,7 +386,7 @@ sub wait_grub {
     push @tags, 'grub2';
     push @tags, 'boot-live-' . get_var('DESKTOP') if get_var('LIVETEST');    # LIVETEST won't to do installation and no grub2 menu show up
     push @tags, 'bootloader' if get_var('OFW');
-    push @tags, 'encrypted-disk-password-prompt-grub' if get_var('ENCRYPT');
+    push @tags, 'encrypted-disk-password-prompt-grub', 'encrypted-disk-password-prompt' if get_var('ENCRYPT');
     if (get_var('ONLINE_MIGRATION')) {
         push @tags, 'migration-source-system-grub2';
     }
@@ -456,7 +457,7 @@ sub wait_grub {
     elsif (match_has_tag('inst-bootmenu')) {
         $self->wait_grub_to_boot_on_local_disk;
     }
-    elsif (match_has_tag('encrypted-disk-password-prompt-grub')) {
+    elsif (match_has_tag('encrypted-disk-password-prompt-grub') || match_has_tag('encrypted-disk-password-prompt')) {
         # unlock encrypted disk before grub
         unlock_bootloader;
         assert_screen("grub2", timeout => ((is_pvm) ? 300 : 90));
@@ -520,6 +521,7 @@ sub reconnect_s390 {
     my (%args) = @_;
     my $ready_time = $args{ready_time};
     my $textmode = $args{textmode};
+    my $enable_root_ssh = $args{enable_root_ssh} // 0;
     return undef unless is_s390x;
     my $login_ready = get_login_message();
     if (is_backend_s390x) {
@@ -550,9 +552,15 @@ sub reconnect_s390 {
         grub_select;
 
         type_line_svirt '', expect => $login_ready, timeout => $ready_time + 100, fail_message => 'Could not find login prompt';
-        type_line_svirt "root", expect => 'Password';
+        type_line_svirt "root", expect => qr/Passwor[dt]/;
         type_line_svirt "$testapi::password";
         type_line_svirt "systemctl is-active network", expect => 'active';
+        if ($enable_root_ssh eq 1) {
+            record_info('Enable root ssh login');
+            type_line_svirt "mkdir -p /etc/ssh/sshd_config.d";
+            type_line_svirt "echo 'PermitRootLogin yes' \\> /etc/ssh/sshd_config.d/root.conf";
+            type_line_svirt "systemctl restart sshd";
+        }
         type_line_svirt 'systemctl is-active sshd', expect => 'active';
 
         # make sure we can reach the SSH server in the SUT, try up to 1 min (12 * 5s)
@@ -651,15 +659,18 @@ sub grub_select {
     elsif (!get_var('S390_ZKVM')) {
         # confirm default choice
         send_key 'ret';
-        if (get_var('USE_SUPPORT_SERVER') && is_aarch64 && is_opensuse)
-        {
-            # On remote installations of openSUSE distris on aarch64, first key
-            # press doesn't always reach the SUT, so introducing the workaround
-            wait_still_screen;
-            if (check_screen('grub2')) {
-                record_info 'WARN', 'Return key did not reach the system, re-trying';
-                send_key 'ret';
-            }
+    }
+
+    if (((is_ppc64le && is_qemu) || (!get_var('S390_ZKVM') && is_aarch64 && is_opensuse)) && get_var('USE_SUPPORT_SERVER')) {
+        # First key press doesn't always reach the SUT on all the remote installations.
+        # It happens on some specific machine types:
+        # - on aarch64 using openSUSE distris
+        # - on ppc64le at second boot in short time
+        # so introducing the workaround
+        wait_still_screen;
+        if (check_screen('grub2')) {
+            record_info 'WARN', 'Return key did not reach the system, re-trying';
+            send_key 'ret';
         }
     }
 }
@@ -854,6 +865,7 @@ sub wait_boot {
     my $textmode = $args{textmode};
     my $ready_time = $args{ready_time} // ((check_var('VIRSH_VMM_FAMILY', 'hyperv') || is_ipmi) ? 500 : 300);
     my $in_grub = $args{in_grub} // 0;
+    my $enable_root_ssh = $args{enable_root_ssh} // 0;
 
     die "wait_boot: got undefined class" unless $self;
     # used to register a post fail hook being active while we are waiting for
@@ -869,7 +881,7 @@ sub wait_boot {
     # Reset the consoles after the reboot: there is no user logged in anywhere
     reset_consoles;
     select_console('sol', await_console => 0) if is_ipmi;
-    if (reconnect_s390(textmode => $textmode, ready_time => $ready_time)) {
+    if (reconnect_s390(textmode => $textmode, ready_time => $ready_time, enable_root_ssh => $enable_root_ssh)) {
     }
     elsif (get_var('USE_SUPPORT_SERVER') && get_var('USE_SUPPORT_SERVER_PXE_CUSTOMKERNEL')) {
         # A supportserver client to reboot via PXE after an initial installation.

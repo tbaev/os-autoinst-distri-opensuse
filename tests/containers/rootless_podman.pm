@@ -22,7 +22,7 @@ use utils;
 use containers::common;
 use containers::container_images;
 use containers::utils qw(registry_url get_podman_version);
-use version_utils qw(is_sle is_leap is_jeos is_transactional package_version_cmp);
+use version_utils qw(is_sle is_leap is_jeos is_transactional package_version_cmp is_tumbleweed);
 use Utils::Architectures;
 use Utils::Logging 'save_and_upload_log';
 
@@ -36,11 +36,11 @@ sub run {
 
     my $podman = $self->containers_factory('podman');
 
+    $podman_version = get_podman_version();
     # add testuser to systemd-journal group to allow non-root
     # user to access container logs via journald event driver
-    # to avoid flakes w/ Podman <=4.0.0
-    $podman_version = get_podman_version();
-    if (package_version_cmp($podman_version, '4.0.0') <= 0) {
+    # bsc#1207673, bsc#1218023
+    if (is_leap("<16.0") || is_sle("<16")) {
         assert_script_run "usermod -a -G systemd-journal $testapi::username";
     }
 
@@ -49,14 +49,13 @@ sub run {
         my $cont_storage = '/etc/containers/storage.conf';
         if ($unresolved_config =~ m|$cont_storage|) {
             assert_script_run(sprintf('mv  %s.rpmnew %s', $cont_storage, $cont_storage));
-            assert_script_run('rm -rf /var/lib/containers/storage') if is_aarch64;
+            assert_script_run('rm -rf /var/lib/containers/storage');
             assert_script_run('podman system reset -f');
         }
     }
 
     # Prepare for Podman 3.4.4 and CGroups v2
     if ((is_sle('15-SP3+') || is_leap('15.3+')) && !check_var('CONTAINERS_CGROUP_VERSION', '1')) {
-        assert_script_run "usermod -a -G systemd-journal $testapi::username";
         switch_cgroup_version($self, 2);
         select_serial_terminal;
 
@@ -206,8 +205,6 @@ sub post_run_hook {
 sub post_fail_hook {
     my $self = shift;
     save_and_upload_log('cat /etc/{subuid,subgid}', "/tmp/permissions.txt");
-    assert_script_run("tar -capf /tmp/proc_files.tar.xz /proc/self");
-    upload_logs("/tmp/proc_files.tar.xz");
     if (is_sle) {
         save_and_upload_log('ls -la /etc/zypp/credentials.d', "/tmp/credentials.d.perm.txt");
         assert_script_run "setfacl -x u:$testapi::username /etc/zypp/credentials.d/*";

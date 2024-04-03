@@ -10,6 +10,7 @@
 use base "consoletest";
 use strict;
 use warnings;
+use Utils::Architectures;
 use testapi;
 use utils;
 use power_action_utils 'power_action';
@@ -30,12 +31,16 @@ sub run {
     # update patches we'd better to select_console to make test robust.
     select_console 'root-console';
     install_patterns() if (get_var('PATTERNS'));
+    # Install openldap package as required
+    if ((get_var('FLAVOR') =~ /Regression/) && check_var('HDDVERSION', '15-SP3') && is_x86_64) {
+        zypper_call("in sssd sssd-tools sssd-ldap openldap2 openldap2-client");
+    }
     deregister_dropped_modules;
     # disable multiversion for kernel-default based on bsc#1097111, for migration continuous cases only
     if (get_var('FLAVOR', '') =~ /Continuous-Migration/) {
         modify_kernel_multiversion("disable");
     }
-
+    workaround_bsc_1220091;
     cleanup_disk_space if get_var('REMOVE_SNAPSHOTS');
     power_action('reboot', keepconsole => 1, textmode => 1);
     reconnect_mgmt_console if is_pvm;

@@ -11,12 +11,12 @@ use lockapi;
 use utils;
 use serial_terminal 'select_serial_terminal';
 use Utils::Logging 'export_logs';
-use testapi qw(record_info);
+use testapi;
 use POSIX 'strftime';
 
 sub run ($self) {
     select_serial_terminal();
-    my $mpi = $self->get_mpi();
+    my $mpi = get_required_var('MPI');
     my %exports_path = (
         bin => '/home/bernhard/bin'
     );

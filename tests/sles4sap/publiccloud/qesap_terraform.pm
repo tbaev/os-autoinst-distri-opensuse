@@ -30,7 +30,7 @@ use testapi;
 use publiccloud::ssh_interactive 'select_host_console';
 use publiccloud::instance;
 use publiccloud::instances;
-use publiccloud::utils qw(is_azure is_gce);
+use publiccloud::utils qw(is_azure is_gce get_ssh_private_key_path);
 use sles4sap_publiccloud;
 use qesapdeployment;
 use serial_terminal 'select_serial_terminal';
@@ -98,6 +98,8 @@ sub run {
     record_info 'Resource Group', "Resource Group used for deployment: $deployment_name";
 
     my $provider = $self->provider_factory();
+    set_var('SLES4SAP_SSHKEY', get_ssh_private_key_path());
+
     # Needed to create the SAS URI token
     if (!is_azure()) {
         my $azure_client = publiccloud::azure_client->new();
@@ -153,11 +155,11 @@ sub run {
 
     # Regenerate config files (This workaround will be replaced with full yaml generator)
     qesap_prepare_env(provider => $provider_setting, only_configure => 1);
-    my @ret = qesap_execute(cmd => 'terraform', timeout => 3600, verbose => 1);
+    my @ret = qesap_execute_conditional_retry(cmd => 'terraform', verbose => 1, timeout => 3600, retries => 2, error_string => 'An internal execution error occurred. Please retry later');
     die 'Terraform deployment FAILED. Check "qesap*" logs for details.' if ($ret[0]);
 
     $provider->terraform_applied(1);
-    my $instances = create_instance_data($provider);
+    my $instances = create_instance_data(provider => $provider);
     foreach my $instance (@$instances) {
         record_info 'Instance', join(' ', 'IP: ', $instance->public_ip, 'Name: ', $instance->instance_id);
         $self->{my_instance} = $instance;

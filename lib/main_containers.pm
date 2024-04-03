@@ -21,10 +21,6 @@ use warnings;
 our @EXPORT = qw(
   is_container_test
   load_container_tests
-  load_host_tests_podman
-  load_image_test
-  load_3rd_party_image_test
-  load_container_engine_test
 );
 
 sub is_container_test {
@@ -60,6 +56,12 @@ sub load_container_engine_test {
     loadtest('containers/container_engine', run_args => $run_args, name => $run_args->{runtime});
 }
 
+sub load_rt_workload {
+    my ($args) = @_;
+    loadtest('containers/realtime', run_args => $args, name => $args->{runtime} . '_realtime');
+
+}
+
 sub load_container_helm {
     my ($run_args, $backend) = @_;
     loadtest('containers/helm', run_args => $run_args, name => $run_args->{runtime} . "_" . $backend);
@@ -73,6 +75,16 @@ sub load_image_tests_podman {
 sub load_volume_tests {
     my ($run_args) = @_;
     loadtest('containers/volumes', run_args => $run_args, name => 'volumes_' . $run_args->{runtime});
+}
+
+sub load_secret_tests {
+    my ($run_args) = @_;
+    loadtest('containers/secret', run_args => $run_args, name => 'secret_' . $run_args->{runtime});
+}
+
+sub load_buildah_tests {
+    my ($run_args) = @_;
+    loadtest('containers/buildah', run_args => $run_args, name => 'buildah_' . $run_args->{runtime});
 }
 
 sub load_image_tests_docker {
@@ -90,49 +102,65 @@ sub load_container_engine_privileged_mode {
     loadtest('containers/privileged_mode', run_args => $run_args, name => $run_args->{runtime} . "_privileged_mode");
 }
 
+sub load_compose_tests {
+    my ($run_args) = @_;
+    return if (is_staging);
+    return unless (is_tumbleweed || is_microos);
+    # compose is only available on these arches:
+    # https://github.com/containers/podman/issues/21757
+    return unless (is_aarch64 || is_x86_64);
+    loadtest('containers/compose', run_args => $run_args, name => $run_args->{runtime} . "_compose");
+}
+
+sub load_firewall_test {
+    my ($run_args) = @_;
+    loadtest('containers/firewall', run_args => $run_args, name => $run_args->{runtime} . "_firewall");
+}
+
 sub load_host_tests_podman {
     my ($run_args) = @_;
-    # podman package is only available as of 15-SP1
-    unless (is_sle("<15-sp1")) {
-        load_container_engine_test($run_args);
-        # In Public Cloud we don't have internal resources
-        load_image_test($run_args) unless is_public_cloud || is_alp;
-        load_3rd_party_image_test($run_args);
-        load_container_engine_privileged_mode($run_args);
-        loadtest 'containers/podman_bci_systemd';
-        loadtest 'containers/podman_pods';
-        # Default for ALP is Netavark
-        loadtest('containers/podman_network_cni') unless (is_alp || is_sle_micro('6.0+'));
-        # Firewall is not installed in JeOS OpenStack, MicroOS and Public Cloud images
-        loadtest 'containers/podman_firewall' unless (is_public_cloud || is_openstack || is_microos || is_alp);
-        # Netavark not supported in 15-SP1 and 15-SP2 (due to podman version older than 4.0.0)
-        loadtest 'containers/podman_netavark' unless (is_staging || is_sle("<15-sp3") || is_ppc64le);
-        # Buildah is not available in SLE Micro, MicroOS and staging projects
-        loadtest 'containers/buildah' unless (is_sle_micro || is_microos || is_leap_micro || is_alp || is_staging);
-        loadtest 'containers/podman_quadlet' if is_tumbleweed;
-        # https://github.com/containers/podman/issues/5732#issuecomment-610222293
-        # exclude rootless podman on public cloud because of cgroups2 special settings
-        unless (is_sle('<15-sp2') || is_openstack || is_public_cloud) {
-            loadtest 'containers/rootless_podman';
-            loadtest 'containers/podman_remote' if is_sle '>15-sp2';
-        }
-        load_volume_tests($run_args);
+    load_container_engine_test($run_args);
+    # In Public Cloud we don't have internal resources
+    load_image_test($run_args) unless is_public_cloud;
+    load_3rd_party_image_test($run_args);
+    load_rt_workload($run_args) if is_rt;
+    load_container_engine_privileged_mode($run_args);
+    loadtest 'containers/podman_bci_systemd';
+    loadtest 'containers/podman_pods';
+    loadtest('containers/podman_network_cni') unless (is_sle_micro('6.0+') || (is_sle_micro('=5.5') && is_public_cloud));
+    # Firewall is not installed in JeOS OpenStack, MicroOS and Public Cloud images
+    load_firewall_test($run_args) unless (is_public_cloud || is_openstack || is_microos);
+    # Netavark not supported in 15-SP1 and 15-SP2 (due to podman version older than 4.0.0)
+    loadtest 'containers/podman_netavark' unless (is_staging || is_sle("<15-sp3") || is_ppc64le);
+    # Buildah is not available in SLE Micro, MicroOS and staging projects
+    load_buildah_tests($run_args) unless (is_sle('<15') || is_sle_micro || is_microos || is_leap_micro || is_staging);
+    loadtest 'containers/podman_quadlet' if is_tumbleweed;
+    # https://github.com/containers/podman/issues/5732#issuecomment-610222293
+    # exclude rootless podman on public cloud because of cgroups2 special settings
+    unless (is_sle('<15-sp2') || is_openstack || is_public_cloud) {
+        loadtest 'containers/rootless_podman';
+        loadtest 'containers/podman_remote' if is_sle '>15-sp2';
     }
+    load_secret_tests($run_args);
+    load_volume_tests($run_args);
+    load_compose_tests($run_args);
+    loadtest('containers/seccomp', run_args => $run_args, name => $run_args->{runtime} . "_seccomp") unless is_sle('<15');
 }
 
 sub load_host_tests_docker {
     my ($run_args) = @_;
     load_container_engine_test($run_args);
     # In Public Cloud we don't have internal resources
-    load_image_test($run_args) unless is_public_cloud || is_alp;
+    load_image_test($run_args) unless is_public_cloud;
     load_3rd_party_image_test($run_args);
+    load_rt_workload($run_args) if is_rt;
     load_container_engine_privileged_mode($run_args);
     # Firewall is not installed in Public Cloud, JeOS OpenStack and MicroOS but it is in SLE Micro
-    loadtest 'containers/docker_firewall' unless (is_public_cloud || is_openstack || is_microos);
+    load_firewall_test($run_args) unless (is_public_cloud || is_openstack || is_microos);
     unless (is_sle("<=15") && is_aarch64) {
         # these 2 packages are not avaiable for <=15 (aarch64 only)
-        # zypper-docker is not available in factory and in SLE Micro/MicroOS
-        loadtest 'containers/zypper_docker' unless (is_tumbleweed || is_sle_micro || is_microos || is_leap_micro);
+        # zypper-docker is only available on SLES < 15-SP6
+        loadtest 'containers/zypper_docker' if (is_sle("<15-SP6") || is_leap("<15.6"));
         loadtest 'containers/docker_runc';
     }
     unless (check_var('BETA', 1) || is_sle_micro || is_microos || is_leap_micro || is_staging) {
@@ -140,16 +168,18 @@ sub load_host_tests_docker {
         # to maintenance jobs or new products after Beta release
         # PackageHub is not available in SLE Micro | MicroOS
         loadtest 'containers/registry' if (is_x86_64 || is_sle('>=15-sp4'));
-        loadtest 'containers/docker_compose' unless (is_public_cloud || is_sle('=12-sp3'));
     }
-    # Expected to work anywhere except of real HW backends, PC and Micro
-    unless (is_generalhw || is_ipmi || is_public_cloud || is_openstack || is_sle_micro || is_microos || is_leap_micro) {
-        loadtest 'containers/validate_btrfs';
-    }
-    load_volume_tests($run_args);
+    load_buildah_tests($run_args) unless (is_sle('<15') || is_sle_micro || is_microos || is_leap_micro || is_staging);
     if (is_tumbleweed || is_microos) {
         loadtest 'containers/buildx';
         loadtest 'containers/rootless_docker';
+    }
+    load_volume_tests($run_args);
+    load_compose_tests($run_args);
+    loadtest('containers/seccomp', run_args => $run_args, name => $run_args->{runtime} . "_seccomp") unless is_sle('<15');
+    # Expected to work anywhere except of real HW backends, PC and Micro
+    unless (is_generalhw || is_ipmi || is_public_cloud || is_openstack || is_sle_micro || is_microos || is_leap_micro) {
+        loadtest 'containers/validate_btrfs';
     }
 }
 
@@ -221,7 +251,7 @@ sub load_container_tests {
     }
 
     # Need to boot a qcow except in JeOS, SLEM and MicroOS where the system is booted already
-    if (get_var('BOOT_HDD_IMAGE') && !(is_jeos || is_sle_micro || is_microos || is_leap_micro || is_alp)) {
+    if (get_var('BOOT_HDD_IMAGE') && !(is_jeos || is_sle_micro || is_microos || is_leap_micro)) {
         loadtest 'installation/bootloader_zkvm' if is_s390x;
         # On Public Cloud we're already booted in the SUT
         loadtest 'boot/boot_to_desktop' unless is_public_cloud;
@@ -243,6 +273,7 @@ sub load_container_tests {
     }
 
     if (get_var('HELM_CONFIG')) {
+        set_var('K3S_ENABLE_COREDNS', 1);
         loadtest 'containers/helm_rmt';
         return;
     }
@@ -272,7 +303,7 @@ sub load_container_tests {
                     # For Base image we also run traditional image.pm test
                     load_image_test($run_args) if (is_sle(">=15-SP3") && check_var('BCI_TEST_ENVS', 'base'));
                 }
-            } elsif (is_sle_micro || is_alp) {
+            } elsif (is_sle_micro) {
                 # Test toolbox image updates
                 loadtest 'microos/toolbox';
             } else {
@@ -295,5 +326,5 @@ sub load_container_tests {
         }
     }
     loadtest 'containers/bci_logs' if (get_var('BCI_TESTS') && !get_var('BCI_SKIP'));
-    loadtest 'console/coredump_collect' unless (is_public_cloud || is_jeos || is_sle_micro || is_microos || is_leap_micro || is_alp || get_var('BCI_TESTS') || is_ubuntu_host || is_expanded_support_host);
+    loadtest 'console/coredump_collect' unless (is_public_cloud || is_jeos || is_sle_micro || is_microos || is_leap_micro || get_var('BCI_TESTS') || is_ubuntu_host || is_expanded_support_host);
 }

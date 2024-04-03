@@ -1,6 +1,6 @@
 # SUSE's openQA tests
 #
-# Copyright 2023 SUSE LLC
+# Copyright 2023-2024 SUSE LLC
 # SPDX-License-Identifier: FSFAP
 
 # Package: podman, netavark, aardvark
@@ -11,17 +11,21 @@ use Mojo::Base 'containers::basetest';
 use testapi;
 use serial_terminal qw(select_serial_terminal);
 use version_utils qw(package_version_cmp is_transactional is_jeos is_leap is_sle_micro is_leap_micro is_sle is_microos is_public_cloud);
+use containers::common qw(install_packages);
 use containers::utils qw(get_podman_version registry_url);
-use transactional qw(trup_call check_reboot_changes);
-use utils qw(zypper_call);
 use Utils::Systemd qw(systemctl);
+use Utils::Architectures qw(is_s390x);
+use main_common qw(is_updates_tests);
+use publiccloud::utils qw(is_gce);
 
 sub is_cni_in_tw {
     return (script_output("podman info -f '{{.Host.NetworkBackend}}'") =~ "cni") && is_microos && get_var('TDUP');
 }
 
+# podman >=4.8.0 defaults to netavark
 sub is_cni_default {
-    return is_sle || is_leap || is_sle_micro('<6.0') || is_leap_micro;
+    my $podman_version = get_podman_version();
+    return package_version_cmp($podman_version, '4.8.0') < 0 || is_sle_micro('<5.5') || (is_sle_micro('=5.5') && !is_public_cloud);
 }
 
 sub remove_subtest_setup {
@@ -45,21 +49,16 @@ sub is_container_running {
 
 # clean up routine only for systems that run CNI as default network backend
 sub _cleanup {
-    return unless is_cni_default;
     my $podman = shift->containers_factory('podman');
     select_console 'log-console';
     remove_subtest_setup;
 
-    $podman->cleanup_system_host();
-
-    # podman >=4.8.0 defaults to netavark,
-    # removing containers.conf falls back
-    # to cni which leads to failing tests
-    my $podman_version = get_podman_version();
-    if (package_version_cmp($podman_version, '4.8.0') < 0) {
-        script_run('rm -rf /etc/containers/containers.conf');
+    if (is_cni_default) {
+        script_run('rm -f /etc/containers/containers.conf');
+        $podman->cleanup_system_host();
         validate_script_output('podman info --format {{.Host.NetworkBackend}}', sub { /cni/ });
     } else {
+        $podman->cleanup_system_host();
         validate_script_output('podman info --format {{.Host.NetworkBackend}}', sub { /netavark/ });
     }
 
@@ -67,15 +66,7 @@ sub _cleanup {
 }
 
 sub switch_to_netavark {
-    my @pkgs = qw(netavark aardvark-dns);
-
-    if (is_transactional) {
-        trup_call("pkg install @pkgs");
-        check_reboot_changes;
-    } else {
-        zypper_call("in @pkgs");
-    }
-
+    install_packages('netavark', 'aardvark-dns');
     # change network backend to *netavark*
     assert_script_run(q(echo -e '[Network]\nnetwork_backend="netavark"' >> /etc/containers/containers.conf));
     # reset the storage back to the initial state
@@ -95,8 +86,11 @@ sub run {
         return 1;
     }
 
-    if ((is_cni_default || is_cni_in_tw) && package_version_cmp($podman_version, '4.8.0') < 0) {
+    if (is_cni_default || is_cni_in_tw) {
         switch_to_netavark;
+    } else {
+        record_info('default', 'netavark should be the default network backend');
+        install_packages('aardvark-dns');
     }
 
     $podman->cleanup_system_host();
@@ -197,7 +191,7 @@ sub run {
     my $cur_version = script_output('rpm -q --qf "%{VERSION}\n" netavark');
     # only for netavark v1.6+
     # JeOS's kernel-default-base is missing *macvlan* kernel module
-    if (!is_jeos && package_version_cmp($cur_version, '1.6.0') >= 0) {
+    if (!(is_jeos || (is_updates_tests && is_gce)) && package_version_cmp($cur_version, '1.6.0') >= 0) {
         record_info('TEST4', 'smoke test for netavark dhcp proxy + macvlan');
         $net1->{name} = 'test_macvlan';
         systemctl('enable --now netavark-dhcp-proxy.socket');
@@ -205,7 +199,7 @@ sub run {
 
         my $dev = script_output(q(ip -br link show | awk '/UP / {print $1}'| head -n 1));
         my $extra = '';
-        if (is_public_cloud) {
+        if (is_public_cloud || is_s390x) {
             my $sn = script_output(qq(ip -o -f inet addr show $dev | awk '/scope global/ {print \$4}' | head -n 1)) =~ s/\.\d+\//\.0\//r;
             $extra .= "--subnet $sn ";
             my $gw = $sn =~ s/0\/\d+$/1/r;

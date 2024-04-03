@@ -18,7 +18,7 @@ use strict;
 use warnings;
 use testapi;
 use utils;
-use version_utils qw(is_sle is_sle_micro is_public_cloud get_version_id is_transactional);
+use version_utils qw(is_sle is_public_cloud get_version_id is_transactional is_openstack);
 use transactional qw(check_reboot_changes trup_call process_reboot);
 use registration;
 use maintenance_smelt qw(is_embargo_update);
@@ -43,10 +43,11 @@ our @EXPORT = qw(
   register_openstack
   register_addons_in_pc
   gcloud_install
+  get_ssh_private_key_path
   prepare_ssh_tunnel
   kill_packagekit
   allow_openqa_port_selinux
-  fully_update_system
+  ssh_update_transactional_system
 );
 
 # Get the current UTC timestamp as YYYY/mm/dd HH:MM:SS
@@ -108,7 +109,7 @@ sub registercloudguest {
     my ($instance) = @_;
     my $regcode = get_required_var('SCC_REGCODE');
     my $path = is_sle('>15') && is_sle('<15-SP3') ? '/usr/sbin/' : '';
-    my $suseconnect = $path . get_var("PUBLIC_CLOUD_SCC_ENDPOINT", "registercloudguest");
+    my $suseconnect = $path . get_var("PUBLIC_CLOUD_SCC_ENDPOINT", (is_transactional) ? "transactional-update register" : "registercloudguest");
     my $cmd_time = time();
     # Check what version of registercloudguest binary we use
     $instance->ssh_script_run(cmd => "rpm -qa cloud-regionsrv-client");
@@ -254,12 +255,18 @@ sub gcloud_install {
     record_info('GCE', script_output('gcloud version'));
 }
 
+sub get_ssh_private_key_path {
+    # Paramiko needs to be updated for ed25519 https://stackoverflow.com/a/60791079
+    return (is_azure() || is_openstack() || get_var('PUBLIC_CLOUD_LTP')) ? "~/.ssh/id_rsa" : '~/.ssh/id_ed25519';
+}
+
 sub prepare_ssh_tunnel {
-    my $instance = shift;
+    my ($instance) = @_;
 
     # configure ssh client
     my $ssh_config_url = data_url('publiccloud/ssh_config');
     assert_script_run("curl $ssh_config_url -o ~/.ssh/config");
+    file_content_replace("~/.ssh/config", "%SSH_KEY%" => get_ssh_private_key_path());
 
     # Create the ssh alias
     assert_script_run(sprintf(q(echo -e 'Host sut\n  Hostname %s' >> ~/.ssh/config), $instance->public_ip));
@@ -274,7 +281,7 @@ sub prepare_ssh_tunnel {
     # Permit root passwordless login over SSH
     $instance->ssh_assert_script_run('sudo cat /etc/ssh/sshd_config');
     $instance->ssh_assert_script_run('sudo sed -i "s/PermitRootLogin no/PermitRootLogin prohibit-password/g" /etc/ssh/sshd_config');
-    $instance->ssh_assert_script_run('sudo sed -iE "/^AllowTcpForwarding/c\AllowTcpForwarding yes" /etc/ssh/sshd_config') if (is_hardened());
+    $instance->ssh_assert_script_run('sudo sed -i "/^AllowTcpForwarding/c\AllowTcpForwarding yes" /etc/ssh/sshd_config') if (is_hardened());
     $instance->ssh_assert_script_run('sudo systemctl reload sshd');
 
     # Copy SSH settings for remote root
@@ -327,40 +334,33 @@ sub allow_openqa_port_selinux {
 }
 
 
-=head2 fully_update_system
+=head2 ssh_update_transactional_system
 
- ssh_fully_patch_system($host);
+ssh_update_transactional_system($host);
 
-Connect to the remote host C<$host> using ssh and update the system by
-running C<zypper update> twice. The first run will update the package manager,
+Connect to the remote host C<$instance> using ssh and update the system by
+running C<zypper update> twice, in transactional mode. The first run will update the package manager,
 the second run will update the system.
-Transactional systems like SLE micro shall use C<transactional_update patch> and reboot. 
+Transactional systems like SLE micro used C<transactional_update up> and reboot. 
 
 =cut
 
-sub fully_update_system {
+sub ssh_update_transactional_system {
     my ($instance) = @_;
-    my $ret;
     my $cmd_time = time();
-    if (is_transactional)
-    {
-        my $cmd = "sudo transactional-update -n up";
-        my $cmd_name = "transactional update";
-        # first run, possible update of packager
-        my $ret = $instance->ssh_script_run(cmd => $cmd, timeout => 1500);
-        $instance->softreboot(timeout => get_var('PUBLIC_CLOUD_REBOOT_TIMEOUT', 600));
-        record_info($cmd_name, 'The command ' . $cmd_name . ' took ' . (time() - $cmd_time) . ' seconds.');
-        die "$cmd_name failed with $ret" if ($ret != 0 && $ret != 102 && $ret != 103);
-        # second run, full system update
-        $cmd_time = time();
-        $ret = $instance->ssh_script_run(cmd => $cmd, timeout => 6000);
-        $instance->softreboot(timeout => get_var('PUBLIC_CLOUD_REBOOT_TIMEOUT', 600));
-        record_info($cmd_name, 'The second command ' . $cmd_name . ' took ' . (time() - $cmd_time) . ' seconds.');
-        die "$cmd_name failed with $ret" if ($ret != 0 && $ret != 102);
-    } else {
-        ssh_fully_patch_system($instance->username . '@' . $instance->public_ip);
-        $instance->softreboot(timeout => get_var('PUBLIC_CLOUD_REBOOT_TIMEOUT', 600));
-    }
+    my $cmd = "sudo transactional-update -n up";
+    my $cmd_name = "transactional update";
+    # first run, possible update of packager
+    my $ret = $instance->ssh_script_run(cmd => $cmd, timeout => 1500);
+    $instance->softreboot(timeout => get_var('PUBLIC_CLOUD_REBOOT_TIMEOUT', 600));
+    record_info($cmd_name, 'The command ' . $cmd_name . ' took ' . (time() - $cmd_time) . ' seconds.');
+    die "$cmd_name failed with $ret" if ($ret != 0 && $ret != 102 && $ret != 103);
+    # second run, full system update
+    $cmd_time = time();
+    $ret = $instance->ssh_script_run(cmd => $cmd, timeout => 6000);
+    $instance->softreboot(timeout => get_var('PUBLIC_CLOUD_REBOOT_TIMEOUT', 600));
+    record_info($cmd_name, 'The second command ' . $cmd_name . ' took ' . (time() - $cmd_time) . ' seconds.');
+    die "$cmd_name failed with $ret" if ($ret != 0 && $ret != 102);
 }
 
 1;

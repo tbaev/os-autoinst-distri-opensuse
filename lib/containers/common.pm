@@ -21,7 +21,7 @@ use Mojo::JSON;
 our @EXPORT = qw(is_unreleased_sle install_podman_when_needed install_docker_when_needed install_containerd_when_needed
   test_container_runtime test_container_image scc_apply_docker_image_credentials scc_restore_docker_image_credentials
   install_buildah_when_needed test_rpm_db_backend activate_containers_module check_containers_connectivity
-  test_search_registry switch_cgroup_version);
+  test_search_registry switch_cgroup_version install_packages);
 
 sub is_unreleased_sle {
     # If "SCC_URL" is set, it means we are in not-released SLE host and it points to proxy SCC url
@@ -106,6 +106,11 @@ sub install_docker_when_needed {
         }
     }
 
+    # Disable docker's own rate-limit in the service file (3 restarts in 60s)
+    # Our tests might restart the docker service more frequently than that
+    assert_script_run 'mkdir -p /etc/systemd/system/docker.service.d';
+    assert_script_run 'echo -e "[Service]\nStartLimitInterval=0s\n" > /etc/systemd/system/docker.service.d/limits.conf';
+
     # docker daemon can be started
     systemctl('enable docker');
     systemctl('is-enabled docker');
@@ -132,10 +137,7 @@ sub install_buildah_when_needed {
             zypper_call('in buildah', timeout => 300);
         }
     }
-    if ((script_output 'buildah info') =~ m/Failed to decode the keys.+ostree_repo/) {
-        assert_script_run "sed -i 's/ostree_repo/#ostree_repo/' /etc/containers/storage.conf";
-        record_soft_failure 'bsc#1189893 - Failed to decode the keys [\"storage.options.ostree_repo\"] from \"/etc/containers/storage.conf\"';
-    }
+    assert_script_run "! buildah info | grep Failed";
     record_info('buildah', script_output('buildah info'));
 }
 
@@ -238,7 +240,7 @@ sub test_container_image {
     my %args = @_;
     my $image = $args{image};
     my $runtime = $args{runtime};
-    my $logfile = "/var/tmp/container_logs";
+    my $logfile = "/var/tmp/container_logs.txt";
 
     die 'Argument $image not provided!' unless $image;
     die 'Argument $runtime not provided!' unless $runtime;
@@ -303,22 +305,24 @@ sub check_containers_connectivity {
     assert_script_run "$runtime run -id --rm --name $container_name -p 1234:1234 " . registry_url('alpine') . " sleep 30d";
     my $container_ip = container_ip $container_name, $runtime;
 
+    my $_4 = is_sle("<15") ? "" : "-4";
+
     # Connectivity to host check
     my $container_route = container_route($container_name, $runtime);
-    assert_script_run "ping -c3 " . $container_route;
-    assert_script_run "$runtime run --rm " . registry_url('alpine') . " ping -c3 " . $container_route;
+    assert_script_run "ping $_4 -c3 " . $container_route;
+    assert_script_run "$runtime run --rm " . registry_url('alpine') . " ping -4 -c3 " . $container_route;
 
     # Cross-container connectivity check
-    assert_script_run "ping -c3 " . $container_ip;
-    assert_script_run "$runtime run --rm " . registry_url('alpine') . " ping -c3 " . $container_ip;
+    assert_script_run "ping $_4 -c3 " . $container_ip;
+    assert_script_run "$runtime run --rm " . registry_url('alpine') . " ping -4 -c3 " . $container_ip;
 
     # Outside IP connectivity check
-    script_retry "ping -c3 8.8.8.8", retry => 3, delay => 120;
-    script_retry "$runtime run --rm " . registry_url('alpine') . " ping -c3 8.8.8.8", retry => 3, delay => 120;
+    script_retry "ping $_4 -c3 8.8.8.8", retry => 3, delay => 120;
+    script_retry "$runtime run --rm " . registry_url('alpine') . " ping -4 -c3 8.8.8.8", retry => 3, delay => 120;
 
     # Outside IP+DNS connectivity check
-    script_retry "ping -c3 google.com", retry => 3, delay => 120;
-    script_retry "$runtime run --rm " . registry_url('alpine') . " ping -c3 google.com", retry => 3, delay => 120;
+    script_retry "ping $_4 -c3 google.com", retry => 3, delay => 120;
+    script_retry "$runtime run --rm " . registry_url('alpine') . " ping -4 -c3 google.com", retry => 3, delay => 120;
 
     # Kill the container running on background
     assert_script_run "$runtime kill $container_name";
@@ -344,6 +348,19 @@ sub switch_cgroup_version {
     select_serial_terminal;
 
     validate_script_output("cat /proc/cmdline", sub { m/systemd\.unified_cgroup_hierarchy=$setting/ });
+}
+
+sub install_packages {
+    my @pkgs = @_;
+    # skip if already installed:
+    unless (script_run("rpm -q @pkgs") == 0) {
+        if (is_transactional) {
+            trup_call("pkg install @pkgs");
+            check_reboot_changes;
+        } else {
+            zypper_call("in @pkgs");
+        }
+    }
 }
 
 1;
