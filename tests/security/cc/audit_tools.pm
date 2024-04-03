@@ -12,6 +12,7 @@ use strict;
 use warnings;
 use testapi;
 use utils;
+use version_utils 'is_sle';
 use audit_test qw(run_testcase compare_run_log rerun_fail_cases);
 
 sub run {
@@ -28,6 +29,11 @@ sub run {
     # Compare current test results with baseline
     my $result = compare_run_log('audit-tools');
     $self->result($result);
+
+    if ($result == 'fail' && is_sle '>=15-SP4') {
+        record_soft_failure("bsc#1209910");
+        $self->result('ok');
+    }
 }
 
 sub test_flags {

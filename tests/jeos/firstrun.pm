@@ -3,18 +3,23 @@
 # Copyright SUSE LLC
 # SPDX-License-Identifier: FSFAP
 
-# Summary: Configure JeOS
+# Summary: Verify provided settings for the already running JeOS system and
+#          enter them going through jeos-firstboot wizard or configuring by
+#          using the terminal. (E.g. timezone, locale, keymap, mounts, users,
+#          passwords...)
 # Maintainer: qa-c team <qa-c@suse.de>
 
 use base "opensusebasetest";
 use strict;
 use warnings;
 use testapi;
-use version_utils qw(is_sle is_tumbleweed is_leap is_opensuse is_microos is_sle_micro);
+use version_utils qw(is_jeos is_sle is_tumbleweed is_leap is_opensuse is_microos is_sle_micro is_vmware is_bootloader_sdboot);
 use Utils::Architectures;
 use Utils::Backends;
 use jeos qw(expect_mount_by_uuid);
 use utils qw(assert_screen_with_soft_timeout ensure_serialdev_permissions);
+use serial_terminal 'prepare_serial_console';
+
 
 sub post_fail_hook {
     assert_script_run('timedatectl');
@@ -58,6 +63,47 @@ sub verify_mounts {
     assert_script_run('mount -fva');
 }
 
+sub verify_hypervisor {
+    my $virt = script_output('systemd-detect-virt', proceed_on_failure => 1);
+
+    return 0 if (
+        is_qemu && $virt =~ /(qemu|kvm)/ ||
+        is_s390x && $virt =~ /(zvm|kvm)/ ||
+        is_hyperv && $virt =~ /microsoft/ ||
+        is_vmware && $virt =~ /vmware/ ||
+        check_var("VIRSH_VMM_FAMILY", "xen") && $virt =~ /xen/);
+
+    if (is_qemu && is_riscv && $virt =~ /none/) {
+        record_soft_failure('boo#1218309');
+        return 0;
+    }
+
+    die("Unknown hypervisor: $virt");
+}
+
+sub verify_norepos {
+    my $ret = script_run "zypper lr";
+
+    # Check ZYPPER_EXIT_NO_REPOS
+    die("Image should not contain any repos after first boot") if ($ret != 6);
+}
+
+sub verify_bsc {
+    if (is_qemu && is_x86_64 && script_run("rpm -q qemu-guest-agent") != 0) {
+        # Included in SLE-15-SP2+, TW and Leap
+        die("bsc#1207135 - Missing qemu-guest-agent from virtual images") unless is_sle('<15-SP2');
+    }
+
+    if (is_qemu && script_run("rpm -q grub2-x86_64-xen") == 0) {
+        die("bsc#1166474 - kvm-and-xen image contains grub2-x86_64-xen") unless is_sle('<15-SP2');
+    }
+
+    if (is_sle('>15')) {
+        my $output = script_output "chronyc sources";
+        die("bsc#1156884 - chronyd is missing sources") if ($output =~ /Number of sources = 0/);
+    }
+}
+
 sub run {
     my ($self) = @_;
     my $lang = is_sle('15+') ? 'en_US' : get_var('JEOSINSTLANG', 'en_US');
@@ -70,10 +116,23 @@ sub run {
 
     # JeOS on generalhw
     mouse_hide;
+
+    # attach serial console to active VNC on z/kvm host
+    # in order to interact with the firstboot wizard
+    my $con;
+    my $initial_screen_timeout = 300;
+    if (is_s390x && is_svirt) {
+        $con = select_console('svirt', await_console => 0);
+        my $name = $con->name;
+        enter_cmd("virsh console --devname console0 --force $name");
+        # long timeout due to missing combustion/ignition config bsc#1210429
+        $initial_screen_timeout = 420 if is_sle_micro;
+    }
+
     # https://github.com/openSUSE/jeos-firstboot/pull/82 welcome dialog is shown on all consoles
     # and configuration continues on console where *Start* has been pressed
     unless (is_leap('<15.4') || is_sle('<15-sp4')) {
-        assert_screen 'jeos-init-config-screen', 300;
+        assert_screen 'jeos-init-config-screen', $initial_screen_timeout;
         # Without this 'ret' sometimes won't get to the dialog
         wait_still_screen;
         send_key 'ret';
@@ -108,7 +167,7 @@ sub run {
     send_key 'ret';
 
     # Accept EULA if required
-    unless (is_tumbleweed || is_microos) {
+    if (is_sle || is_sle_micro) {
         assert_screen 'jeos-doyouaccept';
         send_key 'ret';
     }
@@ -124,14 +183,42 @@ sub run {
         send_key 'ret';
     }
 
+    if (is_bootloader_sdboot) {
+        assert_screen 'jeos-root-as-enc-pass';
+        send_key 'ret';
+
+        if (get_var('QEMUTPM')) {
+            assert_screen 'jeos-fde-tpm-enroll';
+            send_key 'ret';
+        }
+
+        wait_serial(qr/^Encryption recovery key:\s+(([a-z]+-)+[a-z]+)/m) or die 'The encryption recovery key is missing';
+    }
+
     if (is_sle || is_sle_micro) {
         assert_screen 'jeos-please-register';
         send_key 'ret';
     }
 
-    if (is_generalhw && is_aarch64 && !is_leap("<15.5")) {
+    if (is_generalhw && is_aarch64 && !is_leap("<15.4") && !is_tumbleweed) {
         assert_screen 'jeos-please-configure-wifi';
         send_key 'n';
+    }
+
+    # Only execute this block on SLE Micro 6.0+ when using the encrypted image.
+    if ((is_sle_micro('>=6.0')) && get_var("ENCRYPTED_IMAGE")) {
+        # Select FDE with pass and tpm
+        assert_screen "alp-fde-pass-tpm";
+        # with the latest ALP 9.2/SLEM 3.4 build, this step takes more time than usual.
+        wait_screen_change(sub { send_key "ret" }, 25);
+        assert_screen("alp-fde-newluks", timeout => 120);
+        type_password;
+        send_key "ret";
+        wait_still_screen 2;
+        type_password;
+        send_key "ret";
+        # Disk encryption is gonna take time. Once this is done we can proceed with login.
+        wait_still_screen 5;
     }
 
     # Our current Hyper-V host and it's spindles are quite slow. Especially
@@ -150,6 +237,21 @@ sub run {
         }
     }
 
+    # release console and reattach to be used again as serial output
+    if (is_s390x && is_svirt) {
+        # enable root ssh login, see poo#154309
+        if (is_sle_micro('>=6.0') || is_sle('15-SP6+')) {
+            record_info "enable root ssh login";
+            enter_cmd "root";    # login to serial console at first
+            wait_still_screen 1;
+            enter_cmd "$testapi::password";
+            wait_still_screen 1;
+            enter_cmd "echo 'PermitRootLogin yes' > /etc/ssh/sshd_config.d/root.conf";
+            enter_cmd "systemctl restart sshd";
+        }
+        send_key('ctrl-^-]');
+        $con->attach_to_running();
+    }
     select_console('root-console', skip_set_standard_prompt => 1, skip_setterm => 1);
 
     type_string('1234%^&*()qwerty');
@@ -164,7 +266,7 @@ sub run {
     }
     # Manually configure root-console as we skipped some parts in root-console's activation
     $testapi::distri->set_standard_prompt('root');
-    assert_script_run('setterm -blank 0');
+    assert_script_run('setterm -blank 0') unless is_s390x;
 
     verify_user_info(user_is_root => 1);
 
@@ -175,7 +277,13 @@ sub run {
         assert_script_run "echo $username:$password | chpasswd";
     }
 
+    if (check_var('FLAVOR', 'JeOS-for-RaspberryPi')) {
+        assert_script_run("echo 'PermitRootLogin yes' > /etc/ssh/sshd_config.d/permit-root-login.conf");
+    }
+
     ensure_serialdev_permissions;
+
+    prepare_serial_console;
 
     my $console = select_console 'user-console';
     verify_user_info;
@@ -189,6 +297,10 @@ sub run {
 
     # openSUSE JeOS has SWAP mounted as LABEL instead of UUID until kiwi 9.19.0, so tw and Leap 15.2+ are fine
     verify_mounts unless is_leap('<15.2') && is_aarch64;
+
+    verify_hypervisor unless is_generalhw;
+    verify_norepos unless is_opensuse;
+    verify_bsc if is_jeos;
 }
 
 sub test_flags {

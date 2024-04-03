@@ -5,7 +5,7 @@
 # Summary: Test verifies installation using autoyast_sle_12_btrfs.xml profile
 # configuration for btrfs partitions. Verify subvolumes stcructure, mount options
 # subvolume attributes configured in profile.
-# Maintainer: QE YaST <qa-sle-yast@suse.de>
+# Maintainer: QE YaST and Migration (QE Yam) <qe-yam at suse de>
 
 use base 'basetest';
 use strict;
@@ -16,7 +16,7 @@ sub run {
 
     ### Verify mounted drives ###
     # Common part of regexp
-    my $common_opts = qr/rw|relatime|space_cache|subvolid=\d+/;
+    my $common_opts = qr/rw|relatime|discard=async|space_cache=v2|subvolid=\d+/;
 
     # Get verify mount options for root
     validate_script_output "findmnt / -no OPTIONS", sub {

@@ -95,13 +95,15 @@ sub install_guest_instances {
         else {
             $guest_instances{$_}->guest_installation_run(@_);
         }
+        # Abort current guest installation if dry run failed
+        next if $guest_instances{$_}->{guest_installation_result} eq 'FAILED';
         if ($guest_instances{$_}->has_noautoconsole_for_sure) {
             assert_screen('text-logged-in-root');
             $guest_instances{$_}->do_attach_guest_installation_screen_without_session;
         }
         $guest_instances{$_}->{guest_installation_attached} = 'true';
         save_screenshot;
-        if (!(check_screen([qw(guest-installation-yast2-started guest-installation-anaconda-started)], timeout => 180 / get_var('TIMEOUT_SCALE', 1)))) {
+        if (!(check_screen([qw(guest-installation-yast2-started guest-installation-anaconda-started guest-firstboot-provision-finished)], timeout => 180 / get_var('TIMEOUT_SCALE', 1)))) {
             record_info("Failed to detect or guest $guest_instances{$_}->{guest_name} does not have installation window opened", "This might be caused by improper console settings or reboot after installaton finishes. Will continue to monitor its installation progess, so this is not treated as fatal error at the moment.");
         }
         else {
@@ -122,10 +124,10 @@ sub monitor_concurrent_guest_installations {
     my $self = shift;
 
     $self->reveal_myself;
-    my $_installation_timeout = 0;
     my $_guest_installations_left = scalar(keys %guest_instances) - scalar(@guest_installations_done);
     my $_guest_installations_not_the_last = 1;
-    while ($_installation_timeout < 3600) {
+    my $_monitor_start_time = time();
+    while (time() - $_monitor_start_time <= 7200) {
         foreach (keys %guest_instances) {
             if ($guest_instances{$_}->{guest_installation_result} eq '') {
                 $guest_instances{$_}->attach_guest_installation_screen if (($_guest_installations_not_the_last ne 0) or ($guest_instances{$_}->{guest_installation_attached} ne 'true'));
@@ -145,7 +147,6 @@ sub monitor_concurrent_guest_installations {
         }
         last if ($_guest_installations_left eq 0);
         sleep 60;
-        $_installation_timeout += 60;
     }
     return $self;
 }
@@ -209,16 +210,18 @@ sub junit_log_provision {
     return $self;
 }
 
-#Check whether current console is root-ssh console and re-connect if needle 'text-logged-in-root' can not be detected.
+#Check whether current console is root-ssh console of the hypervisor and re-connect if relevant needle can not be detected.
 sub check_root_ssh_console {
     my $self = shift;
 
     $self->reveal_myself;
+    script_run("clear");
     save_screenshot;
     if (!(check_screen('text-logged-in-root'))) {
         reset_consoles;
         select_console('root-ssh');
     }
+
     return $self;
 }
 

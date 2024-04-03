@@ -4,7 +4,7 @@
 # Summary: Make sure we are logged in
 # - Wait for boot if BACKEND is ipmi
 # - Set root-console
-# Maintainer: QA SLE YaST team <qa-sle-yast@suse.de>
+# Maintainer: QE YaST and Migration (QE Yam) <qe-yam at suse de>
 
 use strict;
 use warnings;
@@ -14,7 +14,11 @@ use Utils::Backends;
 
 sub run {
     my ($self) = @_;
-    $self->wait_boot if is_ipmi;
+    # IPXE boot does not provide boot menu so set pxe_boot_done equals 1 without checking needles
+
+    # If we didn't see pxe, the reboot is going now
+    $self->wait_boot if is_ipmi && !check_var('IPXE', '1') && !check_var('IPXE_UEFI', '1');
+
     select_console 'root-console';
 }
 

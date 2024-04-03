@@ -3,7 +3,7 @@
 #
 # Package: openssh libvirt-client libvirt-daemon
 # Summary: Stop all libvirt guests
-# Maintainer: Pavel Dostál <pdostal@suse.cz>
+# Maintainer: QE-Virtualization <qe-virt@suse.de>
 
 use base "consoletest";
 use virt_autotest::common;
@@ -21,7 +21,8 @@ sub run {
     record_info "AUTOSTART DISABLE", "Disable autostart for all guests";
     assert_script_run "virsh autostart --disable $_" foreach (keys %virt_autotest::common::guests);
 
-    record_info "LIBVIRTD", "Restart libvirtd and expect all guests to stay down";
+    record_info "LIBVIRTD", "Restart libvirt daemon and expect all guests to stay down";
+    # Note: TBD for modular libvirt. See poo#129086 for detail.
     restart_libvirtd;
 }
 

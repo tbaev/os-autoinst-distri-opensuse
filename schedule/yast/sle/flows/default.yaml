@@ -47,7 +47,7 @@ installation_logs:
 virsh_boot_hdd: []
 confirm_reboot:
   - installation/performing_installation/confirm_reboot
-reconnect_svirt:  []
+reconnect_svirt: []
 grub:
   - installation/grub_test
 first_login:

@@ -13,25 +13,33 @@ use testapi;
 use serial_terminal 'select_serial_terminal';
 use lockapi;
 use utils;
+use hpc::utils 'get_slurm_version';
 use version_utils 'is_sle';
 
 sub run ($self) {
     select_serial_terminal();
     my $hostname = get_required_var("HOSTNAME");
+    my $slurm_pkg = get_slurm_version(get_var('SLURM_VERSION', ''));
 
     barrier_wait('CLUSTER_PROVISIONED');
 
     $self->prepare_user_and_group();
 
-    # Install slurm
-    zypper_call("in slurm slurm-munge slurm-slurmdbd");
-    # install slurm-node if sle15, not available yet for sle12
-    zypper_call('in slurm-node') if is_sle '15+';
+    # If one wants to test unversioned slurm, one should not
+    # install slurm-node at all. Also slurm rpm does not
+    # provide mariadb as a dependency
+    if ($slurm_pkg eq 'slurm' and is_sle('=12-sp5')) {
+        zypper_call("in $slurm_pkg mariadb");
+    } else {
+        zypper_call("in $slurm_pkg $slurm_pkg-node");
+    }
+
+    # $slurm_pkg-munge is installed explicitly since slurm_23_02
+    zypper_call("in $slurm_pkg-munge $slurm_pkg-slurmdbd");
 
     my $mariadb_service = "mariadb";
     $mariadb_service = "mysql" if is_sle('<12-sp4');
 
-    zypper_call("in mariadb");
     systemctl("start $mariadb_service");
     systemctl("is-active $mariadb_service");
 
@@ -61,6 +69,11 @@ EOF
     ## munge must start before other slurm daemons
     $self->enable_and_start('munge');
     systemctl('is-active munge');
+
+    # Install mrsh and mrsh-server to allow t10 basic
+    zypper_call('in mrsh mrsh-server');
+    $self->enable_and_start('mrlogind.socket mrshd.socket');
+
     $self->prepare_slurmdb_conf();
     record_info("slurmdbd conf", script_output("cat /etc/slurm/slurmdbd.conf"));
     $self->enable_and_start("slurmdbd");

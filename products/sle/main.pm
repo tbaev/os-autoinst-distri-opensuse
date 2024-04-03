@@ -29,6 +29,7 @@ BEGIN {
 }
 use utils;
 use main_common;
+use main_ltp_loader 'load_kernel_tests';
 use main_pods;
 use known_bugs;
 use YuiRestClient;
@@ -355,7 +356,7 @@ if (is_updates_test_repo && !get_var('MAINT_TEST_REPO')) {
     my $repos = join_incidents_to_repo(\%incidents);
 
     set_var('MAINT_TEST_REPO', $repos);
-    set_var('SCC_REGISTER', 'installation');
+    set_var('SCC_REGISTER', 'installation') unless get_var('FLAVOR') =~ /TERADATA/;
 }
 
 if (get_var('ENABLE_ALL_SCC_MODULES') && !get_var('SCC_ADDONS')) {
@@ -479,6 +480,7 @@ sub load_online_migration_tests {
     if (is_sle && (get_var('FLAVOR') =~ /Migration/) && (get_var('SCC_ADDONS') !~ /ha/) && !is_sles4sap && (is_upgrade || get_var('MEDIA_UPGRADE'))) {
         loadtest "console/check_os_release";
         loadtest "console/check_system_info";
+        loadtest "console/verify_lock_package" if (get_var("LOCK_PACKAGE"));
     }
 }
 
@@ -760,7 +762,7 @@ elsif (get_var("QA_TESTSET")) {
         loadtest 'kernel/kernel_kexec';
     }
     elsif (check_var('QA_TESTSET', 'kernel_multipath')) {
-        loadtest 'qa_automation/kernel_multipath';
+        loadtest 'kernel/multipath_iscsi';
     }
     else {
         loadtest 'qa_automation/qa_run', name => get_required_var('QA_TESTSET');
@@ -779,24 +781,15 @@ elsif (get_var('XFSTESTS')) {
         loadtest 'kernel/change_kernel';
     }
     prepare_target;
-    if (is_pvm || check_var('ARCH', 's390x')) {
+    if (check_var('XFSTESTS_INSTALL', 1) || check_var('XFSTESTS', 'installation') || is_pvm || check_var('ARCH', 's390x')) {
         loadtest 'xfstests/install';
         unless (check_var('NO_KDUMP', '1')) {
             loadtest 'xfstests/enable_kdump';
         }
-        loadtest 'xfstests/partition';
-        loadtest 'xfstests/run';
-        loadtest 'xfstests/generate_report';
-    }
-    else {
+        if (get_var('XFSTEST_KLP')) {
+            loadtest 'kernel/install_klp_product';
+        }
         if (check_var('XFSTESTS', 'installation')) {
-            loadtest 'xfstests/install';
-            unless (check_var('NO_KDUMP', '1')) {
-                loadtest 'xfstests/enable_kdump';
-            }
-            if (get_var('XFSTEST_KLP')) {
-                loadtest 'kernel/install_klp_product';
-            }
             loadtest 'shutdown/shutdown';
         }
         else {
@@ -804,6 +797,11 @@ elsif (get_var('XFSTESTS')) {
             loadtest 'xfstests/run';
             loadtest 'xfstests/generate_report';
         }
+    }
+    else {
+        loadtest 'xfstests/partition';
+        loadtest 'xfstests/run';
+        loadtest 'xfstests/generate_report';
     }
 }
 elsif (get_var("BTRFS_PROGS")) {
@@ -849,28 +847,30 @@ elsif (get_var("VIRT_AUTOTEST")) {
     }
     else {
         if (!is_s390x) {
+            loadtest "autoyast/prepare_profile" if get_var("AUTOYAST_PREPARE_PROFILE");
             load_boot_tests();
             if (get_var("AUTOYAST")) {
                 loadtest "autoyast/installation";
-                loadtest "virt_autotest/reboot_and_wait_up_normal";
             }
             else {
                 load_inst_tests();
-                loadtest "virt_autotest/login_console";
             }
         }
-        else {
-            loadtest "virt_autotest/login_console";
-        }
+        loadtest "virt_autotest/login_console";
         loadtest "virt_autotest/install_package";
         loadtest "virt_autotest/update_package";
-        loadtest "virt_autotest/reset_partition";
-        loadtest "virt_autotest/reboot_and_wait_up_normal" if get_var('REPO_0_TO_INSTALL');
+        # Skip reset_partition for s390x due to there just be 42Gib disk space for each s390x LPAR
+        loadtest "virt_autotest/reset_partition" if (!is_s390x);
+        # Skip reboot_and_wait_up_normal for s390x due to new changes from svirt backend for power_action_utils::power_action (see poo#151786)
+        loadtest "virt_autotest/reboot_and_wait_up_normal" if (!get_var('AUTOYAST') && get_var('REPO_0_TO_INSTALL') && (!is_s390x));
         loadtest "virt_autotest/download_guest_assets" if get_var("SKIP_GUEST_INSTALL") && is_x86_64;
     }
     if (get_var("VIRT_PRJ1_GUEST_INSTALL")) {
         load_virt_guest_install_tests;
-        load_virt_feature_tests if (!(get_var("GUEST_PATTERN") =~ /win/img) && is_x86_64 && !get_var("LTSS"));
+        if (!(get_var('GUEST_PATTERN', '') =~ /win/img) && is_x86_64 && !get_var("LTSS")) {
+            load_virt_feature_tests;
+            loadtest "virt_autotest/validate_system_health" if get_var("VALIDATE_SYSTEM_HEALTH");
+        }
     }
     #those tests which test extended features, such as hotpluggin, virtual network and SRIOV passthrough etc.
     #they can be seperated from prj1 if needed
@@ -896,16 +896,6 @@ elsif (get_var("VIRT_AUTOTEST")) {
         }
         loadtest "virt_autotest/reboot_and_wait_up_normal";
         loadtest "virt_autotest/host_upgrade_step3_run";
-    }
-    elsif (get_var("VIRT_PRJ3_GUEST_MIGRATION_SOURCE")) {
-        loadtest "virt_autotest/guest_migration_config_virtualization_env";
-        loadtest "virt_autotest/guest_migration_source_nfs_setup";
-        loadtest "virt_autotest/guest_migration_source_install_guest";
-        loadtest "virt_autotest/guest_migration_source_migrate";
-    }
-    elsif (get_var("VIRT_PRJ3_GUEST_MIGRATION_TARGET")) {
-        loadtest "virt_autotest/guest_migration_config_virtualization_env";
-        loadtest "virt_autotest/guest_migration_target_nfs_setup";
     }
     elsif (get_var("VIRT_PRJ4_GUEST_UPGRADE")) {
         loadtest "virt_autotest/guest_upgrade_run";
@@ -1112,30 +1102,9 @@ else {
         boot_hdd_image;
         if (check_var('HOSTNAME', 'client')) {
             loadtest 'network/setup_multimachine';
-            loadtest 'network/samba/samba_adcli';
         }
         elsif (check_var('HOSTNAME', 'win2k19')) {
             loadtest 'support_server/windows/win2019_boot';
-        }
-    }
-    elsif (get_var('QAM_SMT')) {
-        set_var('INSTALLONLY', 1);
-        if (check_var('HOSTNAME', 'server')) {
-            barrier_create('smt_setup', 2);
-            barrier_create('smt_registered', 2);
-            boot_hdd_image;
-            loadtest 'network/setup_multimachine';
-            loadtest 'smt/smt_server';
-        }
-        elsif (check_var('HOSTNAME', 'client1')) {
-            boot_hdd_image;
-            loadtest 'network/setup_multimachine';
-            loadtest 'smt/smt_client1';
-        }
-        else {
-            #default hostname, installation and setting up smt server
-            boot_hdd_image;
-            loadtest 'smt/smt_server_install';
         }
     }
     elsif (get_var('QAM_MAIL_THUNDERBIRD')) {
@@ -1211,17 +1180,12 @@ else {
             if (is_sle && (get_var('FLAVOR') =~ /Migration/) && (get_var('SCC_ADDONS') !~ /ha/) && !is_sles4sap && (is_upgrade || get_var('MEDIA_UPGRADE'))) {
                 loadtest "console/check_os_release";
                 loadtest "console/check_system_info";
+                loadtest "console/verify_lock_package" if (get_var("LOCK_PACKAGE"));
             }
         }
     }
     elsif (get_var("BOOT_HDD_IMAGE") && !is_jeos) {
         boot_hdd_image;
-        if (get_var("ADDONS")) {
-            loadtest "installation/addon_products_yast2";
-        }
-        if (get_var('SCC_ADDONS') && !get_var('SLENKINS_NODE') && !get_var('PUBLIC_CLOUD')) {
-            loadtest "installation/addon_products_via_SCC_yast2";
-        }
         if (get_var("ISCSI_SERVER")) {
             set_var('INSTALLONLY', 1);
             loadtest "iscsi/iscsi_server";

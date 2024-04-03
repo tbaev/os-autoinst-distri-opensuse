@@ -1,12 +1,12 @@
 # SUSE's openQA tests
 #
-# Copyright 2020-2021 SUSE LLC
+# Copyright 2020-2023 SUSE LLC
 # SPDX-License-Identifier: FSFAP
 
 # Package: podman
 # Summary: Test installation and running of the docker image from the registry for this snapshot
 # This module is unified to run independented the host os.
-# Maintainer: Fabian Vogt <fvogt@suse.com>, qa-c team <qa-c@suse.de>
+# Maintainer: QE-C team <qa-c@suse.de>
 
 use Mojo::Base 'containers::basetest';
 use testapi;
@@ -16,6 +16,7 @@ use containers::common;
 use containers::container_images;
 use containers::urls qw(get_image_uri);
 use db_utils qw(push_image_data_to_db);
+use containers::utils qw(reset_container_network_if_needed);
 
 sub run {
     my ($self, $args) = @_;
@@ -23,6 +24,8 @@ sub run {
 
     my $runtime = $args->{runtime};
     my $engine = $self->containers_factory($runtime);
+    reset_container_network_if_needed($runtime);
+
 
     scc_apply_docker_image_credentials() if (get_var('SCC_DOCKER_IMAGE') && $runtime eq 'docker');
 

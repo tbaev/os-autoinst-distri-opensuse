@@ -13,6 +13,9 @@ use Carp 'croak';
 use Test::Assert 'assert_equals';
 use containers::utils qw(registry_url);
 use utils qw(systemctl file_content_replace script_retry);
+use version_utils qw(package_version_cmp);
+use containers::utils qw(get_podman_version);
+use Mojo::JSON qw(decode_json);
 use overload
   '""' => sub { return shift->runtime },
   bool => sub { return 1 },
@@ -238,10 +241,31 @@ Otherwise it prints the output of info.
 =cut
 
 sub info {
-    my ($self, %args) = shift;
-    my $property = $args{property} ? qq(--format '{{.$args{property}}}') : '';
-    my $expected = $args{value} ? qq( | grep $args{value}) : '';
-    $self->_engine_assert_script_run(sprintf("info %s %s", $property, $expected));
+    my ($self, %args) = @_;
+    my $stdout;
+
+    if (exists $args{json} && $args{json}) {
+        my $raw = $self->_engine_script_output("info -f '{{json .}}' 2> ./error", proceed_on_failure => 1);
+        # issue related to podman v2.0 (sle15sp2, s390x) -> bsc#1200623
+        # extract only the json part as there might be other error messages from info output
+        # e.g. 2023-09-11T08:01:40.788854+02:00 susetest systemd[31629]: Failed to start podman-31709.scope
+        if ($raw =~ m/(?s)(\{(?:[^{}"]++|"(?:\\.|[^"])*+"|(?1))*\})/gm) {
+            $raw = $1;
+        }
+        $stdout = decode_json($raw);
+    } else {
+        $stdout = $self->_engine_script_output("info 2> ./error", proceed_on_failure => 1);
+    }
+
+    if (script_run('test -s ./error') == 0) {
+        my $error = script_output('cat ./error');
+
+        if ($error !~ /$args{expected_error}/) {
+            die "Error found executing info";
+        }
+    }
+
+    return $stdout;
 }
 
 =head2 get_container_logs($container, $filename)
@@ -321,6 +345,19 @@ sub cleanup_system_host {
     my ($self, $assert) = @_;
     $assert //= 1;
     $self->_engine_assert_script_run("ps -q | xargs -r " . $self->runtime . " stop", 180);
+
+    # all containers should be stopped before running prune
+    # https://github.com/containers/podman/issues/19038
+    if ($self->runtime eq 'podman') {
+        if (package_version_cmp(get_podman_version(), '4.0.0') < 0) {
+            $self->_engine_script_run("pod rm --force --all", 120);
+        }
+        $self->_engine_assert_script_run("rm --force --all", 120);
+        # podman system prune -f --external was added to podman 4.0.0
+        # and it allows to prune external containers created by buildah
+        $self->_engine_script_run("system prune -f --external", 300);
+    }
+    $self->_engine_assert_script_run("volume prune -f", 300);
     $self->_engine_assert_script_run("system prune -a -f", 300);
 
     if ($assert) {

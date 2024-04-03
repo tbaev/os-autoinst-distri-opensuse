@@ -45,20 +45,7 @@ sub run {
 
     # Workaround network timeout issue during upgrade
     if (get_var('HDDVERSION')) {
-        assert_script_run 'journalctl -b --no-pager -o short-precise > bsc1129385-check-journal.log';
-        my $iscsi_fails = script_run 'grep -q "iscsid: cannot make a connection to" bsc1129385-check-journal.log';
-        my $csync_fails = script_run 'grep -q "corosync.service: Failed" bsc1129385-check-journal.log';
-        my $pcmk_fails = script_run 'grep -E -q "pacemaker.service.+failed" bsc1129385-check-journal.log';
-
-        if (defined $iscsi_fails and $iscsi_fails == 0 and defined $csync_fails
-            and $csync_fails == 0 and defined $pcmk_fails and $pcmk_fails == 0)
-        {
-            record_soft_failure "bsc#1129385";
-            upload_logs 'bsc1129385-check-journal.log';
-            $iscsi_fails = script_run 'grep -q LIO-ORG /proc/scsi/scsi';
-            systemctl 'restart iscsi' if ($iscsi_fails);
-            systemctl 'restart pacemaker';
-        }
+        check_iscsi_failure;
     }
 
     # Check iSCSI server is connected
@@ -87,9 +74,10 @@ sub run {
     systemctl 'list-units | grep iscsi', timeout => $default_timeout;
 
     if ((!defined $node_to_fence && check_var('HA_CLUSTER_INIT', 'yes')) || (defined $node_to_fence && get_hostname eq "$node_to_fence")) {
-        my $sbd_delay = calculate_sbd_start_delay;
+        my $sbd_delay = setup_sbd_delay();
         record_info("SBD delay $sbd_delay sec", "Calculated SBD start delay: $sbd_delay");
-        sleep $sbd_delay;
+        # test should wait longer that startup delay set therefore adding 15s
+        sleep $sbd_delay + 15;
     }
     # Barrier for fenced nodes to wait for start delay.
     barrier_wait("SBD_START_DELAY_$cluster_name");
@@ -105,6 +93,8 @@ sub run {
         my $get_uuid_cmd = 'for bd in $(grep ^DEVICE ' . $mdadm_conf . '); do [[ "$bd" == "DEVICE" ]] && continue; ';
         $get_uuid_cmd .= 'blkid -o export "$bd" | sed -n -e s/[\-:]//g -e /^UUID=/s/^UUID=//p; done | sort -u';
         my $uuid = script_output $get_uuid_cmd;
+        # filter out the noise in the output of openQA script_output API
+        $uuid =~ s/(^\[.*$)|(\n)//mg;
         $uuid = join(':', substr($uuid, 0, 8), substr($uuid, 8, 8), substr($uuid, 16, 8), substr($uuid, 24));
         die 'MD RAID devices have different UUIDs!' if ($uuid =~ /\n/);
         my $mdadm_uuid = script_output "sed -r -n -e '/ARRAY/s/.*UUID=([0-9a-z:]+).*/\\1/p' $mdadm_conf";

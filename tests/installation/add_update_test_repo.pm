@@ -20,11 +20,24 @@ sub run() {
         set_var('SKIP_INSTALLER_SCREEN', 0);
     }
 
-    assert_screen 'inst-addon';
-    send_key 'alt-k';    # install with a maint update repo
+    if (!check_var('SCC_REGISTER', 'installation')) {
+        assert_screen('module-selection');
+        send_key $cmd{next};
+        assert_screen('addon-products');
+        send_key 'alt-a';
+    }
+    else {
+        assert_screen('inst-addon', 60);
+        send_key 'alt-k';    # install with a maint update repo
+    }
 
     set_var('MAINT_TEST_REPO', get_var('INCIDENT_REPO')) if get_var('INCIDENT_REPO');
     my @repos = split(/,/, get_var('MAINT_TEST_REPO'));
+    for my $extra_repo (split(/,/, get_var('EXTRA_CUSTOMER_REPOS', ''))) {
+        my @repo_part = split(/;/, $extra_repo);
+        my $url = $repo_part[1];
+        push(@repos, $url);
+    }
 
     while (defined(my $maintrepo = shift @repos)) {
         next if $maintrepo =~ /^\s*$/;
@@ -38,7 +51,10 @@ sub run() {
         type_string $maintrepo;
         advance_installer_window('addon-products');
         # if more repos to come, add more
-        send_key_until_needlematch('addon-menu-active', 'alt-a', 11, 2) if @repos;
+        if (@repos) {
+            send_key 'alt-a';
+            send_key_until_needlematch('addon-menu-active', 'alt-a', 11, 2);
+        }
     }
 }
 

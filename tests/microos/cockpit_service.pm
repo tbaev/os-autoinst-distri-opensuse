@@ -6,19 +6,20 @@
 # Summary: Basic check for cockpit service
 # Maintainer: qa-c team <qa-c@suse.de>
 
-use base "opensusebasetest";
+use base "consoletest";
 use strict;
 use warnings;
 use testapi;
 use transactional;
 use utils qw(systemctl);
 use mm_network qw(is_networkmanager);
-use version_utils qw(is_microos is_sle_micro is_leap_micro is_alp);
+use version_utils qw(is_microos is_sle_micro is_leap_micro);
+use serial_terminal;
 
 sub run {
     my ($self) = @_;
 
-    select_console 'root-console';
+    select_serial_terminal;
 
     # Install cockpit if needed, this is needed for DVD flavor where
     # Cockpit pattern is not selected during install
@@ -34,7 +35,7 @@ sub run {
             push @pkgs, 'cockpit-networkmanager';
         }
     } else {
-        if (is_microos || is_alp || is_leap_micro('5.3+') || is_sle_micro('5.3+')) {
+        if (is_microos || is_leap_micro('5.3+') || is_sle_micro('5.3+')) {
             die sprintf('NetworkManager should be used by %s %s', get_var('DISTRI'), get_var('VERSION'));
         }
         if (script_run('rpm -q cockpit-wicked') != 0) {
@@ -49,8 +50,10 @@ sub run {
 
     if (@pkgs) {
         record_info('TEST', 'Installing Cockpit\'s Modules...');
-        trup_call("pkg install @pkgs", timeout => 360);
-        check_reboot_changes;
+
+        my $results = script_output("transactional-update -n pkg install @pkgs", timeout => 480);
+        # No reboot needed if no package update
+        check_reboot_changes if ($results !~ /zypper: nothing to update/);
     }
 
     record_info('Cockpit', script_output('rpm -qi cockpit'));

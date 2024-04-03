@@ -13,7 +13,7 @@ use autotest;
 use base 'Exporter';
 use Exporter;
 use bmwqemu ();
-use version_utils qw(is_sle is_leap is_sle_micro);
+use version_utils qw(is_sle is_leap is_sle_micro is_openstack);
 use Mojo::Util qw(b64_encode b64_decode sha1_sum trim);
 use Mojo::File 'path';
 use File::Basename;
@@ -59,20 +59,53 @@ sub add_serial_console {
     prepare_serial_console();
 
 Wrapper for add_serial_console.
+
+Configure serial consoles for virtio support (root-virtio-terminal and
+user-virtio-terminal).
+
+NOTE: if test plans to use more consoles via VIRTIO_CONSOLE_NUM, it have to
+call add_serial_console() with proper console name (beware different number
+for ppc64le).
 =cut
 
 sub prepare_serial_console {
-    # Configure serial consoles for virtio support
-    # poo#18860 Enable console on hvc0 on SLES < 12-SP2
-    # poo#44699 Enable console on hvc1 to fix login issues on ppc64le
-    if (!check_var('VIRTIO_CONSOLE', 0)) {
-        if (is_sle('<12-SP2') && !is_s390x) {
-            add_serial_console('hvc0');
-        }
-        elsif (get_var('OFW')) {
-            add_serial_console('hvc1');
-        }
+    # Virtio console is disabled only with VIRTIO_CONSOLE=0 (by default
+    # VIRTIO_CONSOLE is not set which also means that virtio console is
+    # *enabled*).
+    unless (!check_var('VIRTIO_CONSOLE', 0)) {
+        record_info('skip virtio', 'Skipped due to disabled virtio console');
+        return;
     }
+
+    unless (is_qemu) {
+        record_info('skip virtio', 'Skipped adding consoles due unsupported backend (only BACKEND=qemu supported)');
+        return;
+    }
+
+    if (is_openstack) {
+        record_info('skip virtio', 'Openstack Images do not have hvc consoles');
+        return;
+    }
+
+    record_info('getty before', script_output('systemctl | grep serial-getty'));
+
+    my $console = 'hvc1';
+
+    # poo#18860 Enable console on hvc0 on SLES < 12-SP2 (root-virtio-terminal)
+    if (is_sle('<12-SP2') && !is_s390x) {
+        add_serial_console('hvc0');
+    }
+    # poo#44699 Enable console on hvc1 to fix login issues on ppc64le
+    # (root-virtio-terminal)
+    elsif (get_var('OFW')) {
+        add_serial_console('hvc1');
+        $console = 'hvc2';
+    }
+
+    # user-virtio-terminal
+    add_serial_console($console);
+
+    record_info('getty after', script_output('systemctl | grep serial-getty'));
 }
 
 =head2 get_login_message
@@ -88,7 +121,7 @@ wait_serial(get_login_message(), 300);
 sub get_login_message {
     my $arch = get_required_var("ARCH");
     return is_sle() ? qr/Welcome to SUSE Linux Enterprise .*\($arch\)/
-      : is_sle_micro() ? qr/Welcome to SUSE Linux Enterprise Micro .*\($arch\)/
+      : is_sle_micro() ? qr/Welcome to SUSE Linux.* Micro .*\($arch\)/
       : is_leap() ? qr/Welcome to openSUSE Leap.*/
       : qr/Welcome to openSUSE Tumbleweed 20.*/;
 }
@@ -107,7 +140,8 @@ sub set_serial_prompt {
     die "Invalid prompt string '$serial_term_prompt'"
       unless $serial_term_prompt =~ s/\s*$//r;
     enter_cmd(qq/PS1="$serial_term_prompt"/);
-    wait_serial(qr/PS1="$serial_term_prompt"/);
+    wait_serial(qq/PS1="$serial_term_prompt"/, no_regex => 1);
+    $testapi::distri->{serial_term_prompt} = $serial_term_prompt;
 }
 
 =head2 login
@@ -292,7 +326,7 @@ sub reboot {
 
 =head2 select_serial_terminal
 
- select_serial_terminal($root);
+    select_serial_terminal($root[, $prompt]);
 
 Select most suitable text console. The optional parameter C<root> controls
 whether the console will have root privileges or not. Passing any value that
@@ -329,6 +363,7 @@ use root-ssh console directly.
 
 sub select_serial_terminal {
     my $root = shift // 1;
+    my $prompt = shift // ($root ? '# ' : '> ');
 
     my $backend = get_required_var('BACKEND');
     my $console;
@@ -339,13 +374,13 @@ sub select_serial_terminal {
         } else {
             $console = $root ? 'root-virtio-terminal' : 'user-virtio-terminal';
         }
-    } elsif (get_var('SUT_IP')) {
+    } elsif (get_var('SUT_IP') || is_backend_s390x) {
         $console = $root ? 'root-serial-ssh' : 'user-serial-ssh';
     } elsif ($backend eq 'svirt') {
         if (check_var('SERIAL_CONSOLE', 0)) {
             $console = $root ? 'root-console' : 'user-console';
         } else {
-            $console = $root ? 'root-sut-serial' : 'sut-serial';
+            $console = $root ? 'root-sut-serial' : 'user-sut-serial';
         }
     } elsif (has_serial_over_ssh) {
         $console = 'root-ssh';
@@ -359,7 +394,7 @@ sub select_serial_terminal {
 
 =head2 select_user_serial_terminal
 
- select_user_serial_terminal();
+    select_user_serial_terminal([$prompt]);
 
 Select most suitable text console with non-root user.
 The choice is made by BACKEND and other variables.

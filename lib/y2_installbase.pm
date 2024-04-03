@@ -12,12 +12,10 @@ use Utils::Architectures;
 
 use version_utils qw(is_microos is_sle);
 use y2_logs_helper 'get_available_compression';
-use utils qw(type_string_slow zypper_call);
+use utils qw(type_string_slow zypper_call remount_tmp_if_ro detect_bsc_1063638);
 use lockapi;
 use mmapi;
 use Test::Assert 'assert_equals';
-
-my $workaround_bsc1189550_done;
 
 =head1 y2_installbase
 
@@ -81,7 +79,7 @@ sub validate_default_target {
 
     my $target_search = 'default target has been set';
     # default.target is not yet linked, so we parse logs and assert expectations
-    if (my $log_line = script_output("grep '$target_search' /var/log/YaST2/y2log | tail -1",
+    if (my $log_line = script_output("grep '$target_search' /var/log/YaST2/y2log | tail -1", timeout => 30,
             proceed_on_failure => 1)) {
         $log_line =~ /$target_search: (?<current_target>.*)/;
         assert_equals($expected_target, $+{current_target}, "Mismatch in default.target");
@@ -168,10 +166,19 @@ Performs steps needed to go from the "pattern selection" screen to
 
 sub go_to_search_packages {
     my ($self) = @_;
-    send_key 'alt-d';    # details button
-    assert_screen 'packages-manager-detail';
-    assert_and_click 'packages-search-tab';
-    assert_and_click 'packages-search-field-selected';
+    if (check_var('VIDEOMODE', 'text')) {
+        assert_screen 'patterns-list-selected';
+        wait_screen_change { send_key 'alt-f' };
+        for (1 .. 4) { send_key 'down'; }
+        send_key 'ret';
+        assert_screen 'pattern_selector';
+    }
+    else {
+        send_key 'alt-d';    # details button
+        assert_screen 'packages-manager-detail';
+        assert_and_click 'packages-search-tab';
+        assert_and_click 'packages-search-field-selected';
+    }
 }
 
 =head2 move_down
@@ -184,8 +191,14 @@ highlight cursor one item down.
 
 sub move_down {
     my $ret = wait_screen_change { send_key 'down' };
-    workaround_bsc1189550() if (!$workaround_bsc1189550_done && is_sle('>=15-sp3'));
     last if (!$ret);    # down didn't change the screen, so exit here
+    if (is_sle('>=15-sp3')) {
+        # Sending 'down' twice, followed by 'up', scrolls to the intended item.
+        $ret = wait_screen_change { send_key 'down' };
+        # If screen did not change with the second down we are on the last item.
+        # In that case do not press up so that it remains selected.
+        wait_screen_change { send_key 'up' } if $ret;
+    }
     check12qtbug if check_var('VERSION', '12');
 }
 
@@ -224,10 +237,17 @@ C<$package_name>
 sub search_package {
     my ($self, $package_name) = @_;
     assert_and_click 'packages-search-field-selected';
-    wait_screen_change { send_key 'ctrl-a' };
-    wait_screen_change { send_key 'delete' };
-    type_string_slow "$package_name";
-    send_key 'alt-s';    # search button
+    if (check_var('VIDEOMODE', 'text')) {
+        wait_screen_change { send_key 'alt-p' };
+        type_string_slow "$package_name";
+        send_key 'ret';    # search
+    }
+    else {
+        wait_screen_change { send_key 'ctrl-a' };
+        wait_screen_change { send_key 'delete' };
+        type_string_slow "$package_name";
+        send_key 'alt-s';    # search button
+    }
 }
 
 =head2 select_all_patterns_by_menu
@@ -428,8 +448,9 @@ sub toggle_package {
 }
 
 sub use_wicked {
+    # Config DHCP for all interfaces except br0 and bring them up
     script_run "cd /proc/sys/net/ipv4/conf";
-    script_run("for i in *[0-9]; do echo BOOTPROTO=dhcp > /etc/sysconfig/network/ifcfg-\$i; wicked --debug all ifup \$i; done", 600);
+    script_run("for i in *[0-9]; do [ \$i != 'br0' ] && echo BOOTPROTO=dhcp > /etc/sysconfig/network/ifcfg-\$i; wicked --debug all ifup \$i; done", 600);
     save_screenshot;
 }
 
@@ -503,6 +524,7 @@ sub process_unsigned_files {
 # to deal with dependency issues, either work around it, or break dependency to continue with installation
 sub deal_with_dependency_issues {
     my ($self) = @_;
+    my $vendor_change = 0;
 
     return unless check_screen 'manual-intervention', 0;
 
@@ -523,13 +545,19 @@ sub deal_with_dependency_issues {
     elsif (check_var("BREAK_DEPS", '1')) {
         y2_logs_helper::break_dependency;
     }
+    elsif (check_var("VENDOR_CHG_DEPS", '1')) {
+        $vendor_change = 1;
+        y2_logs_helper::vendor_change_dependency;
+    }
     else {
         die 'Dependency problems';
     }
 
-    assert_screen 'dependency-issue-fixed';    # make sure the dependancy issue is fixed now
-    send_key 'alt-a';    # Accept
-    sleep 2;
+    if (!$vendor_change) {
+        assert_screen 'dependency-issue-fixed';    # make sure the dependancy issue is fixed now
+        send_key 'alt-a';    # Accept
+        sleep 2;
+    }
 
   DO_CHECKS:
     while (check_screen('accept-licence', 2)) {
@@ -583,6 +611,20 @@ sub deal_with_dependency_issues {
     }
 }
 
+sub is_sles_in_gm_phase {
+    return !get_var('BETA');
+}
+
+sub is_sles_in_rc_phase {
+    my $is_RC = !script_run('grep -r RC /README.BETA');
+    return $is_RC;
+}
+
+sub is_sles_in_rc_or_gm_phase {
+    my ($self) = @_;
+    return $self->is_sles_in_rc_phase || $self->is_sles_in_gm_phase;
+}
+
 sub save_remote_upload_y2logs {
     my ($self, %args) = @_;
 
@@ -612,9 +654,9 @@ sub post_fail_hook {
         # error pop-up and system will reboot, so log collection will fail (see poo#61052)
         $self->SUPER::post_fail_hook unless get_var('AUTOYAST');
         get_to_console;
-        $self->detect_bsc_1063638;
+        detect_bsc_1063638;
         $self->get_ip_address;
-        $self->remount_tmp_if_ro;
+        remount_tmp_if_ro;
         # Avoid collectin logs twice when investigate_yast2_failure() is inteded to hard-fail
         $self->save_upload_y2logs unless get_var('ASSERT_Y2LOGS');
         return if is_microos;
@@ -623,12 +665,6 @@ sub post_fail_hook {
         # Collect yast2 installer  strace and gbd debug output if is still running
         $self->save_strace_gdb_output;
     }
-}
-
-sub workaround_bsc1189550 {
-    wait_screen_change { send_key 'end' };
-    wait_screen_change { send_key 'home' };
-    $workaround_bsc1189550_done = 1;
 }
 
 # All steps in the installation are 'fatal'.

@@ -4,7 +4,7 @@
 # SPDX-License-Identifier: FSFAP
 # Summary: Package for ssh service tests
 #
-# Maintainer: QE YaST <qa-sle-yast@suse.de>, Huajian Luo <hluo@suse.com>
+# Maintainer: QE YaST and Migration (QE Yam) <qe-yam at suse de>
 
 package services::sshd;
 use base 'opensusebasetest';
@@ -44,6 +44,11 @@ sub prepare_test_data {
 
     # Allow password authentication for $ssh_testman
     assert_script_run(qq(echo -e "Match User $ssh_testman\\n\\tPasswordAuthentication yes" >> /etc/ssh/sshd_config)) if (get_var('PUBLIC_CLOUD'));
+
+    if (script_run('rpm -q busybox-psmisc') == 0) {
+        record_soft_failure("boo#1198137 - busybox-psmisc preferred by zypper");
+        zypper_call("in psmisc -busybox-psmisc");
+    }
 
     # Install software needed for this test module
     zypper_call("in netcat-openbsd expect psmisc");
@@ -140,8 +145,8 @@ sub ssh_basic_check {
     # SCP (poo#46937)
     assert_script_run "echo 'sshd.pm: Testing SCP subsystem' | logger";
     assert_script_run "scp -4v $ssh_testman\@localhost:/etc/resolv.conf /tmp";
-    assert_script_run "scp -4v '$ssh_testman\@localhost:/etc/{group,passwd}' /tmp";
-    assert_script_run "scp -4v '$ssh_testman\@localhost:/etc/ssh/*.pub' /tmp";
+    assert_script_run "scp -4v $ssh_testman\@localhost:/etc/{group,passwd} /tmp";
+    assert_script_run "scp -4v $ssh_testman\@localhost:/etc/ssh/*.pub /tmp";
 }
 
 sub do_ssh_cleanup {

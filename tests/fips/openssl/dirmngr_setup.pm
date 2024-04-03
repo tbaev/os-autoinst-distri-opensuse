@@ -1,7 +1,7 @@
 # Copyright 2019 SUSE LLC
 # SPDX-License-Identifier: GPL-2.0-or-later
 #
-# Package: expect openssl
+# Package: openssl
 # Summary: Setup dirmngr testing environment - create Root CA,
 #          testing ca, testing DER, and CRL
 #
@@ -13,6 +13,7 @@ use strict;
 use warnings;
 use testapi;
 use utils;
+use version_utils;
 
 sub dirmngr_setup {
 
@@ -40,34 +41,19 @@ sub dirmngr_setup {
     assert_script_run 'echo 01 > ca/root-ca/db/root-ca.crt.srl';
     assert_script_run 'echo 01 > ca/root-ca/db/root-ca.crl.srl';
 
-    # Use expect for openssl Interactive mode
-    zypper_call("--no-refresh in expect dirmngr");
+    zypper_call("--no-refresh in dirmngr");
 
     # Create and download the root-ca.conf file
     assert_script_run "curl --silent " . data_url('openssl/root-ca/root-ca.conf') . " --output $ca_cfg";
 
     # Create root ca certificate
-    # assert_script_run("openssl req -new -config $ca_cfg -out $ca_csr -keyout $ca_key");
-    assert_script_run(
-        "expect -c 'spawn openssl req -new -config $ca_cfg -out $ca_csr -keyout $ca_key; \\
-        expect \"Enter PEM pass phrase:\"; send \"$ssl_pwd\\n\"; \\
-        expect \"Verifying - Enter PEM pass phrase:\"; send \"$ssl_pwd\\n\"; interact'"
-    );
-
-    # assert_script_run("openssl ca -selfsign -config $ca_cfg -in $ca_csr -out $ca_crt -extensions root_ca_ext -enddate 20301231235959Z");
-    assert_script_run(
-        "expect -c 'spawn openssl ca -selfsign -config $ca_cfg -in $ca_csr -out $ca_crt -extensions root_ca_ext -enddate 20301231235959Z; \\
-        expect \"Enter pass phrase\"; send \"$ssl_pwd\\n\"; \\
-        expect \"Sign the certificate\"; send \"y\\n\"; \\
-        expect \"1 out of 1 certificate requests certified\"; send \"y\\n\"; interact'"
-    );
+    my $hashing = is_sle('15-SP6+') ? '-aes256' : '';
+    assert_script_run("openssl genrsa $hashing -out $ca_key -passout 'pass:$ssl_pwd' 2048");
+    assert_script_run("openssl req -new -config $ca_cfg -out $ca_csr -key $ca_key -passin 'pass:$ssl_pwd' -passout 'pass:$ssl_pwd'");
+    assert_script_run("openssl ca -selfsign -batch -config $ca_cfg -in $ca_csr -out $ca_crt -extensions root_ca_ext -enddate 20301231235959Z -passin 'pass:$ssl_pwd'");
 
     # Create initial CRL
-    # assert_script_run("openssl ca -gencrl -config $ca_cfg -out $ca_crl");
-    assert_script_run(
-        "expect -c 'spawn openssl ca -gencrl -config $ca_cfg -out $ca_crl; \\
-        expect \"Enter pass phrase for\"; send \"$ssl_pwd\\n\"; interact'"
-    );
+    assert_script_run("openssl ca -gencrl -config $ca_cfg -out $ca_crl -passin 'pass:$ssl_pwd'");
 
     my $crt_csr_t1 = "$myca_dir/certs/test1.csr";
     my $crt_key_t1 = "$myca_dir/certs/test1.key";
@@ -77,50 +63,20 @@ sub dirmngr_setup {
     my $crt_t2 = "$myca_dir/certs/test2.crt";
 
     # Create test certificates (test1.crt)
-    #assert_script_run("openssl req -new -config $ca_cfg -out $crt_csr_t1 -keyout $crt_key_t1");
-    assert_script_run(
-        "expect -c 'spawn openssl req -new -config $ca_cfg -out $crt_csr_t1 -keyout $crt_key_t1; \\
-        expect \"Enter PEM pass phrase:\"; send \"$ssl_pwd\\n\"; \\
-        expect \"Verifying - Enter PEM pass phrase:\"; send \"$ssl_pwd\\n\"; interact'"
-    );
-
-    #assert_script_run("openssl ca -config $ca_cfg -in $crt_csr_t1 -out $crt_t1");
-    assert_script_run(
-        "expect -c 'spawn openssl ca -config $ca_cfg -in $crt_csr_t1 -out $crt_t1 ; \\
-        expect \"Enter pass phrase\"; send \"$ssl_pwd\\n\"; \\
-        expect \"Sign the certificate?\"; send \"y\\n\"; \\
-        expect \"1 out of 1 certificate requests certified\"; send \"y\\n\"; interact'"
-    );
+    assert_script_run("openssl genrsa $hashing -out $crt_key_t1 -passout 'pass:$ssl_pwd' 2048");
+    assert_script_run("openssl req -new -config $ca_cfg -out $crt_csr_t1 -key $crt_key_t1 -passin 'pass:$ssl_pwd' -passout 'pass:$ssl_pwd'");
+    assert_script_run("openssl ca -batch -config $ca_cfg -in $crt_csr_t1 -out $crt_t1 -passin 'pass:$ssl_pwd'");
 
     # Create test certificates (test2.crt)
-    # assert_script_run("openssl req -new -config $ca_cfg -out $crt_csr_t2 -keyout $crt_key_t2");
-    assert_script_run(
-        "expect -c 'spawn openssl req -new -config $ca_cfg -out $crt_csr_t2 -keyout $crt_key_t2; \\
-        expect \"Enter PEM pass phrase:\"; send \"$ssl_pwd\\n\"; \\
-        expect \"Verifying - Enter PEM pass phrase:\"; send \"$ssl_pwd\\n\"; interact'"
-    );
-
-    # assert_script_run("openssl ca -config $ca_cfg -in $crt_csr_t2 -out $crt_t2");
-    assert_script_run(
-        "expect -c 'spawn openssl ca -config $ca_cfg -in $crt_csr_t2 -out $crt_t2 ; \\
-        expect \"Enter pass phrase for\"; send \"$ssl_pwd\\n\"; \\
-        expect \"Sign the certificate\"; send \"y\\n\"; \\
-        expect \"1 out of 1 certificate requests certified\"; send \"y\\n\"; interact'"
-    );
+    assert_script_run("openssl genrsa $hashing -out $crt_key_t2 -passout 'pass:$ssl_pwd' 2048");
+    assert_script_run("openssl req -new -config $ca_cfg -out $crt_csr_t2 -key $crt_key_t2 -passout 'pass:$ssl_pwd' -passin 'pass:$ssl_pwd'");
+    assert_script_run("openssl ca -batch -config $ca_cfg -in $crt_csr_t2 -out $crt_t2 -passin 'pass:$ssl_pwd'");
 
     # Revoke test1.crt but keep test2.crt
-    # openssl ca -revoke certs/test1.crt -config etc/root-ca.conf
-    assert_script_run(
-        "expect -c 'spawn openssl ca -revoke $crt_t1 -config $ca_cfg; \\
-        expect \"Enter pass phrase\"; send \"$ssl_pwd\\n\"; interact'"
-    );
+    assert_script_run("openssl ca -revoke $crt_t1 -config $ca_cfg -passin 'pass:$ssl_pwd'");
 
     # Update the CRL
-    # assert_script_run("openssl ca -gencrl -config $ca_cfg -out $ca_crl");
-    assert_script_run(
-        "expect -c 'spawn openssl ca -gencrl -config $ca_cfg -out $ca_crl; \\
-        expect \"Enter pass phrase for\"; send \"$ssl_pwd\\n\"; interact'"
-    );
+    assert_script_run("openssl ca -gencrl -config $ca_cfg -out $ca_crl -passin 'pass:$ssl_pwd'");
 
     my $ca_der = "$myca_dir/ca/root-ca.crt.der";
     my $crt_crl_der = "$myca_dir/crl/root-ca.crl.der";

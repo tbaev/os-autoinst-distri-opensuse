@@ -16,7 +16,7 @@ use base 'y2_installbase';
 use strict;
 use warnings;
 use testapi;
-use version_utils qw(is_microos is_sle_micro is_upgrade is_sle);
+use version_utils qw(is_microos is_sle_micro is_upgrade is_sle is_tumbleweed);
 use Utils::Backends qw(is_remote_backend is_hyperv);
 use Test::Assert ':all';
 
@@ -25,8 +25,14 @@ sub ensure_ssh_unblocked {
 
         # ssh section is not shown up directly in text mode. Navigate into
         # installation overview frame and hitting down button to get there.
-        if (check_var('VIDEOMODE', 'text') and is_sle_micro()) {
-            send_key_until_needlematch 'installation-settings-overview-selected', 'tab', 25;
+        if (check_var('VIDEOMODE', 'text') and (is_sle_micro() or is_tumbleweed)) {
+            if (is_sle_micro) {
+                send_key_until_needlematch 'installation-settings-overview-selected', 'tab', 25;
+            }
+            else {
+                send_key_until_needlematch 'installation-settings-release-notes-selected', 'tab', 25;
+                send_key 'tab';
+            }
             send_key_until_needlematch [qw(ssh-blocked ssh-open)], 'down', 60;
         }
         else {
@@ -92,6 +98,30 @@ sub set_linux_security_to_none {
     assert_screen 'installation-settings-overview-loaded', 120;
 }
 
+sub disable_secureboot {
+    if (check_var('VIDEOMODE', 'text')) {
+        send_key_until_needlematch [qw(secureboot-enable secureboot-disable)], 'down', 60;
+    } else {
+        send_key_until_needlematch [qw(secureboot-enable secureboot-disable)], 'tab', 60;
+    }
+    if (match_has_tag 'secureboot-enable') {
+        if (check_var('VIDEOMODE', 'text')) {
+            send_key 'alt-c';
+            assert_screen 'inst-overview-options';
+            send_key 'alt-b';
+            send_key 'alt-s';
+            assert_screen 'bootloader-secureboot-disable';
+            send_key 'alt-o';
+            assert_screen 'secureboot-disable';
+        }
+        else {
+            send_key_until_needlematch 'secureboot-enabled-selected', 'tab', 26;
+            send_key 'ret';
+            send_key_until_needlematch 'secureboot-disable', 'tab';
+        }
+    }
+}
+
 sub run {
     my ($self) = shift;
     # overview-generation
@@ -114,6 +144,7 @@ sub run {
         set_linux_security_to_none if (is_sle('>=15-SP4') && check_screen("apparmor-not-selected") && !(get_var('PATTERNS') =~ 'default|all|apparmor'));
         ensure_ssh_unblocked;
         $self->check_default_target();
+        $self->disable_secureboot() if (get_var('UEFI') && get_var('DISABLE_SECUREBOOT'));
     }
 }
 

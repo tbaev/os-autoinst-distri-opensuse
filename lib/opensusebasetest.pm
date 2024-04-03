@@ -23,6 +23,8 @@ use isotovideo;
 use IO::Socket::INET;
 use x11utils qw(handle_login ensure_unlocked_desktop handle_additional_polkit_windows);
 use publiccloud::ssh_interactive 'select_host_console';
+use Utils::Logging qw(save_and_upload_log tar_and_upload_log export_healthcheck_basic select_log_console upload_coredumps export_logs);
+use serial_terminal 'select_serial_terminal';
 
 # Base class for all openSUSE tests
 
@@ -83,157 +85,6 @@ sub post_run_hook {
     # overloaded in x11 and console
 }
 
-=head2 save_and_upload_log
-
- save_and_upload_log($cmd, $file [, timeout => $timeout] [, screenshot => $screenshot] [, noupload => $noupload]);
-
-Will run C<$cmd> on the SUT (without caring for the return code) and tee the standard output to a file called C<$file>.
-The C<$timeout> parameter specifies how long C<$cmd> may run.
-When C<$cmd> returns, the output file will be uploaded to openQA unless C<$noupload> is set.
-Afterwards a screenshot will be created if C<$screenshot> is set.
-=cut
-
-sub save_and_upload_log {
-    my ($self, $cmd, $file, $args) = @_;
-    script_run("$cmd | tee $file", $args->{timeout});
-    my $lname = $args->{logname} ? $args->{logname} : '';
-    upload_logs($file, failok => 1, log_name => $lname) unless $args->{noupload};
-    save_screenshot if $args->{screenshot};
-}
-
-=head2 tar_and_upload_log
-
- tar_and_upload_log($sources, $dest, [, timeout => $timeout] [, screenshot => $screenshot] [, noupload => $noupload]);
-
-Will create an xz compressed tar archive with filename C<$dest> from the folder(s) listed in C<$sources>.
-The return code of C<tar> will be ignored.
-The C<$timeout> parameter specifies how long C<tar> may run.
-When C<tar> returns, the output file will be uploaded to openQA unless C<$noupload> is set.
-Afterwards a screenshot will be created if C<$screenshot> is set.
-
-=cut
-
-sub tar_and_upload_log {
-    my ($self, $sources, $dest, $args) = @_;
-    script_run("tar -jcv -f $dest $sources", $args->{timeout});
-    upload_logs($dest, failok => 1) unless $args->{noupload};
-    save_screenshot() if $args->{screenshot};
-}
-
-=head2 save_and_upload_systemd_unit_log
-
- save_and_upload_systemd_unit_log($unit);
-
-Saves the journal of the systemd unit C<$unit> to C<journal_$unit.log> and uploads it to openQA.
-
-=cut
-
-sub save_and_upload_systemd_unit_log {
-    my ($self, $unit) = @_;
-    $self->save_and_upload_log("journalctl --no-pager -u $unit -o short-precise", "journal_$unit.log");
-}
-
-=head2 detect_bsc_1063638
-
- detect_bsc_1063638();
-
-Btrfs maintenance jobs lead to the system being unresponsive and affects SUT's performance.
-Not to waste time during investigation of the failures, we would like to detect
-if such jobs are running, providing a hint why test timed out.
-This method will create a softfail if such a problem is detected.
-
-=cut
-
-sub detect_bsc_1063638 {
-    # Detect bsc#1063638
-    record_soft_failure 'bsc#1063638' if (script_run('ps x | grep "btrfs-\(scrub\|balance\|trim\)"') == 0);
-}
-
-=head2 problem_detection
-
- problem_detection();
-
-This method will upload a number of logs and debugging information.
-This includes a log with all journal errors, a systemd unit plot and the
-output of rpmverify.
-The files will be uploaded as a single tarball called C<problem_detection_logs.tar.xz>.
-
-=cut
-
-sub problem_detection {
-    my $self = shift;
-
-    enter_cmd "pushd \$(mktemp -d)";
-    $self->detect_bsc_1063638;
-    # Slowest services
-    $self->save_and_upload_log("systemd-analyze blame", "systemd-analyze-blame.txt", {noupload => 1});
-    clear_console;
-
-    # Generate and upload SVG out of `systemd-analyze plot'
-    $self->save_and_upload_log('systemd-analyze plot', "systemd-analyze-plot.svg", {noupload => 1});
-    clear_console;
-
-    # Failed system services
-    $self->save_and_upload_log('systemctl --all --state=failed', "failed-system-services.txt", {screenshot => 1, noupload => 1});
-    clear_console;
-
-    # Unapplied configuration files
-    $self->save_and_upload_log("find /* -name '*.rpmnew'", "unapplied-configuration-files.txt", {screenshot => 1, noupload => 1});
-    clear_console;
-
-    # Errors, warnings, exceptions, and crashes mentioned in dmesg
-    $self->save_and_upload_log("dmesg | grep -i 'error\\|warn\\|exception\\|crash'", "dmesg-errors.txt", {screenshot => 1, noupload => 1});
-    clear_console;
-
-    # Errors in journal
-    $self->save_and_upload_log("journalctl --no-pager -p 'err' -o short-precise", "journalctl-errors.txt", {screenshot => 1, noupload => 1});
-    clear_console;
-
-    # Tracebacks in journal
-    $self->save_and_upload_log('journalctl -o short-precise | grep -i traceback', "journalctl-tracebacks.txt", {screenshot => 1, noupload => 1});
-    clear_console;
-
-    # Segmentation faults
-    $self->save_and_upload_log("coredumpctl list", "segmentation-faults-list.txt", {screenshot => 1, noupload => 1});
-    $self->save_and_upload_log("coredumpctl info", "segmentation-faults-info.txt", {screenshot => 1, noupload => 1});
-    # Save core dumps
-    enter_cmd "mkdir -p coredumps";
-    enter_cmd 'awk \'/Storage|Coredump/{printf("cp %s ./coredumps/\n",$2)}\' segmentation-faults-info.txt | sh';
-    clear_console;
-
-    # Broken links
-    $self->save_and_upload_log(
-"find / -type d \\( -path /proc -o -path /run -o -path /.snapshots -o -path /var \\) -prune -o -xtype l -exec ls -l --color=always {} \\; -exec rpmquery -f {} \\;",
-        "broken-symlinks.txt",
-        {screenshot => 1, noupload => 1, timeout => 60});
-    clear_console;
-
-    # Binaries with missing libraries
-    $self->save_and_upload_log("
-IFS=:
-for path in \$PATH; do
-    for bin in \$path/*; do
-        ldd \$bin 2> /dev/null | grep 'not found' && echo -n Affected binary: \$bin 'from ' && rpmquery -f \$bin
-    done
-done", "binaries-with-missing-libraries.txt", {timeout => 60, noupload => 1});
-    clear_console;
-
-    # rpmverify problems
-    $self->save_and_upload_log("rpmverify -a | grep -v \"[S5T].* c \"", "rpmverify-problems.txt", {timeout => 1200, screenshot => 1, noupload => 1});
-    clear_console;
-
-    # VMware specific
-    if (check_var('VIRSH_VMM_FAMILY', 'vmware')) {
-        script_run('vm-support');
-        upload_logs('vm-*.*.tar.gz', failok => 1);
-        clear_console;
-    }
-
-    script_run 'tar cvvJf problem_detection_logs.tar.xz *';
-    upload_logs('problem_detection_logs.tar.xz', failok => 1);
-    enter_cmd "popd";
-}
-
 =head2 investigate_yast2_failure
 
  investigate_yast2_failure(logs_path => $logs_path);
@@ -265,24 +116,25 @@ sub investigate_yast2_failure {
     );
     # Hash with known errors which we don't want to track in each postfail hook
     my %y2log_known_errors = (
+        "<3>.*Can't find YCP client component clone_proposal" => 'bsc#1218700',
+        "<3>.*84 Factory receive nil name" => 'bsc#1218700',
         "<3>.*QueryWidget failed.*RichText.*VScrollValue" => 'bsc#1167248',
-        "<3>.*Solverrun finished with an ERROR" => 'bsc#1170322',
-        "<3>.*3 packages failed.*badlist" => 'bsc#1170322',
-        "<3>.*Unknown option.*MultiSelectionBox widget" => 'bsc#1170431',
         "<3>.*XML.*Argument.*to Read.*is nil" => 'bsc#1170432',
         "<3>.*no[t]? mount" => 'bsc#1092088',    # Detect not mounted partition
         "<3>.*lib/cheetah.rb" => 'bsc#1153749',
+        "<3>.*Invalid path .value." => 'bsc#1180208',
         # The error below will be cleaned up, see https://trello.com/c/5qTQZKH3/2918-sp2-logs-cleanup
         # Adding reference to trello, detect those in single scenario
         # (build97.1) regressions
         # found https://openqa.suse.de/tests/3646274#step/logs_from_installation_system/412
-        "<3>.*SCR::Dir\\(\\) failed" => 'bsc#1158186',
-        "<3>.*Unknown desktop file: installation" => 'bsc#1158186',
-        "<3>.*Bad options for module: virtio_net" => 'bsc#1158186',
-        "<3>.*Wrong value for path ." => 'bsc#1158186',
-        "<3>.*setOptions:Empty map" => 'bsc#1158186',
-        "<3>.*Unmounting media failed" => 'bsc#1158186',
-        "<3>.*No base product has been found" => 'bsc#1158186',
+        "<3>.*SCR::Dir\\(\\) failed" => 'bsc#1158186 -> WONTFIX',
+        "<3>.*Unknown desktop file: installation" => 'bsc#1158186 -> WONTFIX',
+        "<3>.*Bad options for module: virtio_net" => 'bsc#1158186 -> WONTFIX',
+        "<3>.*Wrong value for path ." => 'bsc#1158186 -> WONTFIX',
+        "<3>.*setOptions:Empty map" => 'bsc#1158186 -> WONTFIX',
+        "<3>.*Unmounting media failed" => 'bsc#1158186 -> WONTFIX',
+        "<3>.*No base product has been found" => 'bsc#1158186 -> WONTFIX',
+        "<3>.*SystemCmd.cc\\(step_fork_and_exec\\)" => 'bsc#1219294 -> WONTFIX',
         "<3>.*Error output: dracut:" => 'https://trello.com/c/5qTQZKH3/2918-sp2-logs-cleanup',
         "<3>.*Reading install.inf" => 'https://trello.com/c/5qTQZKH3/2918-sp2-logs-cleanup',
         "<3>.*shellcommand" => 'https://trello.com/c/5qTQZKH3/2918-sp2-logs-cleanup',
@@ -354,6 +206,7 @@ sub investigate_yast2_failure {
         "<3>.*Could not import key.*Subprocess failed" => 'https://trello.com/c/5qTQZKH3/2918-sp2-logs-cleanup',
         "<3>.*baseproduct symlink is dangling or missing" => 'https://trello.com/c/5qTQZKH3/2918-sp2-logs-cleanup',
         "<3>.*falling back to @\\{DEFAULT_HOME_PATH\\}" => 'https://trello.com/c/5qTQZKH3/2918-sp2-logs-cleanup',
+        "<3>.*open for json file '/etc/libstorage/udev-filters.json' failed" => 'https://trello.com/c/5qTQZKH3/2918-sp2-logs-cleanup',
         # libzypp errors
         "<3>.*The requested URL returned error" => 'https://trello.com/c/5qTQZKH3/2918-sp2-logs-cleanup',
         "<3>.*Not adding cache" => 'https://trello.com/c/5qTQZKH3/2918-sp2-logs-cleanup',
@@ -383,10 +236,10 @@ sub investigate_yast2_failure {
     my $detected_errors_detailed = '';
     for my $y2log_error (keys %y2log_errors) {
         if (my $y2log_error_result = script_output("$cmd_prefix -m 20 -C 5 -E \"$y2log_error\" $cmd_postfix")) {
-            # Save detected error to indetify if have new regressions
+            # Save detected error to identify if there are new regressions
             push @detected_errors, $y2log_error;
             if (my $bug = $y2log_errors{$y2log_error}) {
-                record_info('Softfail', "$bug\n\nDetails:\n$y2log_error_result", result => 'softfail');
+                record_info('Softfail', "$bug\n\nDetails:\n$y2log_error_result", result => 'softfail') unless ($bug =~ m/WONTFIX|trello/);
                 next;
             }
             $detected_errors_detailed .= "$y2log_error_result\n\n$delimiter\n\n";
@@ -424,109 +277,6 @@ sub investigate_yast2_failure {
     }
 }
 
-=head2 export_healthcheck_basic
-
- export_healthcheck_basic();
-
-Upload healthcheck logs that make sense for any failure.
-This includes C<cpu>, C<memory> and C<fdisk>.
-
-=cut
-
-sub export_healthcheck_basic {
-
-    my $cmd = <<'EOF';
-health_log_file="/tmp/basic_health_check.txt"
-echo -e "free -h" > $health_log_file
-free -h >> $health_log_file
-echo -e "\nvmstat" >> $health_log_file
-vmstat >> $health_log_file
-echo -e "\nfdisk -l" >> $health_log_file
-fdisk -l >> $health_log_file
-echo -e "\ndh -h" >> $health_log_file
-df -h >> $health_log_file
-echo -e "\ndh -i" >> $health_log_file
-df -i >> $health_log_file
-echo -e "\nTop 10 CPU Processes" >> $health_log_file
-ps axwwo %cpu,pid,user,cmd | sort -k 1 -r -n | head -11 | sed -e '/^%/d' >> $health_log_file
-echo -e "\nTop 10 Memory Processes" >> $health_log_file
-ps axwwo %mem,pid,user,cmd | sort -k 1 -r -n | head -11 | sed -e '/^%/d' >> $health_log_file
-echo -e "\nALL Processes" >> $health_log_file
-ps axwwo user,pid,ppid,%cpu,%mem,vsz,rss,stat,time,cmd >> $health_log_file
-EOF
-    script_run($_) foreach (split /\n/, $cmd);
-    upload_logs "/tmp/basic_health_check.txt";
-
-}
-
-=head2 export_logs_basic
-
- export_logs_basic();
-
-Upload logs that make sense for any failure.
-This includes C</proc/loadavg>, C<ps axf>, complete journal since last boot, C<dmesg> and C</etc/sysconfig>.
-
-=cut
-
-sub export_logs_basic {
-    my ($self) = @_;
-    $self->save_and_upload_log('cat /proc/loadavg', '/tmp/loadavg.txt', {screenshot => 1});
-    $self->save_and_upload_log('ps axf', '/tmp/psaxf.log', {screenshot => 1});
-    $self->save_and_upload_log('journalctl -b -o short-precise', '/tmp/journal.log', {screenshot => 1});
-    $self->save_and_upload_log('dmesg', '/tmp/dmesg.log', {screenshot => 1});
-    $self->tar_and_upload_log('/etc/sysconfig', '/tmp/sysconfig.tar.bz2');
-
-    for my $service (get_started_systemd_services()) {
-        $self->save_and_upload_log("journalctl -b -u $service", "/tmp/journal_$service.log", {screenshot => 1});
-    }
-}
-
-=head2 select_log_console
-
- select_log_console();
-
-Select 'log-console' with higher timeout on screen check to even cover systems
-that react very slow due to high background load or high memory consumption.
-This should be especially useful in C<post_fail_hook> implementations.
-
-=cut
-
-sub select_log_console { select_console('log-console', timeout => 180, @_) }
-
-=head2 export_logs
-
- export_logs();
-
-This method will call several other log gathering methods from this class.
-
-=cut
-
-sub export_logs {
-    my ($self) = shift;
-    select_log_console;
-    save_screenshot;
-    show_oom_info;
-    $self->remount_tmp_if_ro;
-    $self->export_logs_basic;
-    $self->problem_detection;
-
-    # Just after the setup: let's see the network configuration
-    $self->save_and_upload_log("ip addr show", "/tmp/ip-addr-show.log");
-    $self->save_and_upload_log("cat /etc/resolv.conf", "/tmp/resolv-conf.log");
-
-    save_screenshot;
-
-    $self->export_logs_desktop;
-
-    $self->save_and_upload_log('systemctl list-unit-files', '/tmp/systemctl_unit-files.log');
-    $self->save_and_upload_log('systemctl status', '/tmp/systemctl_status.log');
-    $self->save_and_upload_log('systemctl', '/tmp/systemctl.log', {screenshot => 1});
-
-    if ($utils::IN_ZYPPER_CALL) {
-        $self->upload_solvertestcase_logs();
-    }
-}
-
 =head2 export_logs_locale
 
  export_logs_locale();
@@ -538,9 +288,9 @@ This includes C<locale>, C<localectl> and C</etc/vconsole.conf>.
 
 sub export_logs_locale {
     my ($self) = shift;
-    $self->save_and_upload_log('locale', '/tmp/locale.log');
-    $self->save_and_upload_log('localectl status', '/tmp/localectl.log');
-    $self->save_and_upload_log('cat /etc/vconsole.conf', '/tmp/vconsole.conf');
+    save_and_upload_log('locale', '/tmp/locale.log');
+    save_and_upload_log('localectl status', '/tmp/localectl.log');
+    save_and_upload_log('cat /etc/vconsole.conf', '/tmp/vconsole.conf');
 }
 
 =head2 upload_packagekit_logs
@@ -556,22 +306,6 @@ sub upload_packagekit_logs {
     upload_logs '/var/log/pk_backend_zypp';
 }
 
-=head2 upload_solvertestcase_logs
-
- upload_solvertestcase_logs();
-
-Upload C</tmp/solverTestCase.tar.bz2>.
-
-=cut
-
-sub upload_solvertestcase_logs {
-    my $ret = script_run("zypper -n patch --debug-solver --with-interactive -l");
-    # if zypper was not found, we just skip upload solverTestCase.tar.bz2
-    return if $ret != 0;
-    script_run("tar -cvjf /tmp/solverTestCase.tar.bz2 /var/log/zypper.solverTestCase/*");
-    upload_logs "/tmp/solverTestCase.tar.bz2 ";
-}
-
 =head2 set_standard_prompt
 
  set_standard_prompt();
@@ -583,53 +317,6 @@ Set a simple reproducible prompt for easier needle matching without hostname.
 sub set_standard_prompt {
     my ($self, $user) = @_;
     $testapi::distri->set_standard_prompt($user);
-}
-
-=head2 export_logs_desktop
-
- export_logs_desktop();
-
-Upload several KDE, GNOME, X11, GDM and SDDM related logs and configs.
-
-=cut
-
-sub export_logs_desktop {
-    my ($self) = @_;
-    select_log_console;
-    save_screenshot;
-
-    if (check_var("DESKTOP", "kde")) {
-        if (get_var('PLASMA5')) {
-            $self->tar_and_upload_log("/home/$username/.config/*rc", '/tmp/plasma5_configs.tar.bz2');
-        }
-        else {
-            $self->tar_and_upload_log("/home/$username/.kde4/share/config/*rc", '/tmp/kde4_configs.tar.bz2');
-        }
-        save_screenshot;
-    } elsif (check_var("DESKTOP", "gnome")) {
-        $self->tar_and_upload_log("/home/$username/.cache/gdm", '/tmp/gdm.tar.bz2');
-    }
-
-    # check whether xorg logs exist in user's home, if yes, upload xorg logs
-    # from user's home instead of /var/log
-    my $log_path = '/home/*/.local/share/xorg/';
-    if (!script_run("test -d $log_path")) {
-        $self->tar_and_upload_log("$log_path", '/tmp/Xlogs.users.tar.bz2', {screenshot => 1});
-    }
-    $log_path = '/var/log/X*';
-    if (!script_run("ls -l $log_path")) {
-        $self->save_and_upload_log("cat $log_path", '/tmp/Xlogs.system.log', {screenshot => 1});
-    }
-
-    # do not upload empty .xsession-errors
-    $log_path = '/home/*/.xsession-errors*';
-    if (!script_run("ls -l $log_path")) {
-        $self->save_and_upload_log("cat $log_path", '/tmp/xsession-errors.log', {screenshot => 1});
-    }
-    $log_path = '/home/*/.local/share/sddm/*session.log';
-    if (!script_run("ls -l $log_path")) {
-        $self->save_and_upload_log("cat $log_path", '/tmp/sddm_session.log', {screenshot => 1});
-    }
 }
 
 =head2 handle_uefi_boot_disk_workaround
@@ -699,7 +386,7 @@ sub wait_grub {
     push @tags, 'grub2';
     push @tags, 'boot-live-' . get_var('DESKTOP') if get_var('LIVETEST');    # LIVETEST won't to do installation and no grub2 menu show up
     push @tags, 'bootloader' if get_var('OFW');
-    push @tags, 'encrypted-disk-password-prompt-grub' if get_var('ENCRYPT');
+    push @tags, 'encrypted-disk-password-prompt-grub', 'encrypted-disk-password-prompt' if get_var('ENCRYPT');
     if (get_var('ONLINE_MIGRATION')) {
         push @tags, 'migration-source-system-grub2';
     }
@@ -770,9 +457,9 @@ sub wait_grub {
     elsif (match_has_tag('inst-bootmenu')) {
         $self->wait_grub_to_boot_on_local_disk;
     }
-    elsif (match_has_tag('encrypted-disk-password-prompt-grub')) {
+    elsif (match_has_tag('encrypted-disk-password-prompt-grub') || match_has_tag('encrypted-disk-password-prompt')) {
         # unlock encrypted disk before grub
-        workaround_type_encrypted_passphrase;
+        unlock_bootloader;
         assert_screen("grub2", timeout => ((is_pvm) ? 300 : 90));
     }
     mutex_wait 'support_server_ready' if get_var('USE_SUPPORT_SERVER');
@@ -793,6 +480,12 @@ sub wait_grub_to_boot_on_local_disk {
     my @tags = qw(grub2 tianocore-mainmenu);
     push @tags, 'encrypted-disk-password-prompt' if (get_var('ENCRYPT'));
 
+    # Workaround for poo#118336
+    if (is_ppc64le && is_qemu) {
+        push @tags, 'linux-login' if check_var('DESKTOP', 'textmode');
+        push @tags, 'displaymanager' if check_var('DESKTOP', 'gnome');
+    }
+
     # Enable boot menu for x86_64 uefi workaround, see bsc#1180080 for details
     if (is_sle && get_required_var('FLAVOR') =~ /Migration/ && is_x86_64 && get_var('UEFI')) {
         if (!check_screen(\@tags, 15)) {
@@ -808,14 +501,18 @@ sub wait_grub_to_boot_on_local_disk {
         }
     }
 
-    # We need to wait more time for aarch64's tianocore-mainmenu
-    (is_aarch64) ? assert_screen(\@tags, 30) : assert_screen(\@tags, 15);
+    # We need to wait more for aarch64's tianocore-mainmenu and for qemu ppc64le
+    if ((is_aarch64) || (is_ppc64le && is_qemu)) {
+        assert_screen(\@tags, 30);
+    } else {
+        assert_screen(\@tags, 15);
+    }
     if (match_has_tag('tianocore-mainmenu')) {
         opensusebasetest::handle_uefi_boot_disk_workaround();
         check_screen('encrypted-disk-password-prompt', 10);
     }
     if (match_has_tag('encrypted-disk-password-prompt')) {
-        workaround_type_encrypted_passphrase;
+        unlock_bootloader;
         assert_screen('grub2');
     }
 }
@@ -824,6 +521,7 @@ sub reconnect_s390 {
     my (%args) = @_;
     my $ready_time = $args{ready_time};
     my $textmode = $args{textmode};
+    my $enable_root_ssh = $args{enable_root_ssh} // 0;
     return undef unless is_s390x;
     my $login_ready = get_login_message();
     if (is_backend_s390x) {
@@ -845,7 +543,7 @@ sub reconnect_s390 {
     else {
         my $worker_hostname = get_required_var('WORKER_HOSTNAME');
         my $virsh_guest = get_required_var('VIRSH_GUEST');
-        workaround_type_encrypted_passphrase if get_var('S390_ZKVM');
+        unlock_bootloader if get_var('S390_ZKVM');
 
         select_console('svirt');
         save_svirt_pty;
@@ -854,9 +552,15 @@ sub reconnect_s390 {
         grub_select;
 
         type_line_svirt '', expect => $login_ready, timeout => $ready_time + 100, fail_message => 'Could not find login prompt';
-        type_line_svirt "root", expect => 'Password';
+        type_line_svirt "root", expect => qr/Passwor[dt]/;
         type_line_svirt "$testapi::password";
         type_line_svirt "systemctl is-active network", expect => 'active';
+        if ($enable_root_ssh eq 1) {
+            record_info('Enable root ssh login');
+            type_line_svirt "mkdir -p /etc/ssh/sshd_config.d";
+            type_line_svirt "echo 'PermitRootLogin yes' \\> /etc/ssh/sshd_config.d/root.conf";
+            type_line_svirt "systemctl restart sshd";
+        }
         type_line_svirt 'systemctl is-active sshd', expect => 'active';
 
         # make sure we can reach the SSH server in the SUT, try up to 1 min (12 * 5s)
@@ -939,18 +643,34 @@ sub grub_select {
             boot_grub_item($first_menu);
         }
     }
+    elsif (is_ppc64le && is_qemu) {
+        my @tags = qw(grub2);
+
+        # Workaround for poo#118336
+        push @tags, 'linux-login' if check_var('DESKTOP', 'textmode');
+        push @tags, 'displaymanager' if check_var('DESKTOP', 'gnome');
+
+        assert_screen(\@tags);
+
+        if (match_has_tag 'grub2') {
+            send_key 'ret';
+        }
+    }
     elsif (!get_var('S390_ZKVM')) {
         # confirm default choice
         send_key 'ret';
-        if (get_var('USE_SUPPORT_SERVER') && is_aarch64 && is_opensuse)
-        {
-            # On remote installations of openSUSE distris on aarch64, first key
-            # press doesn't always reach the SUT, so introducing the workaround
-            wait_still_screen;
-            if (check_screen('grub2')) {
-                record_info 'WARN', 'Return key did not reach the system, re-trying';
-                send_key 'ret';
-            }
+    }
+
+    if (((is_ppc64le && is_qemu) || (!get_var('S390_ZKVM') && is_aarch64 && is_opensuse)) && get_var('USE_SUPPORT_SERVER')) {
+        # First key press doesn't always reach the SUT on all the remote installations.
+        # It happens on some specific machine types:
+        # - on aarch64 using openSUSE distris
+        # - on ppc64le at second boot in short time
+        # so introducing the workaround
+        wait_still_screen;
+        if (check_screen('grub2')) {
+            record_info 'WARN', 'Return key did not reach the system, re-trying';
+            send_key 'ret';
         }
     }
 }
@@ -959,14 +679,14 @@ sub handle_grub {
     my ($self, %args) = @_;
     my $bootloader_time = $args{bootloader_time};
     my $in_grub = $args{in_grub};
-    my $linux_boot_entry = $args{linux_boot_entry} // (is_sle('15+') ? 15 : 14);
-    $linux_boot_entry = $linux_boot_entry - 1 if is_aarch64;    # poo#100500
 
     # On Xen PV and svirt we don't see a Grub menu
     # If KEEP_GRUB_TIMEOUT is defined it means that GRUB menu will appear only for one second
     return if (check_var('VIRSH_VMM_FAMILY', 'xen') && check_var('VIRSH_VMM_TYPE', 'linux') && is_svirt || check_var('KEEP_GRUB_TIMEOUT', '1'));
     $self->wait_grub(bootloader_time => $bootloader_time, in_grub => $in_grub);
     if (my $boot_params = get_var('EXTRABOOTPARAMS_BOOT_LOCAL')) {
+        my $linux_boot_entry = get_var('EXTRABOOTPARAMS_LINE_OFFSET') // (is_sle('15+') ? 15 : 14);
+        $linux_boot_entry -= 1 if is_aarch64 && !get_var('EXTRABOOTPARAMS_LINE_OFFSET');    # poo#100500
         wait_screen_change { send_key 'e' };
         for (1 .. $linux_boot_entry) { send_key 'down' }
         wait_screen_change { send_key 'end' };
@@ -1048,15 +768,6 @@ sub wait_boot_past_bootloader {
     my $ready_time = $args{ready_time} // 500;
     my $nologin = $args{nologin};
     my $forcenologin = $args{forcenologin};
-
-    # Workaround for bsc#1204221 and bsc#1204230
-    if (is_sle('=15-SP5') && check_var('VIRSH_VMM_FAMILY', 'hyperv')) {
-        # This should only happen on SLE15SP5 and on hyperv
-        record_soft_failure 'workaround bsc#1204221 - Failed to boot at SLES15SP5 with gnome in hyperv 2019' if check_var('DESKTOP', 'gnome');
-        record_soft_failure 'workaround bsc#1204230 - Failed to boot at SLES15SP5 with x server in hyperv 2019' if check_var('DESKTOP', 'textmode');
-        sleep 30;
-        send_key 'esc';
-    }
 
     # On IPMI, when selecting x11 console, we are connecting to the VNC server on the SUT.
     # select_console('x11'); also performs a login, so we should be at generic-desktop.
@@ -1154,6 +865,7 @@ sub wait_boot {
     my $textmode = $args{textmode};
     my $ready_time = $args{ready_time} // ((check_var('VIRSH_VMM_FAMILY', 'hyperv') || is_ipmi) ? 500 : 300);
     my $in_grub = $args{in_grub} // 0;
+    my $enable_root_ssh = $args{enable_root_ssh} // 0;
 
     die "wait_boot: got undefined class" unless $self;
     # used to register a post fail hook being active while we are waiting for
@@ -1169,7 +881,7 @@ sub wait_boot {
     # Reset the consoles after the reboot: there is no user logged in anywhere
     reset_consoles;
     select_console('sol', await_console => 0) if is_ipmi;
-    if (reconnect_s390(textmode => $textmode, ready_time => $ready_time)) {
+    if (reconnect_s390(textmode => $textmode, ready_time => $ready_time, enable_root_ssh => $enable_root_ssh)) {
     }
     elsif (get_var('USE_SUPPORT_SERVER') && get_var('USE_SUPPORT_SERVER_PXE_CUSTOMKERNEL')) {
         # A supportserver client to reboot via PXE after an initial installation.
@@ -1181,7 +893,10 @@ sub wait_boot {
         #
         $self->handle_pxeboot(bootloader_time => $bootloader_time, pxemenu => 'pxe-custom-kernel', pxeselect => 'pxe-custom-kernel-selected');
     }
-    else {
+    # When no bounce back on power KVM, we need skip bootloader process and go ahead when 'displaymanager' matched.
+    elsif (get_var('OFW') && (check_screen('displaymanager', 5))) {
+    }
+    elsif (is_bootloader_grub2) {
         assert_screen([qw(virttest-pxe-menu qa-net-selection prague-pxe-menu pxe-menu)], 600) if (uses_qa_net_hardware() || get_var("PXEBOOT"));
         $self->handle_grub(bootloader_time => $bootloader_time, in_grub => $in_grub);
         # part of soft failure bsc#1118456
@@ -1193,11 +908,19 @@ sub wait_boot {
                 send_key 'ret';
             }
         }
+    } elsif (is_bootloader_sdboot) {
+        assert_screen 'systemd-boot', 300;
+        save_screenshot;    # Show what's selected for booting
+        send_key('ret');
+    } else {
+        die 'Unknown bootloader';
     }
     reconnect_xen if check_var('VIRSH_VMM_FAMILY', 'xen');
 
-    # on s390x svirt encryption is unlocked with workaround_type_encrypted_passphrase before here
-    unlock_if_encrypted unless get_var('S390_ZKVM');
+    # on s390x svirt encryption is unlocked with unlock_bootloader before here
+    if (need_unlock_after_bootloader) {
+        unlock_if_encrypted unless get_var('S390_ZKVM');
+    }
 
     $self->wait_boot_past_bootloader(%args);
     $self->{in_wait_boot} = 0;
@@ -1250,43 +973,6 @@ sub firewall {
     return (($old_product_versions || $upgrade_from_susefirewall) && !is_tumbleweed && !(check_var('SUSEFIREWALL2_SERVICE_CHECK', 1))) ? 'SuSEfirewall2' : 'firewalld';
 }
 
-=head2 remount_tmp_if_ro
-
- remount_tmp_if_ro();
-
-Mounts /tmp to shared memory if not possible to write to tmp.
-For example, save_y2logs creates temporary files there.
-
-=cut
-
-sub remount_tmp_if_ro {
-    script_run 'touch /tmp/test_ro || mount -t tmpfs /dev/shm /tmp';
-}
-
-=head2 upload_coredumps
-
- upload_coredumps(%args);
-
-Upload all coredumps to logs. In case `proceed_on_failure` key is set to true,
-errors during logs collection will be ignored, which is usefull for the
-post_fail_hook calls.
-=cut
-
-sub upload_coredumps {
-    my ($self, %args) = @_;
-    my $res = script_run('coredumpctl --no-pager');
-    if (!$res) {
-        record_info("COREDUMPS found", "we found coredumps on SUT, attemp to upload");
-        script_run("coredumpctl info --no-pager | tee coredump-info.log");
-        upload_logs("coredump-info.log", failok => $args{proceed_on_failure});
-        my $basedir = '/var/lib/systemd/coredump/';
-        my @files = split("\n", script_output("\\ls -1 $basedir | cat", proceed_on_failure => $args{proceed_on_failure}));
-        foreach my $file (@files) {
-            upload_logs($basedir . $file, failok => $args{proceed_on_failure});
-        }
-    }
-}
-
 =head2 post_fail_hook
 
  post_fail_hook();
@@ -1301,21 +987,18 @@ base method using C<$self-E<gt>SUPER::post_fail_hook;> at the end.
 
 sub post_fail_hook {
     my ($self) = @_;
-    return if is_serial_terminal();    # unless VIRTIO_CONSOLE=0 nothing below make sense
-
-    show_tasks_in_blocked_state;
 
     return if (get_var('NOLOGS'));
 
     # Upload basic health check log
-    select_log_console;
-    $self->export_healthcheck_basic;
+    select_serial_terminal();
+    export_healthcheck_basic;
 
     # set by x11_start_program
     if (get_var('IN_X11_START_PROGRAM')) {
         my ($program) = get_var('IN_X11_START_PROGRAM') =~ m/(\S+)/;
         set_var('IN_X11_START_PROGRAM', undef);
-        select_log_console;
+
         my $r = script_run "which $program";
         if ($r != 0) {
             record_info("no $program", "Could not find '$program' on the system", result => 'fail');
@@ -1323,18 +1006,16 @@ sub post_fail_hook {
     }
 
     if (get_var('FULL_LVM_ENCRYPT') && get_var('LVM_THIN_LV')) {
-        select_console 'root-console';
         my $lvmdump_regex = qr{/root/lvmdump-.*?-\d+\.tgz};
         my $out = script_output('lvmdump', proceed_on_failure => 1);
         if ($out =~ /(?<lvmdump_gzip>$lvmdump_regex)/) {
             upload_logs("$+{lvmdump_gzip}", failok => 1);
         }
-        $self->save_and_upload_log('lvm dumpconfig', '/tmp/lvm_dumpconf.out');
+        save_and_upload_log('lvm dumpconfig', '/tmp/lvm_dumpconf.out');
     }
 
     if (get_var('COLLECT_COREDUMPS')) {
-        select_console 'root-console';
-        $self->upload_coredumps(proceed_on_failure => 1);
+        upload_coredumps(proceed_on_failure => 1);
     }
 
     if ($self->{in_wait_boot}) {
@@ -1345,21 +1026,11 @@ sub post_fail_hook {
     }
     # Find out in post-fail-hook if system is I/O-busy, poo#35877
     else {
-        select_log_console;
         my $io_status = script_output("sed -n 's/^.*da / /p' /proc/diskstats | cut -d' ' -f10");
         record_info('System I/O status:', ($io_status =~ /^0$/) ? 'idle' : 'busy');
     }
 
-    # In case the system is stuck in shutting down or during boot up, press
-    # 'esc' just in case the plymouth splash screen is shown and we can not
-    # see any interesting console logs.
-    send_key 'esc';
-    save_screenshot;
-    # the space prevents the esc from eating up the next alphanumerical
-    # character typed into the console
-    send_key 'spc';
-
-    $self->export_logs;
+    export_logs;
 
     if ((is_public_cloud() || is_openstack()) && $self->{run_args}->{my_provider}) {
         select_host_console(force => 1);

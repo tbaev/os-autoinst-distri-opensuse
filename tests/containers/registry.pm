@@ -1,7 +1,7 @@
 # SUSE's openQA tests
 #
 # Copyright 2009-2013 Bernhard M. Wiedemann
-# Copyright 2012-2021 SUSE LLC
+# Copyright 2012-2023 SUSE LLC
 # SPDX-License-Identifier: FSFAP
 
 # Package: docker-distribution-registry | distribution-registry
@@ -12,7 +12,7 @@
 # - images can be searched
 # - images can be pulled
 # - images can be deleted
-# Maintainer: qac team <qa-c@suse.de>
+# Maintainer: QE-C team <qa-c@suse.de>
 
 use Mojo::Base 'containers::basetest';
 use testapi;
@@ -48,7 +48,7 @@ sub registry_push_pull {
     if (script_run($engine->runtime . " images | grep '$image'") == 0) {
         assert_script_run $engine->runtime . " image rm -f $image", 90;
     } else {
-        record_soft_failure("Known issue - containers/podman#10685: podman image rm --force also untags other images (3.2.0 regression)");
+        die("rm --force untags other images");
     }
     assert_script_run "! " . $engine->runtime . " images | grep '$image'", 60;
     assert_script_run "! " . $engine->runtime . " images | grep 'localhost:5000/$image'", 60;
@@ -66,7 +66,10 @@ sub run {
     my $pkg = 'distribution-registry';
     if (is_sle(">=15-SP4")) {
         activate_containers_module;
-    } elsif (is_sle("<15-SP4")) {
+    } elsif (is_sle("<=15")) {
+        record_info("SKIP", "docker-distribution-registry is not available on this version of SLE");
+        return;
+    } elsif (is_sle(">15")) {
         add_suseconnect_product('PackageHub', undef, undef, undef, 300, 1);
         $pkg = 'docker-distribution-registry';
     } elsif (is_leap("<15.4")) {

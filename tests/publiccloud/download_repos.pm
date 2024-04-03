@@ -5,7 +5,7 @@
 
 # Summary: Download repositores from the internal server
 #
-# Maintainer: Pavel Dostal <pdostal@suse.cz>
+# Maintainer: qa-c <qa-c@suse.de>
 
 use base 'consoletest';
 use registration;
@@ -14,6 +14,8 @@ use testapi;
 use strict;
 use utils;
 use publiccloud::ssh_interactive "select_host_console";
+use publiccloud::utils "validate_repo";
+
 
 # Get the status of the update repos
 # 0 = no repo, 1 = repos already downloaded, 2 = repos downloading
@@ -48,17 +50,31 @@ sub run {
         # Note: Clear previous qem_download_status.txt file here
         assert_script_run("echo 'Starting download' > ~/repos/qem_download_status.txt");
 
+        # In Incidents there is INCIDENT_REPO instead of MAINT_TEST_REPO
+        # Those two variables contain list of repositories separated by comma
         set_var('MAINT_TEST_REPO', get_var('INCIDENT_REPO')) unless get_var('MAINT_TEST_REPO');
         my @repos = split(/,/, get_var('MAINT_TEST_REPO'));
         assert_script_run('touch /tmp/repos.list.txt');
 
+        # Failsafe: Fail if there are no test repositories, otherwise we have the wrong template link
+        my $count = scalar @repos;
+        my $check_empty_repos = get_var('PUBLIC_CLOUD_IGNORE_EMPTY_REPO', 0) == 0;
+        die "No test repositories" if ($check_empty_repos && $count == 0);
+
         my $ret = 0;
+        my $reject = "'robots.txt,*.ico,*.png,*.gif,*.css,*.js,*.htm*'";
+        my $regex = "'s390x\\/|ppc64le\\/|kernel*debuginfo*.rpm|src\\/'";
+        my ($incident, $type);
+        set_var("PUBLIC_CLOUD_EMBARGOED_UPDATES_DETECTED", 0);
         for my $maintrepo (@repos) {
-            next if $maintrepo !~ m/^http/;
+            unless (validate_repo($maintrepo)) {
+                set_var("PUBLIC_CLOUD_EMBARGOED_UPDATES_DETECTED", 1);
+                next;
+            }
             script_run("echo 'Downloading $maintrepo ...' >> ~/repos/qem_download_status.txt");
             my ($parent) = $maintrepo =~ 'https?://(.*)$';
             my ($domain) = $parent =~ '^([a-zA-Z.]*)';
-            $ret = script_run "wget --no-clobber -r -R 'robots.txt,*.ico,*.png,*.gif,*.css,*.js,*.htm*' --reject-regex='s390x\\/|ppc64le\\/|kernel*debuginfo*.rpm|src\\/' --domains $domain --no-parent $maintrepo/", timeout => 600;
+            $ret = script_run "wget --no-clobber -r --reject $reject --reject-regex=$regex --domains $domain --no-parent $maintrepo/", timeout => 600;
             if ($ret !~ /0|8/) {
                 # softfailure, if repo doesn't exist (anymore). This is required for cloning jobs, because the original test repos could be empty already
                 record_info('Softfail', "Download failed (rc=$ret):\n$maintrepo", result => 'softfail');
@@ -76,22 +92,19 @@ sub run {
                 }
             }
         }
-        # Failsafe: Fail if there are no test repositories, otherwise we have the wrong template link
-        my $count = scalar @repos;
-        my $check_empty_repos = get_var('PUBLIC_CLOUD_IGNORE_EMPTY_REPO', 0) == 0;
-        die "No test repositories" if ($check_empty_repos && $count == 0);
 
         assert_script_run("echo 'Download completed' >> ~/repos/qem_download_status.txt");
         upload_logs('/tmp/repos.list.txt');
         upload_logs('qem_download_status.txt');
         # Failsafe 2: Ensure the repos are not empty (i.e. size >= 100 kB)
         my $size = script_output('du -s ~/repos | awk \'{print$1}\'');
-        die "Empty test repositories" if ($check_empty_repos && $size < 100);
+        # we will not die if repos are empty due to embargoed updates filtering
+        die "Empty test repositories" if (!get_var("PUBLIC_CLOUD_EMBARGOED_UPDATES_DETECTED") && $check_empty_repos && $size < 100);
     }
 
     my $total_size = script_output("du -hs ~/repos");
     record_info("Repo size", "Total repositories size: $total_size");
-    assert_script_run("find ./ -name '*.rpm' -exec du -h '{}' \\; | sort -h > /root/rpm_list.txt", timeout => 60);
+    assert_script_run("find ./ -name '*.rpm' -exec du -h '{}' + | sort -h > /root/rpm_list.txt", timeout => 60);
     upload_logs("/root/rpm_list.txt");
 
     # The maintenance *.repo files all point to download.suse.de, but we are using dist.suse.de, so we need to rename the directory
@@ -107,7 +120,7 @@ sub post_fail_hook {
     #bash: cannot create temp file for here-document: No space left on device
     #H69A2-1-
     assert_script_run("du -hs ~/repos || true");
-    assert_script_run("find ~/repos/ -name '*.rpm' -exec du -h '{}' \\; | sort -h || true");
+    assert_script_run("find ~/repos/ -name '*.rpm' -exec du -h '{}' + | sort -h || true");
     assert_script_run("df -h");
 }
 
@@ -120,4 +133,3 @@ sub test_flags {
 }
 
 1;
-

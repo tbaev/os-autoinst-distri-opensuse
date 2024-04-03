@@ -4,6 +4,7 @@ description:    >
     Tests for virtualization tests
 schedule:
   - console/login
+  - virt_autotest/cleanup_libvirtd_log
   - '{{qam_tests}}'
   - virtualization/universal/finish
 conditional_schedule:
@@ -52,3 +53,5 @@ conditional_schedule:
         - virtualization/universal/virtmanager_offon
         - virtualization/universal/virtmanager_add_devices
         - virtualization/universal/virtmanager_rm_devices
+      'sriov_network_card_pci_passthrough':
+        - virt_autotest/sriov_network_card_pci_passthrough

@@ -14,7 +14,7 @@ conditional_schedule:
             'svirt-hyperv':
                 - installation/bootloader_hyperv
                 - installation/bootloader_uefi
-            'svirt-vmware65':
+            'svirt-vmware70':
                 - installation/bootloader_svirt
                 - installation/bootloader_uefi
     efi:
@@ -25,7 +25,6 @@ schedule:
     - '{{bootloader}}'
     - jeos/firstrun
     - jeos/record_machine_id
-    - console/system_prepare
     - console/force_scheduled_tasks
     - jeos/grub2_gfxmode
     - jeos/diskusage

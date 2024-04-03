@@ -26,21 +26,29 @@ sub run {
 
     # Network setup takes ages
     assert_screen 'windows-account-setup', 360;
-    assert_and_click 'windows-select-personal-use', dclick => 1;
-    wait_still_screen stilltime => 2, timeout => 10, similarity_level => 43;
-    assert_and_click 'windows-next';
 
-    # To select an offline account in Win11 requires an intermediate step
+    # From 22H2 build, the offline account selection process has diverted a lot
     if (check_var "WIN_VERSION", "11") {
-        assert_and_click('windows-signin-options', timeout => 300);
+        # There's need to select a work or school account and then choose a
+        # domain join in order to skip the MS account
+        assert_and_click 'windows-work-school-account', dclick => 1;
+        wait_still_screen stilltime => 2, timeout => 10, similarity_level => 43;
+        assert_and_click 'windows-next';
+        assert_and_click 'windows-signin-options', timeout => 300;
+        assert_and_click 'windows-domain-join';
+        wait_still_screen stilltime => 2, timeout => 10, similarity_level => 43;
+
     }
     else {
+        assert_and_click 'windows-select-personal-use', dclick => 1;
+        wait_still_screen stilltime => 2, timeout => 10, similarity_level => 43;
+        assert_and_click 'windows-next';
         assert_screen 'windows-signin-with-ms', timeout => 60;
+        assert_and_click 'windows-offline';
+        wait_still_screen stilltime => 2, timeout => 10, similarity_level => 43;
+        assert_and_click 'windows-limited-exp', timeout => 60;
+        wait_still_screen stilltime => 2, timeout => 10, similarity_level => 43;
     }
-    assert_and_click 'windows-offline';
-    wait_still_screen stilltime => 2, timeout => 10, similarity_level => 43;
-    assert_and_click 'windows-limited-exp', timeout => 60;
-    wait_still_screen stilltime => 2, timeout => 10, similarity_level => 43;
     assert_and_click 'windows-create-account';
     wait_still_screen stilltime => 2, timeout => 10, similarity_level => 43;
     type_string $realname;
@@ -65,6 +73,8 @@ sub run {
         sleep 3;
         assert_and_click 'windows-next';
     }
+    assert_and_click('windows-access-to-browsing-data')
+      if (check_var('WIN_VERSION', '10'));
     my $count = 0;
     my @privacy_menu =
       split(',', get_required_var('WIN_INSTALL_PRIVACY_NEEDLES'));
@@ -94,7 +104,7 @@ sub run {
         assert_screen 'windows-desktop';
     }
 
-    # setup stable lock screen background
+    # setup stable lock screen background only in Win10
     $self->use_search_feature('lock screen settings');
     assert_screen 'windows-lock-screen-in-search';
     wait_still_screen stilltime => 2, timeout => 10, similarity_level => 43;
@@ -103,20 +113,14 @@ sub run {
     assert_and_click 'windows-lock-screen-background';
     assert_and_click 'windows-select-picture';
 
-    # turn off hibernation and fast startup
+    # close window lock screen window
+    send_key "alt-f4";
+
+    # open powershell
     $self->open_powershell_as_admin;
-    $self->run_in_powershell(cmd =>
-          q{Set-ItemProperty -Path 'HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager\Power' -Name HiberbootEnabled -Value 0}
-    );
-    $self->run_in_powershell(cmd => 'powercfg /hibernate off');
 
-    # disable screen's fade to black
-    $self->run_in_powershell(cmd => 'powercfg -change -monitor-timeout-ac 0');
-
-    # adjust visusal effects to best performance
-    $self->run_in_powershell(cmd =>
-          q{Set-ItemProperty -Path 'HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\VisualEffects' -Name VisualFXSetting -Value 2}
-    );
+    # turn off hibernation and fast startup
+    $self->power_configuration;
 
     # remove skype and xbox
     $self->run_in_powershell(cmd =>
@@ -148,8 +152,14 @@ sub run {
         cmd => 'reg add HKEY_CURRENT_USER\Policies\Microsoft\Windows\Explorer /v DisableSearchBoxSuggestions /t REG_DWORD /d 1'
     );
 
+    # prevent password from expiring
+    $self->run_in_powershell(
+        cmd => 'Set-LocalUser -Name "Bernhard M. Wiedeman" -PasswordNeverExpires 1'
+    );
+
     # poweroff
-    $self->reboot_or_shutdown();
+    $self->reboot_or_shutdown(1);
+    $self->wait_boot_windows;
 }
 
 1;

@@ -23,6 +23,7 @@ use testapi;
 use utils;
 use Utils::Backends 'is_remote_backend';
 use power_action_utils 'power_action';
+use y2snapper_common qw(y2snapper_close_snapper_module);
 
 sub y2snapper_create_snapshot {
     my ($self, $name, $user_data) = @_;
@@ -60,12 +61,12 @@ sub run {
     # Make sure the snapshot is listed in the main window
     send_key_until_needlematch([qw(grub_comment)], 'pgdn');
     # C'l'ose  the snapper module
-    send_key "alt-l";
+    y2snapper_common::y2snapper_close_snapper_module;
     wait_serial("$module_name-0", 200) || die "'yast2 $module_name' didn't finish";
     $self->{in_wait_boot} = 1;
     record_info 'Snapshot created', 'booting the system into created snapshot';
     power_action('reboot', keepconsole => 1);
-    $self->wait_grub(bootloader_time => 250);
+    $self->wait_grub(bootloader_time => 350);
     send_key_until_needlematch("boot-menu-snapshot", 'down', 11, 5);
     send_key 'ret';
     $self->{in_wait_boot} = 0;
@@ -85,7 +86,7 @@ sub run {
     # request reboot again to ensure we will end up in the original system
     record_info 'Desktop reached', 'Now return system to original state with a reboot';
     power_action('reboot', keepconsole => 1);
-    $self->wait_boot(textmode => $is_textmode, in_grub => 1, bootloader_time => 250);
+    $self->wait_boot(textmode => $is_textmode, in_grub => 1, bootloader_time => 350);
 }
 
 1;

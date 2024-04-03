@@ -10,7 +10,7 @@
 # - Launch yast2 bootloader
 # - Handle missing package screen
 # - Wait to yast2 to finish (initrd regenerated)
-# Maintainer: QA SLE YaST team <qa-sle-yast@suse.de>
+# Maintainer: QE YaST and Migration (QE Yam) <qe-yam at suse de>
 
 use strict;
 use base 'y2_module_consoletest';
@@ -18,7 +18,7 @@ use warnings;
 use testapi;
 use Utils::Architectures;
 use utils;
-use Utils::Backends 'is_hyperv';
+use Utils::Backends qw(is_hyperv is_pvm_hmc is_spvm);
 
 sub run {
     my $self = shift;
@@ -26,12 +26,19 @@ sub run {
 
     # make sure yast2 bootloader module is installed
     zypper_call 'in yast2-bootloader';
-
-    my $module_name = y2_module_consoletest::yast2_console_exec(yast2_module => 'bootloader');
+    my $y2_opts = "";
+    $y2_opts = "--ncurses" if (is_pvm_hmc() || is_spvm());
+    my $module_name = y2_module_consoletest::yast2_console_exec(yast2_module => 'bootloader', yast2_opts => $y2_opts);
 
     # YaST2 prompts user to install missing packages found during storage probing.
     # Otherwise YaST2 shows bootloader settings options
     $self->ncurses_filesystem_probing('test-yast2_bootloader-1');
+
+    # We may propose new configuration from scratch if some backend device changed
+    if (check_screen('bootloader_unsupported_config', 2)) {
+        send_key 'alt-p';
+        wait_still_screen 2;
+    }
 
     # OK => Close
     send_key "alt-o";

@@ -3,7 +3,9 @@
 # Copyright 2017-2021 SUSE LLC
 # SPDX-License-Identifier: FSFAP
 
-# Summary: Basic journal tests
+# Summary: Check system journal for errors given a list of known patterns
+#          referring to known bugs. This module will fail in case an unknown
+#          message was found and in case a failing systemd service was found.
 # Maintainer: qa-c team <qa-c@suse.de>
 
 use base "opensusebasetest";
@@ -57,21 +59,21 @@ sub run {
     my @matched_bugs;
 
     # Find lines which matches to the pattern_bug
-    foreach my $bug (keys %$bug_pattern) {
+    foreach my $bsc (keys %$bug_pattern) {
         my $buffer = "";
         foreach my $line (@journal_output) {
-            if ($line =~ /$bug_pattern->{$bug}->{description}/) {
+            if ($line =~ /$bug_pattern->{$bsc}->{description}/) {
                 $buffer .= $line . "\n";
-                push @matched_bugs, $bug;
+                push @matched_bugs, $bsc;
             }
         }
         if ($buffer) {
-            if ($bug_pattern->{$bug}->{type} eq 'feature') {
-                record_info($bug, $buffer);
-            } elsif ($bug_pattern->{$bug}->{type} eq 'ignore') {
+            if ($bug_pattern->{$bsc}->{type} eq 'feature') {
+                record_info($bsc, $buffer);
+            } elsif ($bug_pattern->{$bsc}->{type} eq 'ignore') {
                 bmwqemu::diag("Ignoring log message:\n$buffer\n");
             } else {
-                record_info('Softfail', "$bug:\n$buffer", result => 'softfail');
+                record_soft_failure("$bsc\n$buffer");
             }
         }
     }
@@ -98,8 +100,8 @@ sub run {
             my $service = $1;
             my $failed_service_output = script_output("systemctl status $service -l || true");
             foreach my $bsc (@matched_bugs) {
-                if ($failed_service_output =~ /$bug_pattern->{$bsc}->{description}/) {
-                    record_info('Softfail', "Service: $service failed due to $bsc\n$failed_service_output", result => 'softfail');
+                if ($failed_service_output =~ $bug_pattern->{$bsc}->{description}) {
+                    record_soft_failure("$service failed due to $bsc\n$failed_service_output") unless $bug_pattern->{$bsc}->{type} eq 'ignore';
                     next SRV;
                 }
             }
@@ -107,6 +109,13 @@ sub run {
             $failed = 1;
         }
     }
+
+    # upload all content of audit directory
+    if (script_run('test -d /var/log/audit/') == 0) {
+        assert_script_run('tar cvf /tmp/audit.tar  /var/log/audit/*');
+        upload_logs('/tmp/audit.tar');
+    }
+
     $self->result('fail') if $failed;
 }
 

@@ -10,7 +10,6 @@ schedule:
   - console/wget_ipv6
   - console/ca_certificates_mozilla
   - console/unzip
-  - console/gpg
   - console/rsync
   - console/shells
   - console/sudo
@@ -24,96 +23,89 @@ schedule:
   - console/timezone
   - console/procps
   - console/iotop
-  - console/systemd_rpm_macros
   - console/kmod
   - console/suse_module_tools
   - console/aaa_base
   - console/gd
   - console/systemtap
   - console/vsftpd
+  - network/samba/samba_adcli
   - '{{version_specific}}'
   - console/coredump_collect
 conditional_schedule:
   version_specific:
     VERSION:
+      15-SP5:
+        - console/osinfo_db
+        - console/ovn
+        - console/firewalld
+        - console/libgcrypt
+        - console/zziplib
+        - console/journald_fss
+        - console/nginx
+        - '{{arch_specific}}'
+        - console/valgrind
+        - '{{arch_specific15_sp5}}'
       15-SP4:
         - console/osinfo_db
         - console/ovn
         - console/firewalld
         - console/libgcrypt
-        - console/valgrind
         - console/zziplib
         - console/journald_fss
-        - console/openvswitch_ssl
-        - network/samba/samba_adcli
         - console/nginx
-        - console/ansible
         - '{{arch_specific}}'
+        - console/valgrind
       15-SP3:
         - console/osinfo_db
         - console/ovn
         - console/firewalld
         - console/libgcrypt
-        - console/valgrind
         - console/zziplib
         - console/journald_fss
-        - console/openvswitch_ssl
-        - network/samba/samba_adcli
         - console/nginx
-        - console/ansible
         - '{{arch_specific}}'
+        - console/valgrind
       15-SP2:
         - console/osinfo_db
         - console/ovn
         - console/firewalld
         - console/libgcrypt
-        - console/valgrind
         - console/zziplib
         - console/journald_fss
-        - console/openvswitch_ssl
-        - network/samba/samba_adcli
         - console/nginx
         - '{{arch_specific}}'
+        - console/valgrind
       15-SP1:
         - console/osinfo_db
         - console/libgcrypt
-        - console/valgrind
         - console/zziplib
         - console/journald_fss
-        - console/openvswitch_ssl
-        - network/samba/samba_adcli
         - console/nginx
+        - console/valgrind
         - '{{arch_specific}}'
       15:
         - console/osinfo_db
         - console/libgcrypt
-        - console/valgrind
         - console/zziplib
         - console/journald_fss
-        - console/openvswitch_ssl
-        - network/samba/samba_adcli
         - console/nginx
+        - console/valgrind
         - '{{arch_specific}}'
       12-SP5:
         - console/osinfo_db
         - console/libgcrypt
-        - console/valgrind
         - console/zziplib
-        - console/openvswitch_ssl
-        - network/samba/samba_adcli
         - '{{arch_specific}}'
+        - console/valgrind
         - '{{arch_12sp5}}'
       12-SP4:
         - console/osinfo_db
         - console/journald_fss
-        - console/openvswitch_ssl
-        - network/samba/samba_adcli
         - '{{arch_specific}}'
       12-SP3:
         - console/osinfo_db
         - console/journald_fss
-        - console/openvswitch_ssl
-        - network/samba/samba_adcli
         - '{{arch_specific}}'
       12-SP2:
         - console/journald_fss
@@ -127,4 +119,10 @@ conditional_schedule:
         - console/journald_fss
       aarch64:
         - console/journald_fss
+  arch_specific15_sp5:
+    ARCH:
+      x86_64:
+        - console/year_2038_detection
+      aarch64:
+        - console/year_2038_detection
 ...

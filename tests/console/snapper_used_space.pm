@@ -10,13 +10,14 @@
 # - Display the exclusive space used by each snapshot
 # - Query the exclusive space when data is included in a single snapshot
 # - Query the exclusive space when data is included in several snapshots (pre- and post-)
-# Maintainer: QE YaST <qa-sle-yast@suse.de>
+# Maintainer: QE YaST and Migration (QE Yam) <qe-yam at suse de>
 
 use base 'btrfs_test';
 use strict;
 use warnings;
 use testapi;
 use serial_terminal 'select_serial_terminal';
+use version_utils 'is_leap';
 
 use constant COLUMN_FILTER => "awk -F '|' '{print \$1  \$6}'";    # Filter by columns: # and Used Space
 use constant SUBVOLUME_FILTER => "tail -n4 | sed -n 2,3p | cut -d ' ' -f2";    # Subvolume IDs
@@ -78,6 +79,12 @@ sub query_space_several_snapshot {
 
 sub run {
     select_serial_terminal;
+    # softfail the test if hitting bsc#1206814 due to test dependency
+    my $output = script_output('snapper cleanup number', 300, proceed_on_failure => 1);
+    if (($output eq 'Failure (error.something).') && is_leap) {
+        record_soft_failure 'bsc#1206814';
+        return;
+    }
     die 'Quota must be enabled on btrfs for this test' if (script_run('snapper get-config | grep QGROUP') != 0);
     ensure_size_displayed;
     query_space_single_snapshot;

@@ -1,6 +1,6 @@
 # SUSE's SLES4SAP openQA tests
 #
-# Copyright 2019-2021 SUSE LLC
+# Copyright 2019-2024 SUSE LLC
 # SPDX-License-Identifier: FSFAP
 
 # Package: lvm2 util-linux parted device-mapper
@@ -18,10 +18,48 @@ use utils qw(file_content_replace zypper_call);
 use Utils::Systemd 'systemctl';
 use version_utils 'is_sle';
 use POSIX 'ceil';
+use Utils::Logging 'save_and_upload_log';
 
 sub is_multipath {
     return (get_var('MULTIPATH') and (get_var('MULTIPATH_CONFIRM') !~ /\bNO\b/i));
 }
+
+=head2 download_hana_assets_from_server
+
+  download_hana_assets_from_server()
+
+Download and extract HANA installation media to /sapinst directory of the SUT.
+The media location must be provided as ASSET_0 in the job settings and be
+available as an uncompressed tar in the factory/other directory of the openQA
+server
+
+=cut
+
+sub download_hana_assets_from_server {
+    my $target = $_{target} // '/sapinst';
+    my $nettout = $_{nettout} // 2700;
+    assert_script_run "mkdir $target";
+    assert_script_run "cd $target";
+    my $filename = get_required_var('ASSET_0');
+    my $hana_location = data_url('ASSET_0');
+    # Each HANA asset is about 16GB. A ten minute timeout assumes a generous
+    # 27.3MB/s download speed. Adjust according to expected server conditions.
+    assert_script_run "wget -O - $hana_location | tar -xf -", timeout => $nettout;
+    # Skip checksum check if DISABLE_CHECKSUM is set, or if checksum file is not
+    # part of the archive
+    my $sap_chksum_file = 'MD5FILE.DAT';
+    my $chksum_file = 'checksum.md5sum';
+    my $no_checksum_file = script_run "[[ -f $target/$chksum_file || -f $target/$sap_chksum_file ]]";
+    return 1 if (get_var('DISABLE_CHECKSUM') || $no_checksum_file);
+
+    # Switch to $target to verify copied contents are OK
+    assert_script_run "pushd $target";
+    # If SAP provided MD5 sum file is present convert it to the md5sum format
+    assert_script_run "[[ -f $sap_chksum_file ]] && awk '{print \$2\" \"\$1}' $target/$sap_chksum_file > $target/$chksum_file";
+    assert_script_run "md5sum -c --quiet $chksum_file", $nettout;
+    assert_script_run "popd";
+}
+
 
 sub get_hana_device_from_system {
     my ($self, $disk_requirement) = @_;
@@ -30,7 +68,12 @@ sub get_hana_device_from_system {
     my $out = script_output q@echo PV=$(pvscan -s 2>/dev/null | awk '/dev/ {print $1}' | tr '\n' ',')@;
     $out =~ /PV=(.+),$/;
     $out = $1;
-    my @pvdevs = map { if ($_ =~ s@mapper/@@) { $_ =~ s/\-part\d+$// } else { $_ =~ s/\d+$// } $_ =~ s@^/dev/@@; $_; } split(/,/, $out);
+    my @pvdevs = map {
+        if ($_ =~ s@mapper/@@) { $_ =~ s/\-part\d+$// }
+        else { $_ =~ s/\d+$// }
+        $_ =~ s@^/dev/@@;
+        $_;
+    } split(/,/, $out);
 
     my $lsblk = q@lsblk -n -l -o NAME -d -e 7,11 | grep -E -vw '@ . join('|', @pvdevs) . "'";
     # lsblk command to probe for devices is different when in multipath scenario
@@ -64,7 +107,7 @@ sub debug_locked_device {
     for ('dmsetup info', 'dmsetup ls', 'mount', 'df -h', 'pvscan', 'vgscan', 'lvscan', 'pvdisplay', 'vgdisplay', 'lvdisplay') {
         my $filename = $_;
         $filename =~ s/[^\w]/_/g;
-        $self->save_and_upload_log($_, "$filename.txt");
+        save_and_upload_log($_, "$filename.txt");
     }
 }
 
@@ -89,7 +132,8 @@ sub run {
     my ($proto, $path) = $self->fix_path(get_required_var('HANA'));
     my $sid = get_required_var('INSTANCE_SID');
     my $instid = get_required_var('INSTANCE_ID');
-    my $tout = get_var('HANA_INSTALLATION_TIMEOUT', 3600);    # Timeout for HANA installation commands.
+    # set timeout as 4800 as a temp workaround for slow nfs
+    my $tout = get_var('HANA_INSTALLATION_TIMEOUT', 4800);    # Timeout for HANA installation commands.
 
     select_serial_terminal;
     my $RAM = $self->get_total_mem();
@@ -106,9 +150,19 @@ sub run {
     # This installs HANA. Start by configuring the appropiate SAP profile
     $self->prepare_profile('HANA');
 
-    # Mount media
-    $self->mount_media($proto, $path, '/sapinst');
-
+    # Transfer media.
+    my $target = '/sapinst';    # Directory in SUT where install media will be copied token
+    if (get_var 'ASSET_0') {
+        # If the ASSET_0 variable is defined, the test will attempt to download
+        # the HANA media from the factory/other directory of the openQA server.
+        record_info "Dowloading using ASSET_0";
+        download_hana_assets_from_server(target => $target, nettout => $tout);
+    }
+    elsif (get_required_var 'HANA') {
+        # If not, the media will be retrieved from a remote server.
+        record_info "Downloading using $proto";
+        $self->copy_media($proto, $path, $tout, $target);
+    }
     # Mount points information: use the same paths and minimum sizes as the wizard (based on RAM size)
     my $full_size = ceil($RAM / 1024);    # Use the ceil value of RAM in GB
     my $half_size = ceil($full_size / 2);
@@ -117,8 +171,7 @@ sub run {
         hanadata => {mountpt => '/hana/data', size => "${full_size}g"},
         hanalog => {mountpt => '/hana/log', size => "${half_size}g"},
         hanashared => {mountpt => '/hana/shared', size => "${full_size}g"},
-        usr_sap => {mountpt => "/usr/sap/$sid/home", size => '50g'}
-    );
+        usr_sap => {mountpt => "/usr/sap/$sid/home", size => '50g'});
 
     # Partition disks for Hana
     if (check_var('HANA_PARTITIONING_BY', 'yast')) {
@@ -191,17 +244,20 @@ sub run {
     # Configure NVDIMM devices only when running on a BACKEND with NVDIMM
     my $pmempath = get_var('HANA_PMEM_BASEPATH', "/hana/pmem/$sid");
     if (get_var('NVDIMM')) {
-        my $nvddevs = get_var('NVDIMM_NAMESPACES_TOTAL', 2);
-        foreach my $i (0 .. ($nvddevs - 1)) {
-            assert_script_run "mkdir -p $pmempath/pmem$i";
-            assert_script_run "mkfs.xfs -f /dev/pmem$i";
-            assert_script_run "echo /dev/pmem$i $pmempath/pmem$i xfs defaults,noauto,dax 0 0 >> /etc/fstab";
-            assert_script_run "mount $pmempath/pmem$i";
+        # Read all configured pmem devices on the system
+        my @pmem_devices_all = split("\n", script_output("find /dev/pmem*"));
+        foreach my $pmem_device (@pmem_devices_all) {
+            $pmem_device =~ s:/dev/(pmem\S+).*:$1:;
+            assert_script_run "mkdir -p $pmempath/$pmem_device";
+            assert_script_run "mkfs.xfs -f /dev/$pmem_device";
+            assert_script_run "echo /dev/$pmem_device $pmempath/$pmem_device xfs defaults,noauto,dax 0 0 >> /etc/fstab";
+            assert_script_run "mount $pmempath/$pmem_device";
         }
 
         assert_script_run 'mkdir -p /etc/systemd/system/systemd-udev-settle.service.d';
-        assert_script_run "curl -f -v " . autoinst_url .
-          '/data/sles4sap/udev-settle-override.conf -o /etc/systemd/system/systemd-udev-settle.service.d/00-override.conf';
+        assert_script_run "curl -f -v "
+          . autoinst_url
+          . '/data/sles4sap/udev-settle-override.conf -o /etc/systemd/system/systemd-udev-settle.service.d/00-override.conf';
         systemctl 'daemon-reload';
         systemctl 'restart systemd-udev-settle';
 
@@ -215,10 +271,14 @@ sub run {
       if (script_run "ls $hdblcm");
 
     # Install hana
+    # Prepare hdblcm args.
+    # Note: set "--components=server,client" as other test moudle (monitoring_services.pm) installs shared pkgs from dir 'hdbclient'
     my @hdblcm_args = qw(--autostart=n --shell=/bin/sh --workergroup=default --system_usage=custom --batch
       --hostname=$(hostname) --db_mode=multiple_containers --db_isolation=low --restrict_max_mem=n
-      --userid=1001 --groupid=79 --use_master_password=n --skip_hostagent_calls=n --system_usage=production);
+      --userid=1001 --groupid=79 --use_master_password=n --skip_hostagent_calls=n --system_usage=production
+    );
     push @hdblcm_args,
+      "--components=server,client",
       "--sid=$sid",
       "--number=$instid",
       "--home=$mountpts{usr_sap}->{mountpt}",
@@ -229,11 +289,7 @@ sub run {
       "--logpath=$mountpts{hanalog}->{mountpt}/$sid",
       "--sapmnt=$mountpts{hanashared}->{mountpt}";
     push @hdblcm_args, "--pmempath=$pmempath", "--use_pmem" if get_var('NVDIMM');
-    # NOTE: Remove when SAP releases HANA with a fix for bsc#1195133
-    if (get_var('NVDIMM')) {
-        push @hdblcm_args, "--ignore=check_signature_file";
-        record_soft_failure("Workaround for bsc#1195133");
-    }
+
     my $cmd = join(' ', $hdblcm, @hdblcm_args);
     record_info 'hdblcm command', $cmd;
     assert_script_run $cmd, $tout;
@@ -253,8 +309,8 @@ sub run {
 
     # Upload installations logs
     $self->upload_hana_install_log;
-    $self->save_and_upload_log('rpm -qa', 'packages.list');
-    $self->save_and_upload_log('systemctl list-units --all', 'systemd-units.list');
+    save_and_upload_log('rpm -qa', 'packages.list');
+    save_and_upload_log('systemctl list-units --all', 'systemd-units.list');
 
     # Quick check of block/filesystem devices after installation
     assert_script_run 'mount';

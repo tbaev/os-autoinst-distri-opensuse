@@ -19,6 +19,11 @@ sub run {
     my $node_to_fence = get_var('NODE_TO_FENCE', undef);
     my $node_index = !defined $node_to_fence ? 1 : 2;
 
+    # Force this module to run in the root-console. This is required, as when the test runs
+    # in the serial terminal and it's followed by the boot/boot_to_desktop module, it fails
+    # to match the grub screen
+    select_console 'root-console';
+
     # Check cluster state *before* fencing
     barrier_wait("CHECK_BEFORE_FENCING_BEGIN_${cluster_name}_NODE${node_index}");
     check_cluster_state;
@@ -32,11 +37,13 @@ sub run {
         barrier_wait("HANA_REPLICATE_STATE_${cluster_name}_NODE${node_index}");
     }
 
-    # Fence a node with sysrq or crm node fence
+    # Fence a node with sysrq, crm node fence or by killing corosync
     # Sysrq fencing is more a real crash simulation
-    if (get_var('USE_SYSRQ_FENCING')) {
-        record_info('Fencing info', 'Fencing done by sysrq');
-        enter_cmd "echo b > /proc/sysrq-trigger" if ((!defined $node_to_fence && check_var('HA_CLUSTER_INIT', 'yes')) || (defined $node_to_fence && get_hostname eq "$node_to_fence"));
+    if (get_var('USE_SYSRQ_FENCING') || get_var('USE_PKILL_COROSYNC_FENCING')) {
+        my $cmd = 'echo b > /proc/sysrq-trigger';
+        $cmd = 'pkill -9 corosync' if (get_var('USE_PKILL_COROSYNC_FENCING'));
+        record_info('Fencing info', "Fencing done by [$cmd]");
+        enter_cmd $cmd if ((!defined $node_to_fence && check_var('HA_CLUSTER_INIT', 'yes')) || (defined $node_to_fence && get_hostname eq "$node_to_fence"));
     }
     else {
         record_info('Fencing info', 'Fencing done by crm');

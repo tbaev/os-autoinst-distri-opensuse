@@ -1,11 +1,11 @@
 # SUSE's openQA tests
 #
-# Copyright 2022 SUSE LLC
+# Copyright 2022-2023 SUSE LLC
 # SPDX-License-Identifier: FSFAP
 #
 # Summary: Test the kubectl utility
 #
-# Maintainer: qa-c team <qa-c@suse.de>
+# Maintainer: QE-C team <qa-c@suse.de>
 
 use base 'consoletest';
 use strict;
@@ -81,8 +81,8 @@ sub run {
     ## Test jobs
     record_info('Testing: jobs and pods', 'job and pod test runs');
     # The testing.registry must be registered in k8s as private registry and point to REGISTRY variable.
-    assert_script_run("kubectl create job sayhello --image=testing.registry/library/alpine -- echo 'Hello World'");
-    assert_script_run("kubectl create job gimme-date --image=testing.registry/library/busybox -- date");
+    assert_script_run("kubectl create job sayhello --image=docker.io/library/alpine -- echo 'Hello World'");
+    assert_script_run("kubectl create job gimme-date --image=docker.io/library/busybox -- date");
     validate_script_output("kubectl get jobs --no-headers", qr/sayhello/);
     validate_script_output("kubectl get jobs --no-headers", qr/gimme-date/);
     assert_script_run('kubectl wait jobs/sayhello --for=condition=complete --timeout=300s', timeout => 330);
@@ -122,7 +122,14 @@ sub run {
     validate_script_output('kubectl describe services/web-load-balancer', sub { $_ =~ m/.*Port:.*8080\/TCP.*/ });
     validate_script_output('kubectl describe services/web-load-balancer', sub { $_ =~ m/.*TargetPort:.*80\/TCP.*/ });
     validate_script_output('kubectl describe services/web-load-balancer', sub { $_ =~ m/.*Endpoints:.*10.*/ });
-    validate_script_output_retry("curl http://localhost:8080/index.html", qr/I am Groot/, retry => 6, delay => 20, timeout => 10);
+    $pid = background_script_run('kubectl port-forward deploy/nginx-deployment 8008:80');
+    validate_script_output_retry("curl http://localhost:8008/index.html", qr/I am Groot/, retry => 6, delay => 20, timeout => 10);
+    assert_script_run("kill $pid");    # terminate port-forwarding
+    my $output = script_output("kubectl describe services/web-load-balancer");
+    my ($ip) = $output =~ /IP:\s+([^\s]+)/;
+    record_info('Balancer IP', $ip);
+    validate_script_output_retry("curl http://$ip:8080/index.html", qr/I am Groot/, retry => 6, delay => 20, timeout => 10);
+
     assert_script_run('kubectl delete -f service.yml');
 
     assert_script_run('kubectl delete -f deployment.yml');

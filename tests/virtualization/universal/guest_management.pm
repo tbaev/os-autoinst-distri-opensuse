@@ -5,7 +5,7 @@
 
 # Package: libvirt-client nmap
 # Summary: Test basic VM guest management
-# Maintainer: Pavel Dostal <pdostal@suse.cz>, Felix Niederwanger <felix.niederwanger@suse.de>, Jan Baier <jbaier@suse.cz>
+# Maintainer: QE-Virtualization <qe-virt@suse.de>
 
 use base "consoletest";
 use virt_autotest::common;
@@ -51,6 +51,7 @@ sub run {
     record_info "START", "Start all guests";
     foreach my $guest (keys %virt_autotest::common::guests) {
         if (script_retry("virsh start $guest", delay => 120, retry => 3, die => 0) != 0) {
+            # Note: TBD for modular libvirt. See poo#129086 for detail.
             restart_libvirtd;
             script_retry("virsh start $guest", delay => 120, retry => 3);
         }

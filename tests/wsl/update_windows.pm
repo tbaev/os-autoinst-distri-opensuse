@@ -7,24 +7,31 @@
 # Maintainer: qa-c <qa-c@suse.de>
 
 use Mojo::Base qw(windowsbasetest);
-use testapi qw(assert_and_click assert_screen check_screen match_has_tag);
+use testapi;
 
 sub run {
     my $self = shift;
-    $self->windows_run('control update');
 
-    assert_screen 'windows-update';
-    while (defined(check_screen('windows-updates-available', 60))) {
-        bmwqemu::diag("Updating windows base image file...");
-        sleep 30;
-    }
-
-    assert_screen([qw(windows-updates-required-restart windows-up-to-date)]);
-
-    $self->windows_run('shutdown -s -t 0');
+    my $vbs_url = data_url("wsl/UpdateInstall.vbs");
+    $self->open_powershell_as_admin;
+    $self->run_in_powershell(cmd => "Invoke-WebRequest -Uri \"$vbs_url\" -OutFile \"C:\\UpdateInstall.vbs\"");
+    $self->run_in_powershell(
+        cmd => 'cd \\; $port.WriteLine($(cscript .\\UpdateInstall.vbs /Automate))',
+        code => sub {
+            die("Update script finished unespectedly or timed out...")
+              unless wait_serial("The update process finished with value 1", timeout => 3600);
+        }
+    );
+    save_screenshot;
+    # The script autoreboot fails, so there's need to reboot manually
+    $self->reboot_or_shutdown(1);
     while (defined(check_screen('windows-updating', 60))) {
         bmwqemu::diag("Applying updates while shutting down the machine...");
     }
+    $self->wait_boot_windows;
+
+    # Shutdown
+    $self->reboot_or_shutdown;
 }
 
 1;

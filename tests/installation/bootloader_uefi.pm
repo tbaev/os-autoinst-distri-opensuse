@@ -43,11 +43,18 @@ use lockapi 'mutex_wait';
 use bootloader_setup;
 use registration;
 use utils;
-use version_utils qw(is_jeos is_microos is_sle is_selfinstall);
+use version_utils qw(is_jeos is_microos is_opensuse is_sle is_selfinstall);
+use Utils::Backends qw(is_ipmi);
 
 # hint: press shift-f10 trice for highest debug level
 sub run {
     my ($self) = @_;
+
+    # Press key 't' to let grub2 boot menu show up in serial console
+    if (is_ipmi && current_console eq 'sol' && is_selfinstall && get_var('IPXE_UEFI')) {
+        assert_screen('press-t-for-boot-menu', 180);
+        send_key('t');
+    }
 
     # Enabled boot menu for x86_64 uefi. In migration cases we set cdrom as boot index=0
     # However migration cases need to boot the hard disk and fully pach it which are the
@@ -64,7 +71,7 @@ sub run {
         }
     }
 
-    if (get_var("IPXE")) {
+    if (get_var("IPXE") && !is_usb_boot) {
         sleep 60;
         return;
     }
@@ -86,7 +93,19 @@ sub run {
     if (get_var('UEFI_HTTP_BOOT') || get_var('UEFI_HTTPS_BOOT')) {
         tianocore_http_boot;
     }
-    assert_screen([qw(bootloader-shim-import-prompt bootloader-grub2)], $bootloader_timeout);
+
+    # Some aach64 JeOS jobs take too long to match the first grub2 needle.
+    # By pressing a random key, we stop the grub timeout
+    send_key 'backspace' if (is_jeos && is_aarch64);
+
+    if (get_var('VERSION') =~ /agama/) {
+        # For agama test, it is too short time to match the grub2(10s), so we create
+        # a new needle to avoid too much needles loaded.
+        assert_screen("bootloader-grub2-agama", $bootloader_timeout);
+    }
+    else {
+        assert_screen([qw(bootloader-shim-import-prompt bootloader-grub2)], $bootloader_timeout);
+    }
     if (match_has_tag("bootloader-shim-import-prompt")) {
         send_key "down";
         send_key "ret";
@@ -112,7 +131,7 @@ sub run {
         # random magic numbers
         send_key_until_needlematch('inst-onupgrade', 'down', 11, 3);
     }
-    else {
+    elsif (get_var('VERSION') !~ /agama/) {
         if (get_var("PROMO") || get_var('LIVETEST') || get_var('LIVECD')) {
             send_key_until_needlematch("boot-live-" . get_var("DESKTOP"), 'down', 11, 3);
         }
@@ -122,6 +141,19 @@ sub run {
     }
 
     uefi_bootmenu_params;
+
+    # Ipmi backend sol console is not reliable enough to change bootmenu params,
+    # so skip bootmenu_default_params which is not necessary now.
+    # However, serial console and AGAMA_AUTO settings are actually useful.
+    # If agama provides support for installation via ssh connection or others,
+    # we will then consider adding them back.
+    if (is_ipmi && is_selfinstall) {
+        # directly start installation
+        send_key "f10";
+        wait_still_screen;
+        return;
+    }
+
     bootmenu_default_params;
     unless (is_selfinstall) {
         bootmenu_remote_target;
@@ -129,7 +161,7 @@ sub run {
 
         # JeOS is never deployed with Linuxrc involved,
         # so 'regurl' does not apply there.
-        registration_bootloader_params(utils::VERY_SLOW_TYPING_SPEED) unless is_jeos;
+        registration_bootloader_params(utils::VERY_SLOW_TYPING_SPEED) unless is_jeos || is_opensuse;
 
         # boot
         mutex_wait 'support_server_ready' if get_var('USE_SUPPORT_SERVER');

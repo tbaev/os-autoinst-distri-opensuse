@@ -4,7 +4,7 @@
 # Summary: Test module to validate that no system role is pre-selected in
 # openSUSE.
 #
-# Maintainer: QE YaST <qa-sle-yast@suse.de>
+# Maintainer: QE YaST and Migration (QE Yam) <qe-yam at suse de>
 
 use strict;
 use warnings;
@@ -13,7 +13,7 @@ use Test::Assert 'assert_null';
 
 sub run {
     assert_null(
-        $testapi::distri->get_system_role_controller()->get_selected_role(),
+        $testapi::distri->get_system_role()->get_selected_role(),
         'A System Role is pre-selected, none expected');
 }
 

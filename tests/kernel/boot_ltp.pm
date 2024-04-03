@@ -17,6 +17,7 @@ use Utils::Backends;
 use LTP::utils;
 use version_utils qw(is_jeos is_sle);
 use utils 'assert_secureboot_status';
+use kdump_utils;
 
 sub run {
     my ($self) = @_;
@@ -31,12 +32,22 @@ sub run {
     elsif (is_jeos) {
         record_info('Loaded JeOS image', 'nothing to do...');
     }
+    elsif (is_backend_s390x) {
+        record_info('s390x backend', 'nothing to do...');
+    }
     else {
         record_info('INFO', 'normal boot or boot with params');
         # during install_ltp, the second boot may take longer than usual
         $self->wait_boot(ready_time => 1800);
     }
 
+    if (check_var_array('LTP_DEBUG', 'crashdump')) {
+        select_serial_terminal;
+        configure_service(yast_interface => 'cli');
+    }
+
+    # Initialize VNC console now to avoid login attempts on frozen system
+    select_console('root-console') if get_var('LTP_DEBUG');
     select_serial_terminal;
 
     # Debug code for poo#81142
@@ -52,6 +63,9 @@ sub run {
         my $lp_tag = is_sle('>=15-sp4') ? 'lp' : 'lp-';
         assert_script_run("uname -v | grep -E '(/kGraft-|/${lp_tag})'");
     }
+
+    # module is used by non-LTP tests, i.e. kernel-live-patching
+    return unless (get_var('LTP_COMMAND_FILE'));
 
     prepare_ltp_env;
     init_ltp_tests($cmd_file);

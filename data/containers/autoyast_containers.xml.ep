@@ -3,14 +3,14 @@
 <profile xmlns="http://www.suse.com/1.0/yast2ns" xmlns:config="http://www.suse.com/1.0/configns">
   <suse_register>
     <do_registration config:type="boolean">true</do_registration>
-    % unless ($check_var->('VERSION', '15-SP4')) {
+    % unless ($check_var->('VERSION', '15-SP6')) {
     <install_updates config:type="boolean">true</install_updates>
     % }
     <email/>
     <reg_code>{{SCC_REGCODE}}</reg_code>
     <reg_server>{{SCC_URL}}</reg_server>
     <addons config:type="list">
-      % if ($get_var->('VERSION') =~ /15|15-SP1|15-SP2|15-SP3|15-SP4/) {
+      % if ($get_var->('VERSION') =~ /^15/) {
       <addon>
         <name>sle-module-basesystem</name>
         <version>{{VERSION}}</version>
@@ -31,6 +31,14 @@
         % }
         <arch>{{ARCH}}</arch>
       </addon>
+      % if ($get_var->('VERSION') =~ /15-SP[1-3]/) {
+      <addon>
+        <name>SLES-LTSS</name>
+        <arch>{{ARCH}}</arch>
+        <version>{{VERSION}}</version>
+        <reg_code>{{SCC_REGCODE_LTSS}}</reg_code>
+      </addon>
+      % }
     </addons>
   </suse_register>
   <general>
@@ -39,13 +47,8 @@
     </mode>
   </general>
   <bootloader>
-    % unless ($check_var->('ARCH', 's390x')) {
-    <device_map config:type="list">
-      <device_map_entry>
-        <firmware>hd0</firmware>
-        <linux>/dev/vda</linux>
-      </device_map_entry>
-    </device_map>
+    % if ($check_var->('ARCH', 'ppc64le') or $check_var->('ARCH', 's390x')) {
+    <loader_type>grub2</loader_type>
     % }
     <global>
       % if ($check_var->('ARCH', 's390x')) {
@@ -62,8 +65,13 @@
       % }
       <timeout config:type="integer">-1</timeout>
     </global>
-    % if ($check_var->('ARCH', 'ppc64le') or $check_var->('ARCH', 's390x')) {
-    <loader_type>grub2</loader_type>
+    % unless ($check_var->('ARCH', 's390x')) {
+    <device_map config:type="list">
+      <device_map_entry>
+        <firmware>hd0</firmware>
+        <linux>/dev/vda</linux>
+      </device_map_entry>
+    </device_map>
     % }
   </bootloader>
   <networking>
@@ -80,7 +88,7 @@
     <keep_install_network config:type="boolean">true</keep_install_network>
     % }
   </networking>
-  % if ($check_var->('VERSION', '15-SP4')) {
+  % if ($get_var->('VERSION') =~ /15-SP[456]$/) {
   <firewall>
     <enable_firewall config:type="boolean">true</enable_firewall>
     <start_firewall config:type="boolean">true</start_firewall>
@@ -100,6 +108,98 @@
     </zones>
   </firewall>
   % }
+  % if ($check_var->('ARCH', 's390x')) {
+  <partitioning config:type="list">
+    <drive config:type="map">
+      <device>/dev/vda</device>
+      <disklabel>gpt</disklabel>
+      <enable_snapshots config:type="boolean">true</enable_snapshots>
+      <partitions config:type="list">
+        <partition config:type="map">
+          <create config:type="boolean">true</create>
+          <filesystem config:type="symbol">ext2</filesystem>
+          <format config:type="boolean">true</format>
+          <fstopt>acl,user_xattr</fstopt>
+          <mount>/boot/zipl</mount>
+          <partition_type>primary</partition_type>
+          <resize config:type="boolean">false</resize>
+          <size>300M</size>
+        </partition>
+        <partition config:type="map">
+          <create config:type="boolean">true</create>
+          <create_subvolumes config:type="boolean">true</create_subvolumes>
+          <filesystem config:type="symbol">btrfs</filesystem>
+          <format config:type="boolean">true</format>
+          <mount>/</mount>
+          <size>max</size>
+          <subvolumes config:type="list">
+            <subvolume config:type="map">
+              <copy_on_write config:type="boolean">true</copy_on_write>
+              <path>boot/grub2/s390x-emu</path>
+            </subvolume>
+            <subvolume config:type="map">
+              <copy_on_write config:type="boolean">false</copy_on_write>
+              <path>var</path>
+            </subvolume>
+          </subvolumes>
+          <subvolumes_prefix>@</subvolumes_prefix>
+        </partition>
+      </partitions>
+      <type config:type="symbol">CT_DISK</type>
+      <use>all</use>
+    </drive>
+  </partitioning>
+  % }
+  % unless ($check_var->('ARCH', 's390x')) {
+  <partitioning config:type="list">
+    <drive config:type="map">
+      <device>/dev/vda</device>
+      <disklabel>gpt</disklabel>
+      <enable_snapshots config:type="boolean">true</enable_snapshots>
+      <partitions config:type="list">
+        <partition config:type="map">
+          <create config:type="boolean">true</create>
+          <create_subvolumes config:type="boolean">true</create_subvolumes>
+          <filesystem config:type="symbol">btrfs</filesystem>
+          <format config:type="boolean">true</format>
+          <mount>/</mount>
+          <size>max</size>
+          <subvolumes config:type="list">
+          % if ($check_var->('ARCH', 'x86_64')) {
+            <subvolume config:type="map">
+              <copy_on_write config:type="boolean">true</copy_on_write>
+              <path>boot/grub2/x86_64-efi</path>
+            </subvolume>
+            <subvolume config:type="map">
+              <copy_on_write config:type="boolean">true</copy_on_write>
+              <path>boot/grub2/i386-pc</path>
+            </subvolume>
+          % } 
+          % if ($get_var->('ARCH') =~ /^ppc64/ ) {
+            <subvolume config:type="map">
+              <copy_on_write config:type="boolean">true</copy_on_write>
+              <path>boot/grub2/powerpc-ieee1275</path>
+            </subvolume>
+          % }
+          % if ($get_var->('ARCH') =~ /^aarch64/) {
+            <subvolume config:type="map">
+              <copy_on_write config:type="boolean">true</copy_on_write>
+              <path>boot/grub2/arm64-efi/</path>
+            </subvolume>
+          % }
+            <subvolume config:type="map">
+              <copy_on_write config:type="boolean">false</copy_on_write>
+              <path>var</path>
+            </subvolume>
+          </subvolumes>
+          <subvolumes_prefix>@</subvolumes_prefix>
+        </partition>
+      </partitions>
+      <type config:type="symbol">CT_DISK</type>
+      <use>all</use>
+    </drive>
+  </partitioning>
+  % }
   <software>
     <products config:type="list">
       <product>SLES</product>
@@ -116,8 +216,10 @@
       % }
       % unless ($get_var->('VERSION') =~ /12-SP3|12-SP4|12-SP5|15$/) {
       <package>podman</package>
-      <package>podman-cni-config</package>
       % }}
+      % if ($get_var->('VERSION') =~ /15$|15-SP1|15-SP2/) {
+      <package>podman-cni-config</package>
+      % }
     </packages>
     <patterns config:type="list">
       <pattern>base</pattern>
@@ -148,94 +250,6 @@
       <username>root</username>
     </user>
   </users>
-  % unless ($check_var->('ARCH', 's390x')) {
-  <partitioning config:type="list">
-    <drive>
-      <device>/dev/vda</device>
-      <disklabel>gpt</disklabel>
-      <initialize config:type="boolean">true</initialize>
-      <partitions config:type="list">
-        % if ($check_var->('ARCH', 'aarch64')) {
-        <partition>
-          <mountby config:type="symbol">device</mountby>
-          <create config:type="boolean">true</create>
-          <filesystem config:type="symbol">vfat</filesystem>
-          <format config:type="boolean">true</format>
-          <fstopt>umask=0002,utf8=true</fstopt>
-          <mount>/boot/efi</mount>
-          <size>512M</size>
-        </partition>
-        % }
-        <partition>
-          <mountby config:type="symbol">device</mountby>
-          <create config:type="boolean">true</create>
-          <filesystem config:type="symbol">swap</filesystem>
-          <format config:type="boolean">true</format>
-          <fstopt>defaults</fstopt>
-          <mount>swap</mount>
-          <size>2G</size>
-        </partition>
-        <partition>
-          <mountby config:type="symbol">device</mountby>
-          <create config:type="boolean">true</create>
-          <filesystem config:type="symbol">btrfs</filesystem>
-          <format config:type="boolean">true</format>
-          <fstopt>defaults</fstopt>
-          <mount>/</mount>
-          <size>max</size>
-        </partition>
-      </partitions>
-      <use>all</use>
-    </drive>
-  </partitioning>
-  % }
-  % if ($check_var->('ARCH', 's390x')) {
-  <partitioning config:type="list">
-    <drive>
-      <disklabel>gpt</disklabel>
-      <enable_snapshots config:type="boolean">true</enable_snapshots>
-      <initialize config:type="boolean">true</initialize>
-      <partitions config:type="list">
-        <partition>
-          <create config:type="boolean">true</create>
-          <format config:type="boolean">true</format>
-          <filesystem config:type="symbol">ext2</filesystem>
-          <mount>/boot/zipl</mount>
-          <fstopt>acl,user_xattr</fstopt>
-          <mountby config:type="symbol">path</mountby>
-          <partition_id config:type="integer">131</partition_id>
-          <partition_nr config:type="integer">1</partition_nr>
-          <partition_type>primary</partition_type>
-          <size>500M</size>
-        </partition>
-        <partition>
-          <create config:type="boolean">true</create>
-          <filesystem config:type="symbol">swap</filesystem>
-          <format config:type="boolean">true</format>
-          <mount>swap</mount>
-          <mountby config:type="symbol">uuid</mountby>
-          <partition_id config:type="integer">130</partition_id>
-          <partition_nr config:type="integer">2</partition_nr>
-          <partition_type>primary</partition_type>
-          <size>2G</size>
-        </partition>
-        <partition>
-          <create config:type="boolean">true</create>
-          <format config:type="boolean">true</format>
-          <mount>/</mount>
-          <mountby config:type="symbol">uuid</mountby>
-          <partition_id config:type="integer">131</partition_id>
-          <partition_nr config:type="integer">3</partition_nr>
-          <partition_type>primary</partition_type>
-          <size>max</size>
-        </partition>
-      </partitions>
-      <pesize/>
-      <type config:type="symbol">CT_DISK</type>
-      <use>all</use>
-    </drive>
-  </partitioning>
-  % }
   <report>
     <errors>
       <log config:type="boolean">true</log>

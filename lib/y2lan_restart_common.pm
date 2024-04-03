@@ -9,7 +9,7 @@ Library for non-destructive testing using yast2 lan.
 # SPDX-License-Identifier: FSFAP
 
 # Summary: YaST logic on Network Restart while no config changes were made
-# Maintainer: QE YaST <qa-sle-yast@suse.de>
+# Maintainer: QE YaST and Migration (QE Yam) <qe-yam at suse de>
 # Tags: fate#318787 poo#11450
 
 package y2lan_restart_common;
@@ -20,6 +20,7 @@ use Exporter 'import';
 use testapi;
 use utils 'systemctl';
 use version_utils qw(is_sle is_leap);
+use Utils::Backends qw(is_pvm_hmc is_spvm);
 use y2_module_basetest qw(accept_warning_network_manager_default is_network_manager_default);
 use y2_module_consoletest;
 use Test::Assert ':all';
@@ -143,12 +144,7 @@ sub check_network_status {
     $expected_status //= 'no_restart_or_reload';
     assert_screen 'yast2_closed_xterm_visible', 120;
     assert_script_run 'ip a';
-    if ($device eq 'bond') {
-        record_soft_failure 'bsc#992113';
-    }
-    else {
-        assert_script_run 'dig suse.com|grep \'status: NOERROR\'';    # test if conection and DNS is working
-    }
+    assert_script_run 'dig suse.com|grep \'status: NOERROR\'';
     assert_script_run 'cat journal.log';    # print journal.log
     my $journal_findings = script_output('cat journal.log');
     record_info "$expected_status", "Network status expects $expected_status";
@@ -398,7 +394,9 @@ sub change_ipforward {
 
 =head2 open_yast2_lan
 
- open_yast2_lan();
+ open_yast2_lan([$ui]);
+
+C<$ui> ncurses/qt will used for set yast ui mode
 
 Open yast2 lan, run handle_dhcp_popup() and install and check firewalld
 
@@ -407,9 +405,16 @@ If network is controlled by Networkmanager, don't change any network settings.
 =cut
 
 sub open_yast2_lan {
-    my $is_nm = !script_run('systemctl is-active NetworkManager');    # Revert boolean because of bash vs perl's return code.
+    my %options = @_;
+    my $is_nm
+      = !script_run('systemctl is-active NetworkManager');    # Revert boolean because of bash vs perl's return code.
+    my $y2_opts
+      = ($options{ui} =~ /ncurses/)
+      ? "--" . $options{ui}
+      : "";
+    $y2_opts = "--ncurses" if (is_pvm_hmc() || is_spvm());
 
-    $module_name = y2_module_consoletest::yast2_console_exec(yast2_module => 'lan');
+    $module_name = y2_module_consoletest::yast2_console_exec(yast2_module => 'lan', yast2_opts => $y2_opts);
 
     if ($is_nm) {
         handle_Networkmanager_controlled;    # don't change any settings

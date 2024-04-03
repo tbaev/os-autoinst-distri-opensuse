@@ -18,20 +18,16 @@ use Utils::Architectures;
 use rpi 'enable_tpm_slb9670';
 
 sub run {
+    # Enable TPM on Raspberry Pi 4
+    # Refer: https://en.opensuse.org/HCL:Raspberry_Pi3_TPM
     if (get_var('MACHINE') =~ /RPi4/) {
         enable_tpm_slb9670;
     } else {
         select_serial_terminal;
     }
 
-
-    # Enable TPM on Raspberry Pi 4
-    # Refer: https://en.opensuse.org/HCL:Raspberry_Pi3_TPM
-    enable_tpm_slb9670 if (get_var('MACHINE') =~ /RPi4/);
-
-    # Install the required packages for libvirt environment setup,
-    # "expect" is used for later remote login test, so install here as well
-    zypper_call("in qemu libvirt swtpm expect virt-install virt-manager");
+    # Install the required packages for libvirt environment setup
+    zypper_call("in qemu libvirt swtpm virt-install virt-manager wget");
 
     # Start libvirtd daemon and start the default libvirt network
     assert_script_run("systemctl start libvirtd");
@@ -39,38 +35,11 @@ sub run {
     assert_script_run("systemctl is-active libvirtd");
     assert_script_run("virsh net-list | grep default | grep active");
 
-    # Since machine:RPi4 and machine:aarch64 are using different flavors,
-    # and we can not add `START_AFTER_TEST` dependencies between jobs in
-    # different flavors, so we need to wait create_swtpm_hdd job finished
-    # here if this test is running on machine:RPi4
-    my $openqa_url = get_var('OPENQA_URL', autoinst_url);
-    if (get_var('MACHINE') =~ /RPi4/) {
-        if (!get_var('CREATE_SWTPM_HDD_TEST')) {
-            die 'CREATE_SWTPM_HDD_TEST settings are needed';
-        }
-        my $build = get_var('BUILD');
-        my $create_swtpm_test = get_var('CREATE_SWTPM_HDD_TEST');
-        my $counter = 100;
-        record_info('check status', "start checking job status of $create_swtpm_test");
-        while ($counter--) {
-            my $result = script_output(
-                "curl -s \"$openqa_url/api/v1/jobs?build=$build&machine=aarch64&flavor=DVD&latest=1&test=$create_swtpm_test&state=done&page=1&limit=3\""
-            );
-            if ($result =~ m/\"state\":\"done\"/) {
-                record_info('check status finished', "$create_swtpm_test job done");
-                last;
-            }
-            sleep(60);
-        }
-        if (!$counter) {
-            die "waiting for test $create_swtpm_test finished timeout";
-        }
-    }
-
     # Download the pre-installed guest images and sample xml files
     my $image_path = '/var/lib/libvirt/images';
     my $legacy_image = 'swtpm_legacy@64bit.qcow2';
     my $uefi_image = 'swtpm_uefi@64bit.qcow2';
+    my $openqa_url = get_var('OPENQA_URL', autoinst_url);
     if (get_var('HDD_SWTPM_LEGACY')) {
         my $hdd_swtpm_legacy = get_required_var('HDD_SWTPM_LEGACY');
         my $sample_file = 'swtpm/swtpm_legacy.xml';
@@ -89,12 +58,6 @@ sub run {
         assert_script_run("mv $image_path/$hdd_swtpm_uefi $image_path/$uefi_image");
         assert_script_run("wget --quiet " . data_url($sample_file) . " -P $image_path");
     }
-
-    # Write expect script to implement ssh access into remote host and run some commands
-    assert_script_run("wget --quiet " . data_url("swtpm/ssh_script") . " -P $image_path");
-
-    # Change permission of the expect script
-    assert_script_run("chmod 755 $image_path/ssh_script");
 }
 
 sub test_flags {

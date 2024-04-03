@@ -13,7 +13,7 @@
 # - Legacy Module
 # - Web and Scripting Module
 #
-# Maintainer: QA SLE YaST team <qa-sle-yast@suse.de>
+# Maintainer: QE YaST and Migration (QE Yam) <qe-yam at suse de>
 
 use base 'y2_installbase';
 use strict;
@@ -21,7 +21,7 @@ use warnings;
 
 sub run {
     $testapi::distri->get_module_selection()->select_modules(
-        [qw(containers desktop development legacy web)]);
+        [qw(containers desktop development legacy web python)]);
 }
 
 1;

@@ -14,7 +14,7 @@ use warnings;
 use lockapi;
 use Utils::Systemd qw(systemctl);
 use utils qw(file_content_replace zypper_call);
-use hacluster qw(add_file_in_csync get_cluster_name get_hostname is_node wait_until_resources_started);
+use hacluster qw(add_file_in_csync get_cluster_name get_hostname is_node wait_until_resources_started wait_for_idle_cluster);
 
 sub configure_ha_exporter {
     my $exporter_name = 'ha_cluster_exporter';
@@ -28,8 +28,8 @@ sub configure_ha_exporter {
     upload_logs("/usr/etc/$exporter_name", failok => 1);
 
     # Get the IP port and start exporter
-    my ($ha_exporter_port) = script_output("awk '/port:/ { print \$NF }' /etc/$exporter_name /usr/etc/$exporter_name 2>/dev/null", proceed_on_failure => 1) =~ /(\d+)/;
-    $ha_exporter_port ||= 9664;
+    my ($ha_exporter_port) = script_output("awk '/port:/ { print \$NF }' /etc/$exporter_name /usr/etc/$exporter_name 2>/dev/null", proceed_on_failure => 1) =~ /^(\d+)$/ ? $1 : 9664;
+
     systemctl "enable --now prometheus-$exporter_name";
     systemctl "status prometheus-$exporter_name";
     assert_script_run "curl -o $metrics_file http://localhost:$ha_exporter_port";
@@ -63,10 +63,10 @@ sub configure_hanadb_exporter {
     upload_logs("$hanadb_exporter_config", failok => 1);
 
     # Get the IP port and start exporter
-    ($hanadb_exporter_port) = script_output("awk '/exposition_port/ { print \$NF }' $hanadb_exporter_config", proceed_on_failure => 1) =~ /(\d+)/;
-    $hanadb_exporter_port ||= 9668;
+    ($hanadb_exporter_port) = script_output("awk '/exposition_port/ { print \$NF }' $hanadb_exporter_config", proceed_on_failure => 1) =~ /^(\d+)$/ ? $1 : 9668;
 
     # Add monitoring resource in the HA stack
+    wait_for_idle_cluster;
     if (get_var('HA_CLUSTER') and is_node(1)) {
         my $hanadb_msl = "msl_SAPHana_$args{rsc_id}";
         my $hanadb_exp_rsc = "rsc_exporter_$args{rsc_id}";
@@ -123,8 +123,7 @@ sub configure_sap_host_exporter {
     upload_logs("$exporter_config", failok => 1);
 
     # Get the IP port and start exporter
-    my ($exporter_port) = script_output("awk '/port:/ { print \$NF }' $exporter_config", proceed_on_failure => 1) =~ /(\d+)/;
-    $exporter_port ||= 9680;
+    my ($exporter_port) = script_output("awk '/port:/ { print \$NF }' $exporter_config", proceed_on_failure => 1) =~ /^(\d+)$/ ? $1 : 9680;
 
     if (get_var('HA_CLUSTER')) {
         my $exporter_rsc = "rsc_exporter_$args{rsc_id}";
@@ -148,6 +147,7 @@ sub configure_sap_host_exporter {
         assert_script_run "crm configure modgroup grp_$args{rsc_id} add $exporter_rsc";
         assert_script_run "crm resource start $exporter_rsc";
         wait_until_resources_started;
+        wait_for_idle_cluster;
 
         # Release the lock
         mutex_unlock 'support_server_ready';
@@ -167,11 +167,22 @@ sub configure_sap_host_exporter {
 sub configure_node_exporter {
     my $monitoring_port = 9100;
     my $metrics_file = '/tmp/node_exporter.metrics';
+    my $wait_time = bmwqemu::scale_timeout(30);
+    my $not_ready = 1;
 
     # Install and start node_exporter
     zypper_call 'in golang-github-prometheus-node_exporter';
     systemctl 'enable --now prometheus-node_exporter';
     systemctl 'status prometheus-node_exporter';
+
+    # Wait $wait_time for prometheus node_exporter to start
+    while ($wait_time > 0) {
+        $not_ready = script_run 'journalctl --no-pager -t node_exporter | grep -q "Listening on"';
+        last unless ($not_ready);
+        sleep 5;
+        $wait_time -= 5;
+    }
+    die 'Timed out waiting during 30s (scaled) for prometheus node_exporter to start' if ($not_ready && $wait_time <= 0);
 
     # Check that node_exporter is working as expected
     assert_script_run "curl -o $metrics_file http://localhost:$monitoring_port/metrics";

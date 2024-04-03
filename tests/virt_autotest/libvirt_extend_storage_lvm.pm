@@ -69,24 +69,60 @@ sub prepare_lvm_storage_pool_source {
     # Use a unused hard disk for LVM volumes
     $dev = "/dev/";
     foreach my $disk (@disks) {
-        if (script_run("set -o pipefail;lsblk -rnoPKNAME,MOUNTPOINT | grep -i $disk | awk \'{print \$2}\'") ne '0') {
+        if (script_run("set -o pipefail;findmnt -n -o SOURCE / | grep $disk") != 0 and get_hard_disk_size($disk) >= 20) {
             $lvm_disk_name = $dev . $disk;
             last;
         }
     }
-    record_info "Assign a New Disk:", "$lvm_disk_name";
-    # Wipe Hard Disk Clean via dd for assigned a new full disk
-    wipe_hard_disk($lvm_disk_name);
-    ## About LVM volumes management
-    # Create a Volume Group (VG) with LVM named 'lvm_vg'
-    create_volume_group($lvm_disk_name);
-    return ($lvm_disk_name);
+
+    if ($lvm_disk_name) {
+        record_info "Assign a New Disk:", "$lvm_disk_name";
+        # Wipe Hard Disk Clean via dd for assigned a new full disk
+        wipe_hard_disk($lvm_disk_name);
+        ## About LVM volumes management
+        # Create a Volume Group (VG) with LVM named 'lvm_vg'
+        remove_volume_group(disk => "${lvm_disk_name}1", vg => "${lvm_vg_name}");
+        create_volume_group($lvm_disk_name);
+        return ($lvm_disk_name);
+    }
+    else {
+        record_info("Full information about block devices on host", script_output("lsblk --all --output-all"));
+        die("Failed to find spare hard disk with 20G or more size");
+    }
+}
+
+#Get disk size in gigabytes
+sub get_hard_disk_size {
+    my $hard_disk_name = shift;
+
+    my $hard_disk_size = script_output("blockdev --getsize64 /dev/$hard_disk_name");
+    return $hard_disk_size / (1024**3);
 }
 
 # Wipe Hard Disk Clean via dd
 sub wipe_hard_disk {
     my $hard_disk_name = shift;
     assert_script_run("dd if=/dev/zero of=$hard_disk_name count=1M", timeout => 1500, fail_message => "Failed to wipe hard disk clean on $hard_disk_name");
+}
+
+# Reomve volume group associated with a disk partition
+sub remove_volume_group {
+    my %args = @_;
+    $args{disk} //= '';
+    $args{vg} //= '';
+    die("Neither disk nor vg should be empty") unless ($args{disk} and $args{vg});
+
+    my $timeout = 180;
+    record_info("Reomve vg $args{vg} forcibly");
+    script_run("vgremove -f -y $args{vg}", timeout => $timeout);
+
+    record_info("Remove physical volume $args{disk} forcibly");
+    script_run("pvremove -f -y $args{disk}", timeout => $timeout);
+
+    if (script_run("vgdisplay $args{vg}", timeout => $timeout) == 0 or script_run("pvdisplay $args{disk}", timeout => $timeout) == 0) {
+        die("Either vg $args{vg} or pv $args{disk} still exists after removing");
+    }
+    save_screenshot;
 }
 
 # Create a Volume Group with LVM

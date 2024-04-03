@@ -1,11 +1,11 @@
 # SUSE's openQA tests
 #
-# Copyright 2021 SUSE LLC
+# Copyright 2021-2023 SUSE LLC
 # SPDX-License-Identifier: FSFAP
 
 # Summary: Push a container image to the public cloud container registry
 #
-# Maintainer: Ivan Lausuch <ilausuch@suse.com>, qa-c team <qa-c@suse.de>
+# Maintainer: QE-C team <qa-c@suse.de>
 
 use Mojo::Base 'publiccloud::k8sbasetest';
 use testapi;
@@ -62,7 +62,7 @@ EOT
 sub cleanup {
     my ($self) = @_;
     record_info('Cleanup', 'Deleting kubectl job and image.');
-    assert_script_run("kubectl delete job " . $self->{job_name});
+    script_run("kubectl delete job --grace-period=0 --force " . $self->{job_name}) if defined $self->{job_name};
     $self->{provider}->delete_container_image($self->{image_tag});
 }
 

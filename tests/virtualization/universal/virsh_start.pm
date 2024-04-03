@@ -3,7 +3,7 @@
 #
 # Package: libvirt-client libvirt-daemon
 # Summary: This starts libvirt guests again
-# Maintainer: Pavel Dostál <pdostal@suse.cz>
+# Maintainer: QE-Virtualization <qe-virt@suse.de>
 
 use base "consoletest";
 use virt_autotest::common;
@@ -21,7 +21,8 @@ sub run {
         }
     }
 
-    record_info "LIBVIRTD", "Restart libvirtd and expect all guests to boot up";
+    record_info "LIBVIRTD", "Restart libvirt daemon and expect all guests to boot up";
+    # Note: TBD for modular libvirt. See poo#129086 for detail.
     restart_libvirtd;
 
 

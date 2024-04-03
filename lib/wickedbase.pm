@@ -15,6 +15,7 @@ use network_utils;
 use lockapi;
 use testapi qw(is_serial_terminal :DEFAULT);
 use serial_terminal 'select_serial_terminal';
+use version_utils 'is_sle';
 use bmwqemu;
 use serial_terminal;
 use Carp;
@@ -23,6 +24,9 @@ use Mojo::Util qw(b64_encode b64_decode trim);
 use Regexp::Common 'net';
 use File::Basename;
 use version_utils 'check_version';
+use List::MoreUtils qw(uniq);
+use containers::common qw(install_podman_when_needed install_docker_when_needed);
+
 
 use strict;
 use warnings;
@@ -49,6 +53,7 @@ sub wicked_command {
 
     my $cmd = '/usr/sbin/wicked --log-target syslog --debug all ' . $action . ' ' . $iface;
     assert_script_run('echo -e "\n# $(date -Isecond)\n# "' . $cmd . ' >> ' . $serial_log);
+    $cmd = $self->valgrind_cmd('wicked') . " $cmd" if (grep { /^wicked$/ } $self->valgrind_get_services());
     record_info('wicked cmd', $cmd);
     assert_script_run($cmd . ' 2>&1 | tee -a ' . $serial_log);
     assert_script_run(q(echo -e "\n# ip addr" >> ) . $serial_log);
@@ -117,6 +122,148 @@ sub assert_wicked_state {
     $self->ping_with_timeout(ip => $args{ping_ip}) if $args{ping_ip};
 }
 
+=head2 valgrind_get_services
+
+    valgrind_get_services()
+
+Retrieves the list of wicked services where valgrind is enabled for. It read the
+`WICKED_VALGRIND` variable.
+
+=cut
+
+sub valgrind_get_services {
+    my $self = shift;
+    my $val = get_var('WICKED_VALGRIND');
+
+    return if (!defined($val) || !$val);
+    my @all = qw(wickedd-auto4
+      wickedd-dhcp6
+      wickedd
+      wickedd-dhcp4
+      wickedd-nanny
+      wicked);
+    my @tmp;
+    my @enable;
+    if (index($val, ",")) {
+        @tmp = split(/,/, $val);
+    } else {
+        @tmp = $val;
+    }
+    foreach my $v (@tmp) {
+        $v =~ s/\.service$//;
+        if (grep { /^$v$/ } @all) {
+            push @enable, $v;
+        } elsif ($v =~ /^1|all$/i) {
+            push @enable, @all;
+        } else {
+            record_info('WARNING', "Unknown value for WICKED_VALGRIND $v", result => 'softfail');
+        }
+    }
+    @enable = uniq @enable;
+
+    return @enable;
+}
+
+=head2 valgrind_cmd
+
+    valgrind_cmd([$service])
+
+Retrieves the valgrind command. If the C<$service> is given, the log file will contain
+the name of it. It used `WICKED_VALGRIND_CMD` variable to build the command.
+
+=cut
+
+sub valgrind_cmd {
+    my ($self, $service) = @_;
+
+    my $valgrind_cmd = get_var('WICKED_VALGRIND_CMD', '/usr/bin/valgrind --tool=memcheck --leak-check=yes');
+    if ($service) {
+        my $logfile = "/var/log/valgrind_$service.log";
+        $valgrind_cmd = "$valgrind_cmd --log-file=$logfile";
+    }
+    return $valgrind_cmd;
+}
+
+=head2 valgrind_enable
+
+    valgrind_enable()
+
+Modify all systemd service units, to enable valgrind for all binarys which where 
+specified via WICKED_VALGRIND.
+
+=cut
+
+sub valgrind_enable {
+    my $self = shift;
+    my $valgrind_cmd = get_var('WICKED_VALGRIND_CMD', '/usr/bin/valgrind --tool=memcheck --leak-check=yes');
+
+    my @services = $self->valgrind_get_services();
+    return 0 if (!@services);
+
+    record_info("valgrind enable", "services: @services\ncommand: $valgrind_cmd");
+
+    foreach my $service (@services) {
+        my $service_file = "/etc/systemd/system/$service.service";
+
+        assert_script_run("systemctl cat $service > $service_file");
+        # Add valgrind command prefix to `ExecStart=` in the custom service file
+        assert_script_run(sprintf(q(sed -i -E 's@^(ExecStart=)(.*)$@\1%s \2@' '%s'),
+                $self->valgrind_cmd($service), $service_file));
+
+        record_info("$service.service", script_output("cat $service_file"));
+    }
+
+    assert_script_run('systemctl daemon-reload');
+
+    return 1;
+}
+
+=head2
+
+    valgrind_prerun()
+
+Run before test-module. Simple cleanup of left-overs.
+
+=cut
+
+sub valgrind_prerun {
+    my $self = shift;
+
+    my @services = $self->valgrind_get_services();
+    foreach my $service (@services) {
+        my $logfile = "/var/log/valgrind_$service.log";
+
+        assert_script_run("rm -f $logfile");
+    }
+}
+
+=head2 valgrind_postrun
+
+    valgrind_postrun()
+
+Check for valgrind errors in one of the valgrind enabled binaries valgrind-logs.
+
+=cut
+
+sub valgrind_postrun {
+    my $self = shift;
+
+    my @services = $self->valgrind_get_services();
+    foreach my $service (@services) {
+        my $logfile = "/var/log/valgrind_$service.log";
+
+        my @lines = split(/\r?\n/, script_output("test -r '$logfile' && grep 'ERROR SUMMARY' '$logfile' || true"));
+        foreach my $l (@lines) {
+            if ($l =~ /ERROR\s+SUMMARY:\s+(\d+)/) {
+                if ($1 > 0) {
+                    record_info("valgrind $service", "service:$service\n\n" . script_output("cat $logfile"), result => 'fail');
+                    $self->result('fail');
+                    last;
+                }
+            }
+        }
+    }
+}
 
 sub reset_wicked {
     my $self = @_;
@@ -382,8 +529,8 @@ sub unique_macaddr {
     $prefix =~ s/:/_/;
     $prefix = hex($prefix);
 
-    $self->{unique_macaddr_cnt} = $self->{unique_macaddr_cnt} ? 0 : $self->{unique_macaddr_cnt} + 1;
-    $prefix += $self->{unique_macaddr_cnt};
+    $self->{unique_macaddr_cnt} //= 0;
+    $prefix += $self->{unique_macaddr_cnt}++;
 
     my $w_id = get_required_var('WORKER_ID');
     die("WORKER_ID too big!") if ($w_id > 0xffffffff);
@@ -508,7 +655,8 @@ sub upload_wicked_logs {
     record_info('Logs', "Collecting logs in $logs_dir");
     script_run("mkdir -p $logs_dir");
     script_run("date +'%Y-%m-%d %T.%6N' > $logs_dir/date");
-    script_run("journalctl -b -o short-precise|tail -n +2 > $logs_dir/journalctl.log");
+    script_run('journalctl --sync');
+    script_run("journalctl -b -o short-precise > $logs_dir/journalctl.log");
     script_run("wicked ifstatus --verbose all > $logs_dir/wicked_ifstatus.log 2>&1");
     script_run("wicked show-config > $logs_dir/wicked_config.log 2>&1");
     script_run("wicked show-xml > $logs_dir/wicked_xml.log 2>&1");
@@ -524,6 +672,25 @@ sub upload_wicked_logs {
     $self->upload_log_file("$dir_name.tar.gz");
 }
 
+=head2 do_barrier_create
+
+  do_barrier_create(<barrier_postfix> [, <test_name>] )
+
+Create a barier which can be later used to syncronize the wicked tests for SUT and REF.
+This function can be called statically. In this case the C<test_name> parameter is 
+mandatory.
+
+=cut
+
+sub do_barrier_create {
+    my ($self, $type, $test_name) = ref $_[0] ? @_ : (undef, @_);
+    $test_name //= $self ? $self->{name} : die("test_name parameter is mandatory");
+
+    my $barrier_name = 'test_' . $test_name . '_' . $type;
+    record_info('barrier create', $barrier_name . ' num_children: 2');
+    barrier_create($barrier_name, 2);
+}
+
 =head2 do_barrier
 
   do_barrier(<barrier_postfix>)
@@ -535,7 +702,12 @@ Used to syncronize the wicked tests for SUT and REF creating the corresponding m
 sub do_barrier {
     my ($self, $type) = @_;
     my $barrier_name = 'test_' . $self->{name} . '_' . $type;
-    barrier_wait($barrier_name);
+    barrier_wait({name => $barrier_name, check_dead_job => 1});
+
+    # This is to mitigate the problem, that if a parallel job is running in the
+    # barrier_wait() poll loop, while this job finished. This would lead to a
+    # failure on the other side.
+    $self->{last_barrier_wait_call} = time;
 }
 
 =head2 setup_vlan
@@ -805,6 +977,8 @@ sub write_cfg {
     my $rand = random_string;
     # replace variables
     $content =~ s/\{\{(\w+)\}\}/$self->lookup($1, $args{env})/eg;
+    # make sure that dirs exists
+    assert_script_run('mkdir -p ' . dirname($filename));
     # unwrap content
     my ($indent) = $content =~ /^\r?\n?([ ]*)/m;
     $content =~ s/^$indent//mg;
@@ -835,9 +1009,11 @@ END_OF_CONTENT_$rand
 
 sub run_test_shell_script
 {
-    my ($self, $title, $script_cmd) = @_;
+    my ($self, $title, $script_cmd, %args) = @_;
+    $args{timeout} //= 300;
+
     $self->check_logs(sub {
-            my $output = script_output($script_cmd . '; echo "==COLLECT_EXIT_CODE==$?=="', proceed_on_failure => 1, timeout => 300);
+            my $output = script_output($script_cmd . '; echo "==COLLECT_EXIT_CODE==$?=="', proceed_on_failure => 1, timeout => $args{timeout});
             my $result = $output =~ m/==COLLECT_EXIT_CODE==0==/ ? 'ok' : 'fail';
             $self->record_console_test_result($title, $output, result => $result);
     });
@@ -887,7 +1063,7 @@ sub check_logs {
     $default_exclude .= ',wickedd=error retrieving tap attribute from sysfs';
 
     my $exclude_var = get_var(WICKED_CHECK_LOG_EXCLUDE => $default_exclude);
-    my $exclude_test_var = get_var('WICKED_CHECK_LOG_EXCLUDE_' . $self->{name}, '');
+    my $exclude_test_var = get_var('WICKED_CHECK_LOG_EXCLUDE_' . uc($self->{name}), '');
 
     my @excludes = split(/(?<!\\),/, "$exclude_var,$exclude_test_var");
     @excludes = map { my $v = trim($_); length($v) > 0 ? $v : () } @excludes;
@@ -905,7 +1081,7 @@ sub check_logs {
             my $msg = "wicked check logs failed:\n$cmd\n\n$out\n\n";
             $msg .= "Use WICKED_CHECK_LOG_EXCLUDE to change filter!\n";
             $msg .= "  WICKED_CHECK_LOG_EXCLUDE=$exclude_var\n";
-            $msg .= '  WICKED_CHECK_LOG_EXCLUDE_' . $self->{name} . "=$exclude_test_var\n";
+            $msg .= '  WICKED_CHECK_LOG_EXCLUDE_' . uc($self->{name}) . "=$exclude_test_var\n";
             $msg .= "Control if test fail with WICKED_CHECK_LOG_FAIL default off.\n";
             bmwqemu::fctwarn($msg);
             record_info('LOG-ERROR', $out, result => 'fail');
@@ -963,6 +1139,43 @@ sub check_coredump {
     }
 }
 
+sub container_runtime {
+    return 'docker' if (is_sle("<=15-SP1"));
+    return 'podman';
+}
+
+sub prepare_containers {
+    my $self = shift;
+
+    if ($self->container_runtime eq 'docker') {
+        install_docker_when_needed(get_var('DISTRI'));
+    } else {
+        install_podman_when_needed(get_var('DISTRI'));
+    }
+
+    my $containers = $self->get_containers();
+    foreach my $name (keys(%$containers)) {
+        my $url = $containers->{$name};
+        assert_script_run($self->container_runtime . " pull '$url'", timeout => 400);
+    }
+}
+
+sub get_containers {
+    my $self = shift;
+    if (!defined($self->{containers})) {
+        my $default_container = 'scapy=registry.opensuse.org/home/cfconrad/openqa/containers/scapy:latest';
+        my @containers = split(/\s*,\s*/, get_var("WICKED_CONTAINERS", $default_container));
+        @containers = grep { /\w+=.+/ } @containers;
+        $self->{containers} = {map { split(/=/, $_, 2) } @containers};
+    }
+    return $self->{containers};
+}
+
+sub get_container {
+    my ($self, $name) = @_;
+    return $self->get_containers()->{$name} // croak("There is no container with name $name");
+}
+
 sub reboot {
     my ($self) = @_;
     $self->check_logs();
@@ -981,7 +1194,19 @@ sub post_run {
     }
     $self->check_logs() unless $self->{skip_check_logs_on_post_run};
     $self->check_coredump();
+    $self->valgrind_postrun();
     $self->upload_wicked_logs('post');
+
+    if (get_var('IS_WICKED_REF')) {
+        my $time_since_barrier_wait = time - ($self->{last_barrier_wait_call} // 0);
+        if ($time_since_barrier_wait < lockapi::POLL_INTERVAL) {
+            my $seconds = lockapi::POLL_INTERVAL - $time_since_barrier_wait;
+            #see https://github.com/os-autoinst/os-autoinst/issues/2340
+            bmwqemu::diag("If the parallel job might wait in barrier_wait() poll loop," .
+                  " we should not finish this parent job to early! sleep $seconds seconds");
+            sleep $seconds;
+        }
+    }
 }
 
 sub pre_run_hook {
@@ -993,7 +1218,7 @@ sub pre_run_hook {
     wait_serial($coninfo, undef, 0, no_regex => 1);
     send_key 'ret';
     if ($self->{name} eq 'before_test' && get_var('VIRTIO_CONSOLE_NUM', 1) > 1) {
-        my $serial_terminal = is_ppc64le ? 'hvc2' : 'hvc1';
+        my $serial_terminal = is_ppc64le ? 'hvc3' : 'hvc2';
         add_serial_console($serial_terminal);
     }
     if ($self->{name} ne 'before_test' && get_var('WICKED_TCPDUMP')) {
@@ -1003,6 +1228,8 @@ sub pre_run_hook {
     $self->upload_wicked_logs('pre');
     $self->{pre_run_log_cursor} = $self->get_log_cursor() if ($self->{name} ne 'before_test');
     $self->SUPER::pre_run_hook;
+
+    $self->valgrind_prerun();
     $self->do_barrier('pre_run');
 }
 
@@ -1016,4 +1243,30 @@ sub post_run_hook {
     $self->post_run() unless $self->{wicked_post_run};
 }
 
+sub need_network_tweaks() {
+    my ($self) = @_;
+    # By default we enable this variable to get reliable results
+    return get_var("WICKED_NEED_NETWORK_TWEAKS") // 1;
+}
+
+sub wait_for_background_process {
+    my ($self, $pid, %args) = @_;
+    $args{proceed_on_failure} //= 0;
+
+    my $ret = script_run("wait $pid", die_on_timeout => 0, %args);
+    unless (defined($ret)) {
+        if (is_serial_terminal()) {
+            type_string(qq(\cc));
+        }
+        else {
+            send_key('ctrl-c');
+        }
+        script_run("kill -9 $pid");
+
+        die("wait_for_background_process() failed, process $pid wasn't ready yet");
+    }
+
+    return $ret if ($ret == 0 || $args{proceed_on_failure});
+    die("Background process $pid exit with $ret");
+}
 1;

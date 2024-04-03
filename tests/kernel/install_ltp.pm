@@ -20,11 +20,15 @@ use bootloader_setup qw(add_custom_grub_entries add_grub_cmdline_settings);
 use power_action_utils 'power_action';
 use repo_tools 'add_qa_head_repo';
 use upload_system_log;
-use version_utils qw(is_jeos is_opensuse is_released is_sle is_leap is_tumbleweed is_rt is_transactional is_alp);
+use version_utils qw(is_jeos is_opensuse is_released is_sle is_leap is_tumbleweed is_rt is_transactional);
 use Utils::Architectures;
 use Utils::Systemd qw(systemctl disable_and_stop_service);
 use LTP::utils;
 use rpi 'enable_tpm_slb9670';
+use bootloader_setup 'add_grub_xen_replace_cmdline_settings';
+use virt_autotest::utils 'is_xen_host';
+use Utils::Backends 'get_serial_console';
+use kdump_utils;
 
 sub add_we_repo_if_available {
     # opensuse doesn't have extensions
@@ -69,13 +73,14 @@ sub install_runtime_dependencies {
       audit
       bc
       binutils
+      bcachefs-tools
+      btrfsprogs
       dosfstools
       e2fsprogs
       evmctl
       exfat-utils
       fuse-exfat
       ibmtss
-      kernel-default-extra
       lvm2
       net-tools
       net-tools-deprecated
@@ -90,10 +95,14 @@ sub install_runtime_dependencies {
       wget
       xfsprogs
     );
-    for my $dep (@maybe_deps) {
-        # ignore failures due to missing packages (exit code 104)
-        zypper_call("in $dep", exitcode => [0, 104]);
-    }
+
+    # SLE-15 allows loading unsupported modules from kernel-default-extra
+    # via modprobe config file but SLE-12 does not. LTP tests for those
+    # modules then fail on SLE-12 because the required driver is available but
+    # modprobe refuses to load it.
+    push @maybe_deps, 'kernel-default-extra' unless is_sle('<15');
+
+    zypper_install_available(@maybe_deps);
 }
 
 sub install_debugging_tools {
@@ -103,10 +112,7 @@ sub install_debugging_tools {
       ltrace
       strace
     );
-    for my $dep (@maybe_deps) {
-        # ignore failures due to missing packages (exit code 104)
-        zypper_call("in $dep", exitcode => [0, 104]);
-    }
+    zypper_install_available(@maybe_deps);
 }
 
 sub install_runtime_dependencies_network {
@@ -133,10 +139,7 @@ sub install_runtime_dependencies_network {
       wireguard-tools
       xinetd
     );
-    for my $dep (@maybe_deps) {
-        # ignore failures due to missing packages (exit code 104)
-        zypper_call("in $dep", exitcode => [0, 104]);
-    }
+    zypper_install_available(@maybe_deps);
 }
 
 sub install_build_dependencies {
@@ -184,11 +187,7 @@ sub install_build_dependencies {
     # libopenssl-devel-32bit is blocked by dependency mess on SLE-12 and we
     # don't use it anyway...
     push @maybe_deps, 'libopenssl-devel-32bit' if !is_sle('<15');
-
-    for my $dep (@maybe_deps) {
-        # ignore failures due to missing packages (exit code 104)
-        zypper_call("in $dep", exitcode => [0, 104]);
-    }
+    zypper_install_available(@maybe_deps);
 }
 
 sub prepare_ltp_git {
@@ -242,68 +241,6 @@ sub install_from_git {
               . get_ltp_version_file()));
 }
 
-sub add_ltp_repo {
-    my $repo = get_var('LTP_REPOSITORY');
-
-    if (!$repo) {
-        if (is_sle || is_transactional) {
-            add_qa_head_repo;
-            return;
-        }
-
-        # ltp for leap15.2 is available only x86_64
-        if (is_leap('15.4+')) {
-            $repo = get_var('VERSION');
-        } elsif ((is_leap('=15.2') && is_x86_64) || is_leap('15.3+')) {
-            $repo = sprintf("openSUSE_Leap_%s", get_var('VERSION'));
-        } elsif (is_tumbleweed) {
-            $repo = "openSUSE_Factory";
-            $repo = "openSUSE_Factory_ARM" if (is_aarch64() || is_arm());
-            $repo = "openSUSE_Factory_PowerPC" if is_ppc64le();
-            $repo = "openSUSE_Factory_zSystems" if is_s390x();
-        } else {
-            die sprintf("Unexpected combination of version (%s) and architecture (%s) used", get_var('VERSION'), get_var('ARCH'));
-        }
-        $repo = "https://download.opensuse.org/repositories/benchmark:/ltp:/devel/$repo/";
-    }
-
-    zypper_ar($repo, name => 'ltp_repo');
-}
-
-sub get_default_pkg {
-    my @packages;
-
-    if (is_sle && is_released) {
-        push @packages, 'ltp-stable';
-        push @packages, 'ltp-stable-32bit' if is_x86_64;
-    } else {
-        push @packages, 'ltp';
-        push @packages, 'ltp-32bit' if is_x86_64 && !is_jeos;
-    }
-
-    return join(' ', @packages);
-}
-
-sub install_from_repo {
-    my @pkgs = split(/\s* \s*/, get_var('LTP_PKG', get_default_pkg));
-
-    if (is_transactional) {
-        assert_script_run("transactional-update -n -c pkg install " . join(' ', @pkgs), 90);
-    } else {
-        zypper_call("in --recommends " . join(' ', @pkgs));
-    }
-
-    my $run_cmd = is_transactional ? 'transactional-update -c -d --quiet run' : '';
-    for my $pkg (@pkgs) {
-        my $want_32bit = $pkg =~ m/32bit/;
-        record_info("LTP pkg: $pkg", script_output("$run_cmd rpm -qi $pkg | tee "
-                  . get_ltp_version_file($want_32bit)));
-        assert_script_run "find " . get_ltproot($want_32bit) .
-          q(/testcases/bin/openposix/conformance/interfaces/ -name '*.run-test' > )
-          . get_ltp_openposix_test_list_file($want_32bit);
-    }
-}
-
 sub setup_network {
     my $content;
 
@@ -312,7 +249,7 @@ sub setup_network {
     assert_script_run("printf \"$content\" >> /etc/securetty");
 
     # ftp
-    assert_script_run('sed -i \'s/^\s*\(root\)\s*$/# \1/\' /etc/ftpusers');
+    assert_script_run('if test -f /etc/ftpusers; then sed -i \'s/^\s*\(root\)\s*$/# \1/\' /etc/ftpusers; fi');
 
     # getaddrinfo_01: missing hostname in /etc/hosts
     assert_script_run('h=`hostname`; grep -q $h /etc/hosts || printf "# ltp\n127.0.0.1\t$h\n::1\t$h\n" >> /etc/hosts');
@@ -356,18 +293,27 @@ sub run {
     my $inst_ltp = get_var 'INSTALL_LTP';
     my $cmd_file = get_var('LTP_COMMAND_FILE');
     my $grub_param = 'ignore_loglevel';
+    my $is_ima = $cmd_file =~ m/^ima$/i;
 
     if ($inst_ltp !~ /(repo|git)/i) {
         die 'INSTALL_LTP must contain "git" or "repo"';
     }
 
-    if (!get_var('KGRAFT') && !get_var('LTP_BAREMETAL') && !is_jeos) {
+    if (!get_var('KGRAFT') && !get_var('LTP_BAREMETAL') && !is_jeos && !is_transactional) {
         $self->wait_boot;
     }
 
-    enable_tpm_slb9670 if (get_var('MACHINE') =~ /RPi/);
+    enable_tpm_slb9670 if ($is_ima && get_var('MACHINE') =~ /RPi/);
 
+    if (get_var('LTP_COMMAND_FILE') && check_var_array('LTP_DEBUG', 'crashdump')) {
+        select_serial_terminal;
+        configure_service(yast_interface => 'cli');
+    }
+
+    # Initialize VNC console now to avoid login attempts on frozen system
+    select_console('root-console') if get_var('LTP_DEBUG');
     select_serial_terminal;
+    export_ltp_env;
 
     if (script_output('cat /sys/module/printk/parameters/time') eq 'N') {
         script_run('echo 1 > /sys/module/printk/parameters/time');
@@ -406,7 +352,7 @@ sub run {
 
     log_versions 1;
 
-    if (is_alp) {
+    if (is_transactional) {
         assert_script_run("transactional-update -n -c pkg install efivar", 90);
     } else {
         zypper_call('in efivar') if is_sle('12+') || is_opensuse;
@@ -419,6 +365,14 @@ sub run {
     }
 
     add_custom_grub_entries if (is_sle('12+') || is_opensuse || is_transactional) && !is_jeos;
+
+    if (is_xen_host) {
+        my $version = get_var('VERSION');
+        assert_script_run("grub2-set-default 'SLES ${version}, with Xen hypervisor'");
+        my $serial_console = get_serial_console;
+        add_grub_xen_replace_cmdline_settings("console=${serial_console},115200n", update_grub => 1);
+    }
+
     setup_network unless is_transactional;
 
     # we don't run LVM tests in 32bit, thus not generating the runtest file
@@ -601,7 +555,6 @@ START_DIRECTLY_AFTER_TEST=default_kernel_spvm
 =head3 install_ltp_baremetal
 
 DESKTOP=textmode
-GA_REPO=http://dist.suse.de/ibs/SUSE:/SLE-%VERSION%:/GA/standard/SUSE:SLE-%VERSION%:GA.repo
 GRUB_PARAM=debug_pagealloc=on;ima_policy=tcb;slub_debug=FZPU
 GRUB_TIMEOUT=300
 INSTALL_LTP=from_repo

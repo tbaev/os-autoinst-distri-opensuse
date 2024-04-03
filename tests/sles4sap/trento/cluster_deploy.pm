@@ -9,25 +9,25 @@ use warnings;
 use Mojo::Base 'publiccloud::basetest';
 use testapi;
 use serial_terminal 'select_serial_terminal';
-use qesapdeployment 'qesap_upload_logs';
-use base 'trento';
+use qesapdeployment qw(qesap_upload_logs qesap_ansible_cmd);
+use trento;
 
 sub run {
     my ($self) = @_;
     select_serial_terminal;
 
-    $self->deploy_qesap();
+    cluster_deploy();
+    cluster_trento_net_peering('/root/test');
 
-    my $trento_rg = $self->get_resource_group;
-    my $cluster_rg = $self->get_qesap_resource_group();
-    my $cmd = join(' ',
-        '/root/test/00.050-trento_net_peering_tserver-sap_group.sh',
-        '-s', $trento_rg,
-        '-n', trento::get_vnet($trento_rg),
-        '-t', $cluster_rg,
-        '-a', trento::get_vnet($cluster_rg));
-    record_info('NET PEERING');
-    assert_script_run($cmd, 360);
+    my $prov = get_required_var('PUBLIC_CLOUD_PROVIDER');
+    my $primary_host = '"hana[0]"';
+    qesap_ansible_cmd(cmd => 'crm cluster wait_for_startup', provider => $prov, filter => $primary_host);
+
+    cluster_print_cluster_status($primary_host);
+}
+
+sub test_flags {
+    return {fatal => 1};
 }
 
 sub post_fail_hook {
@@ -35,10 +35,11 @@ sub post_fail_hook {
     select_serial_terminal;
     qesap_upload_logs();
     if (!get_var('TRENTO_EXT_DEPLOY_IP')) {
-        trento::k8s_logs(qw(web runner));
-        $self->az_delete_group;
+        k8s_logs(qw(web runner));
+        trento_support();
+        az_delete_group();
     }
-    $self->destroy_qesap();
+    cluster_destroy();
     $self->SUPER::post_fail_hook;
 }
 

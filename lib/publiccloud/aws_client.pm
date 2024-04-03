@@ -10,9 +10,10 @@
 package publiccloud::aws_client;
 use Mojo::Base -base;
 use testapi;
+use utils;
 use publiccloud::utils;
 
-has region => sub { get_var('PUBLIC_CLOUD_REGION', 'eu-central-1') };
+has region => sub { get_required_var('PUBLIC_CLOUD_REGION') };
 has aws_account_id => undef;
 has container_registry => sub { get_var("PUBLIC_CLOUD_CONTAINER_IMAGES_REGISTRY", 'suse-qec-testing') };
 has username => sub { get_var('PUBLIC_CLOUD_USER', 'ec2-user') };
@@ -38,6 +39,9 @@ sub init {
     assert_script_run('export AWS_DEFAULT_REGION="' . $self->region . '"');
     define_secret_variable("AWS_ACCESS_KEY_ID", $data->{access_key_id});
     define_secret_variable("AWS_SECRET_ACCESS_KEY", $data->{secret_access_key});
+
+    # Disable pager (see poo#133226 - EC2: WARNING: terminal is not fully functional)
+    assert_script_run('export AWS_PAGER=""');
 
     die('Credentials are invalid') unless ($self->_check_credentials());
 
@@ -72,10 +76,6 @@ sub configure_podman {
     assert_script_run("aws ecr get-login-password --region "
           . $self->region
           . " | podman login --username AWS --password-stdin $full_name_prefix");
-}
-
-sub cleanup {
-    my ($self) = @_;
 }
 
 1;

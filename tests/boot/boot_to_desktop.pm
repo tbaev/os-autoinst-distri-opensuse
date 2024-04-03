@@ -8,7 +8,7 @@
 # - Define the timeout value conditioned to some system variables
 # - If VIRSH_VMM_TYPE is defined as "linux", check serial for 'Welcome to SUSE Linux'
 # - Otherwise, wait for boot with determined timeout
-# Maintainer: yutao <yuwang@suse.com>
+# Maintainer: QE YaST and Migration (QE Yam) <qe-yam at suse de>
 
 use base 'bootbasetest';
 use strict;
@@ -16,14 +16,14 @@ use warnings;
 use testapi;
 use Utils::Architectures;
 use Utils::Backends;
-use version_utils qw(is_upgrade is_sles4sap is_sle);
+use version_utils qw(is_upgrade is_sles4sap is_sle is_sle_micro);
 
 sub run {
     my ($self) = @_;
     $self->{in_boot_desktop} = 1;
     # We have tests that boot from HDD and wait for DVD boot menu's timeout, so
     # the timeout here must cover it. UEFI DVD adds some 60 seconds on top.
-    my $timeout = get_var('UEFI') ? 140 : 80;
+    my $timeout = get_var('BOOTLOADER_TIMEOUT', 200);
     my $ready_time = get_var('USE_SUPPORT_SERVER_PXE_CUSTOMKERNEL') ? 900 : 500;
     # Increase timeout on ipmi bare metal backend, firmware initialization takes
     # a lot of time
@@ -49,7 +49,8 @@ sub run {
         wait_serial('Welcome to SUSE Linux', $timeout) || die "System did not boot in $timeout seconds.";
     }
     else {
-        $self->wait_boot(bootloader_time => $timeout, nologin => $nologin, ready_time => $ready_time);
+        my $enable_root_ssh = (is_sle_micro('>=6.0') && is_s390x) ? 1 : 0;
+        $self->wait_boot(bootloader_time => $timeout, nologin => $nologin, ready_time => $ready_time, enable_root_ssh => $enable_root_ssh);
     }
 }
 

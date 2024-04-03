@@ -5,14 +5,14 @@
 
 # Summary: This test module confirms the popup for installation.
 
-# Maintainer: QE YaST <qa-sle-yast@suse.de>
+# Maintainer: QE YaST and Migration (QE Yam) <qe-yam at suse de>
 
 use strict;
 use warnings;
 use base 'y2_installbase';
 
 sub run {
-    my $install_popup = $testapi::distri->get_ok_popup_controller();
+    my $install_popup = $testapi::distri->get_ok_popup();
     $install_popup->accept();
 }
 

@@ -5,7 +5,7 @@
 
 # Package: bridge-utils libvirt-client openssh qemu-tools util-linux
 # Summary: Virtual network and virtual block device hotplugging
-# Maintainer: Pavel Dostal <pdostal@suse.cz>, Felix Niederwanger <felix.niederwanger@suse.de>, Jan Baier <jbaier@suse.cz>
+# Maintainer: QE-Virtualization <qe-virt@suse.de>
 
 use base "virt_feature_test_base";
 use virt_autotest::common;
@@ -31,10 +31,6 @@ sub add_virtual_network_interface {
     unless ($guest =~ m/hvm/i && is_sle('<=12-SP2') && is_xen_host) {
         my $persistent_config_option = '';
         my $interface_model_option = '';
-        if (get_var('VIRT_AUTOTEST') && is_xen_host) {
-            record_soft_failure 'bsc#1168124 Bridge network interface hotplugging has to be performed at the beginning.';
-            $self->{test_results}->{$guest}->{"bsc#1168124 Bridge network interface hotplugging has to be performed at the beginning"}->{status} = 'SOFTFAILED';
-        }
         if (get_var('VIRT_AUTOTEST') && is_kvm_host) {
             $interface_model_option = '--model virtio';
         }
@@ -45,6 +41,7 @@ sub add_virtual_network_interface {
             assert_script_run("ssh root\@$guest cat /proc/uptime | cut -d. -f1", 60);
             script_retry("ssh root\@$guest ip l | grep " . $mac, delay => 60, retry => 3, timeout => 60);
             assert_script_run("virsh detach-interface $guest bridge --mac " . $mac);
+            die "Failed to detach bridge interface for guest $guest." if (script_run("ssh root\@$guest ip l | grep " . $mac, 60) eq 0);
         }
     } else {
         record_soft_failure 'bsc#959325 - Live NIC attachment on <=12-SP2 Xen hypervisor with HVM guests does not work correctly.';

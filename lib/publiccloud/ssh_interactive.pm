@@ -8,14 +8,13 @@
 # Maintainer: qa-c@suse.de
 
 package publiccloud::ssh_interactive;
-use testapi qw(is_serial_terminal);
 use base Exporter;
+use strict;
+use warnings;
 use testapi;
 use serial_terminal 'select_serial_terminal';
 use Utils::Backends qw(set_sshserial_dev unset_sshserial_dev);
 use version_utils qw(is_tunneled);
-use strict;
-use warnings;
 
 our @EXPORT = qw(ssh_interactive_tunnel ssh_interactive_leave select_host_console);
 

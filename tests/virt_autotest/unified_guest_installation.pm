@@ -51,9 +51,15 @@ use strict;
 use warnings;
 use testapi;
 use Carp;
+use Utils::Backends 'use_ssh_serial_console';
+use virt_autotest::utils qw(check_guest_health);
+use ipmi_backend_utils;
 
 sub run {
     my $self = shift;
+
+    select_console 'sol', await_console => 0;
+    use_ssh_serial_console;
 
     $self->reveal_myself;
     my @guest_names = split(/,/, get_required_var('UNIFIED_GUEST_LIST'));
@@ -68,7 +74,9 @@ sub run {
         $store_of_guests{$element}{REG_CODE} = $guest_registration_codes[$index];
         $store_of_guests{$element}{REG_EXTS_CODES} = $guest_registration_extensions_codes[$index];
     }
+
     $self->concurrent_guest_installations_run(\%store_of_guests);
+    check_guest_health($_) foreach (@guest_names);
     return $self;
 }
 

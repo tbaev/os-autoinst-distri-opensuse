@@ -10,7 +10,6 @@ package reboot_and_wait_up;
 use strict;
 use warnings;
 use testapi;
-use login_console;
 use ipmi_backend_utils;
 use base "proxymode";
 use power_action_utils 'power_action';
@@ -66,7 +65,7 @@ sub reboot_and_wait_up {
                     assert_screen [qw(text-login linux-login)], 600;
                 }
                 else {
-                    assert_screen "text-login", 600;
+                    assert_screen [qw(text-login linux-login)], 600;
                 }
                 enter_cmd "root";
                 assert_screen "password-prompt";
@@ -82,7 +81,9 @@ sub reboot_and_wait_up {
         reset_consoles;
 
         #wait boot finish and relogin
+        set_var('NOT_DIRECT_REBOOT_AFTER_AUTOYAST', '1');
         login_console::login_to_console($self, $reboot_timeout);
+
     }
 }
 

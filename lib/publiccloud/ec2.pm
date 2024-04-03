@@ -13,8 +13,8 @@ use Mojo::JSON 'decode_json';
 use testapi;
 use publiccloud::utils "is_byos";
 use publiccloud::aws_client;
+use publiccloud::ssh_interactive 'select_host_console';
 
-has ssh_key => undef;
 has ssh_key_file => undef;
 
 sub init {
@@ -36,10 +36,18 @@ sub find_img {
     return;
 }
 
+sub get_default_instance_type {
+    # Returns the default machine family type to be used, based on the public cloud architecture
+
+    my $arch = get_var("PUBLIC_CLOUD_ARCH", "x86_64");
+    return "a1.large" if ($arch eq 'arm64');
+    return "t2.large";
+}
+
 sub create_keypair {
     my ($self, $prefix, $out_file) = @_;
 
-    return $self->ssh_key if ($self->ssh_key);
+    return $self->ssh_key_file if ($self->ssh_key_file);
 
     for my $i (0 .. 9) {
         my $key_name = $prefix . "_" . $i;
@@ -79,30 +87,38 @@ sub upload_img {
 
         # AMI is region specific also we need to use different AMI's for on-demand/BYOS uploads
         my $ami_id_hash = {
-            # suse-sles-15-sp2-byos-v20210310-hvm-ssd-x86_64
-            'us-west-1-byos' => 'ami-00dce4ab26f53989c',
-            # suse-sles-15-sp2-v20210310-hvm-ssd-x86_64
-            'us-west-1' => 'ami-099dc1001c74f4813',
-            # suse-sles-15-sp2-byos-v20210310-hvm-ssd-x86_64
-            'us-west-2-byos' => 'ami-088f33f7fdcd2e657',
-            # suse-sles-15-sp2-v20210310-hvm-ssd-x86_64
-            'us-west-2' => 'ami-072cfc789636fd055',
-            # suse-sles-15-sp2-byos-v20210310-hvm-ssd-x86_64
-            'eu-central-1-byos' => 'ami-0e0c1a6d906f89e31',
-            # suse-sles-15-sp2-v20210310-hvm-ssd-x86_64
-            'eu-central-1' => 'ami-0174e85f7925868aa',
-            # suse-sles-15-sp2-v20210303-hvm-ssd-arm64
-            'eu-central-1-arm64' => 'ami-0b01dd8e9169233b8',
-            # suse-sles-15-sp2-byos-v20210303-hvm-ssd-arm64
-            'eu-central-1-byos-arm64' => 'ami-0c8748d383cef954d',
-            # suse-sles-15-sp2-v20210612-hvm-ssd-x86_64
-            'eu-west-1' => 'ami-0262d8a22ca5eae95',
-            # suse-sles-15-sp2-byos-v20210612-hvm-ssd-x86_64
-            'eu-west-1-byos' => 'ami-076b2a39e235b7d33',
-            # suse-sles-15-sp2-v20210604-hvm-ssd-arm64
-            'eu-west-1-arm64' => 'ami-0f3c8cfb9639c3b6d',
-            # suse-sles-15-sp2-byos-v20210604-hvm-ssd-arm64
-            'eu-west-1-byos-arm64' => 'ami-02eae5be24d203db3',
+            # suse-sles-15-sp4-byos-v20220915-hvm-ssd-x86_64
+            'us-west-1-byos' => 'ami-0cf60a7351ac9f023',
+            # suse-sles-15-sp4-v20220915-hvm-ssd-x86_64
+            'us-west-1' => 'ami-095b00d1799acbc5d',
+            # suse-sles-15-sp4-byos-v20220915-hvm-ssd-x86_64
+            'us-west-2-byos' => 'ami-02538b480fd1330ac',
+            # suse-sles-15-sp4-v20220915-hvm-ssd-x86_64
+            'us-west-2' => 'ami-0fbef12dbf17e9796',
+            # suse-sles-15-sp4-byos-v20220915-hvm-ssd-x86_64
+            'eu-central-1-byos' => 'ami-01fee8ad5154e745b',
+            # suse-sles-15-sp4-v20220915-hvm-ssd-x86_64
+            'eu-central-1' => 'ami-0622ab5c21c604604',
+            # suse-sles-15-sp4-v20220915-hvm-ssd-arm64
+            'eu-central-1-arm64' => 'ami-0f33a69f25295ee23',
+            # suse-sles-15-sp4-byos-v20220915-hvm-ssd-arm64
+            'eu-central-1-byos-arm64' => 'ami-0fe6d5a106cf46cce',
+            # suse-sles-15-sp4-v20220915-hvm-ssd-x86_64
+            'eu-west-1' => 'ami-0ddb9fc2019be3eef',
+            # suse-sles-15-sp4-byos-v20220915-hvm-ssd-x86_64
+            'eu-west-1-byos' => 'ami-0067ff53440565874',
+            # suse-sles-15-sp4-v20220915-hvm-ssd-arm64
+            'eu-west-1-arm64' => 'ami-06033303bb6c72a35',
+            # suse-sles-15-sp4-byos-v20220915-hvm-ssd-arm64
+            'eu-west-1-byos-arm64' => 'ami-0e70bccfe7758f9fe',
+            # suse-sles-15-sp4-byos-v20220915-hvm-ssd-x86_64
+            'us-east-2-byos' => 'ami-00d3e0231db6eeee3',
+            # suse-sles-15-sp4-v20220915-hvm-ssd-x86_64
+            'us-east-2' => 'ami-0ca19ecee2be612fc',
+            # suse-sles-15-sp4-v20220915-hvm-ssd-arm64
+            'us-east-1-arm64' => 'ami-05dbc19aca86fdae4',
+            # suse-sles-15-sp4-byos-v20220915-hvm-ssd-arm64
+            'us-east-1-byos-arm64' => 'ami-0e0756f0108a91de8',
         };
 
         my $ami_id_key = $self->provider_client->region;
@@ -117,9 +133,7 @@ sub upload_img {
     my $img_arch = get_var('PUBLIC_CLOUD_ARCH', 'x86_64');
     my $sec_group = get_var('PUBLIC_CLOUD_EC2_UPLOAD_SECGROUP');
     my $vpc_subnet = get_var('PUBLIC_CLOUD_EC2_UPLOAD_VPCSUBNET');
-    my @instance_main_type = split(/\./, get_var('PUBLIC_CLOUD_INSTANCE_TYPE'));
-    my $instance_size = get_var('PUBLIC_CLOUD_IMAGE_LOCATION') =~ /-SAP-/ ? 'large' : 'micro';
-    my $instance_type = get_var('PUBLIC_CLOUD_EC2_UPLOAD_INSTANCE_TYPE', "$instance_main_type[0].$instance_size");
+    my $instance_type = get_var('PUBLIC_CLOUD_EC2_UPLOAD_INSTANCE_TYPE', get_default_instance_type());
 
     # ec2uploadimg will fail without this file, but we can have it empty
     # because we passing all needed info via params anyway
@@ -142,6 +156,7 @@ sub upload_img {
           . "--ec2-ami '" . $helper_ami_id . "' "
           . "--type '" . $instance_type . "' "
           . "--user '" . $self->provider_client->username . "' "
+          . "--boot-mode '" . get_var('PUBLIC_CLOUD_EC2_BOOT_MODE', 'uefi-preferred') . "' "
           . ($sec_group ? "--security-group-ids '" . $sec_group . "' " : '')
           . ($vpc_subnet ? "--vpc-subnet-id '" . $vpc_subnet . "' " : '')
           . "'$file'",
@@ -152,7 +167,12 @@ sub upload_img {
     die("Cannot find image after upload!") unless $ami;
     validate_script_output('aws ec2 describe-images --image-id ' . $ami, sub { /"EnaSupport":\s+true/ });
     record_info('INFO', "AMI: $ami");    # Show the ami-* number, could be useful
-    return $ami;
+}
+
+sub terraform_apply {
+    my ($self, %args) = @_;
+    $args{confidential_compute} = get_var("PUBLIC_CLOUD_CONFIDENTIAL_VM", 0);
+    return $self->SUPER::terraform_apply(%args);
 }
 
 sub img_proof {
@@ -168,10 +188,21 @@ sub img_proof {
 }
 
 sub cleanup {
-    my ($self) = @_;
+    my ($self, $args) = @_;
+    #if for some reason the instance is not created everything below does not make sense to execute
+    return unless ($args->{my_instance} && $args->{my_instance}->{instance_id});
+    my $instance_id = $args->{my_instance}->{instance_id};
+
+    select_host_console(force => 1);
+
+    script_run("aws ec2 get-console-output --instance-id $instance_id | jq -r '.Output' > console.txt");
+    upload_logs("console.txt", failok => 1);
+
+    script_run("aws ec2 get-console-screenshot --instance-id $instance_id | jq -r '.ImageData' | base64 --decode > console.jpg");
+    upload_logs("console.jpg", failok => 1);
+
     $self->terraform_destroy() if ($self->terraform_applied);
     $self->delete_keypair();
-    $self->provider_client->cleanup();
 }
 
 sub describe_instance
@@ -227,6 +258,15 @@ sub start_instance
     }
     die("Unable to get new public IP") unless ($public_ip);
     $instance->public_ip($public_ip);
+}
+
+sub change_instance_type
+{
+    my ($self, $instance, $instance_type) = @_;
+    die "Instance type is already $instance_type" if ($self->describe_instance($instance)->{InstanceType} eq $instance_type);
+    my $instance_id = $instance->instance_id();
+    assert_script_run("aws ec2 modify-instance-attribute --instance-id $instance_id --instance-type '{\"Value\": \"$instance_type\"}'");
+    die "Failed to change instance type to $instance_type" if ($self->describe_instance($instance)->{InstanceType} ne $instance_type);
 }
 
 1;

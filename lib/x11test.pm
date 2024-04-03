@@ -19,11 +19,24 @@ use version_utils qw(is_sle is_leap is_tumbleweed);
 use x11utils qw(select_user_gnome start_root_shell_in_xterm handle_gnome_activities);
 use POSIX 'strftime';
 use mm_network;
+use Utils::Logging qw(export_healthcheck_basic select_log_console export_logs_basic export_logs_desktop);
+use serial_terminal 'select_serial_terminal';
 
 sub post_run_hook {
     my ($self) = @_;
 
     assert_screen('generic-desktop') unless match_has_tag('generic-desktop');
+}
+
+sub post_fail_hook {
+    return if (get_var('NOLOGS'));
+    select_serial_terminal();
+    export_healthcheck_basic;
+    export_logs_basic;
+    # Export extra log after failure for further check gdm issue 1127317, also poo#45236 used for tracking action on Openqa
+    export_logs_desktop;
+    select_log_console;
+    show_tasks_in_blocked_state;
 }
 
 sub dm_login {
@@ -388,7 +401,7 @@ sub start_evolution {
             send_key 'alt-n';
         }
         else {
-            record_soft_failure 'poo#67408';
+            record_info 'poo#67408';
             send_key 'alt-c';
         }
     }
@@ -523,18 +536,27 @@ sub prepare_firefox_autoconfig {
     start_root_shell_in_xterm;
 
     # Enable AutoConfig by pointing to a cfg file
-    type_string(q{cat <<EOF > $(rpm --eval %_libdir)/firefox/defaults/pref/autoconfig.js
+    type_string(
+        q{cat <<EOF > $(rpm --eval %_libdir)/firefox/defaults/pref/autoconfig.js
 pref("general.config.filename", "firefox.cfg");
 pref("general.config.obscure_value", 0);
 EOF
 });
     # Create AutoConfig cfg file
-    type_string(q{cat <<EOF > $(rpm --eval %_libdir)/firefox/firefox.cfg
+    type_string(
+        q{cat <<EOF > $(rpm --eval %_libdir)/firefox/firefox.cfg
 // Mandatory comment
 // https://firefox-source-docs.mozilla.org/browser/components/newtab/content-src/asrouter/docs/first-run.html
+pref("app.normandy.enabled", false);
 pref("browser.aboutwelcome.enabled", false);
+pref("browser.discovery.enabled", false);
+pref("browser.messaging-system.whatsNewPanel.enabled", false);
 pref("browser.startup.upgradeDialog.enabled", false);
+pref("browser.uitour.enabled", false);
+pref("datareporting.policy.firstRunURL", "");
+pref("messaging-system.rsexperimentloader.enabled", false);
 pref("privacy.restrict3rdpartystorage.rollout.enabledByDefault", false);
+pref("trailhead.firstrun.branches", "nofirstrun-empty");
 EOF
 });
 
@@ -556,43 +578,10 @@ sub start_clean_firefox {
     assert_screen 'firefox-url-loaded', 90;
     # to avoid stuck trackinfo pop-up, refresh the browser
     $self->firefox_open_url('opensuse.org');
-    my $count = 10;
-    while ($count--) {
-        # workaround for bsc#1046005
-        assert_and_click 'firefox_titlebar' if check_screen('firefox_titlebar', 2);
-        if (check_screen 'firefox_trackinfo', 3) {
-            record_info 'Tracking protection', 'Track info did show up';
-            assert_and_click 'firefox_trackinfo';
-            last;
-        }
-        # the needle match area has to be where trackinfo does pop-up
-        elsif (check_screen 'firefox-developertool-opensuse') {
-            record_info 'Tracking protection', 'Track info pop-up did NOT show up';
-            last;
-        }
-        elsif ($count eq 1) {
-            die 'trackinfo pop-up did not match';
-        }
-        else {
-            send_key 'f5';
-        }
-    }
-
-    # get rid of "Firefox Privacy Notice" page
-    wait_still_screen(3);
-    if (check_screen 'firefox_privacy_notice') {
-        assert_and_click 'firefox_privacy_notice';
-    }
 
     # get rid of the reader & tracking pop-up once, first test should have milestone flag
-    $self->firefox_open_url('eu.httpbin.org/html');
+    $self->firefox_open_url('eu.httpbin.org/html', assert_loaded_url => 'firefox-urls_protocols-http');
     wait_still_screen(3);
-    if (check_screen 'firefox_readerview_window') {
-        wait_still_screen(3);
-        assert_and_click 'firefox_readerview_window';
-    }
-    # workaround for bsc#1046005
-    assert_and_click 'firefox_titlebar' if check_screen('firefox_titlebar', 2);
 
     # Help
     send_key "alt-h";
@@ -627,8 +616,7 @@ sub start_firefox {
     # Using match_typed parameter on KDE as typing in desktop runner may fail
     x11_start_program('firefox https://html5test.opensuse.org', valid => 0, match_typed => ((check_var('DESKTOP', 'kde')) ? "firefox_url_typed" : ''));
     $self->firefox_check_default;
-    $self->firefox_check_popups;
-    assert_screen 'firefox-html-test';
+    assert_screen 'firefox-html-test', 200;
 }
 
 sub restart_firefox {
@@ -638,7 +626,7 @@ sub restart_firefox {
     wait_still_screen 2;
     $self->exit_firefox_common;
     assert_script_run('time wait $(pidof firefox)');
-    enter_cmd "$cmd";
+    enter_cmd "$cmd" if defined $cmd;
     enter_cmd "firefox $url >>firefox.log 2>&1 &";
     $self->firefox_check_default;
     assert_screen 'firefox-url-loaded';
@@ -657,42 +645,10 @@ sub firefox_check_default {
     }
 }
 
-# Check whether there are any pop up windows and handle them one by one
-sub firefox_check_popups {
-    # assert loaded webpage
-    assert_screen 'firefox-url-loaded', 300;
-    for (1 .. 3) {
-        # slow down loop and give firefox time to show pop-up
-        sleep 5;
-        # check pop-ups
-        assert_screen [qw(firefox_trackinfo firefox_readerview_window firefox-launch)];
-        # handle the tracking protection pop up
-        if (match_has_tag('firefox_trackinfo')) {
-            wait_screen_change { assert_and_click 'firefox_trackinfo'; };
-        }
-        # handle the reader view pop up
-        elsif (match_has_tag('firefox_readerview_window')) {
-            wait_screen_change { assert_and_click 'firefox_readerview_window'; };
-        }
-
-        if (match_has_tag('firefox_trackinfo') or match_has_tag('firefox_readerview_window')) {
-            # bsc#1046005 does not seem to affect KDE and as the workaround sometimes results in
-            # accidentially moving the firefox window around, skip it.
-            if (!check_var("DESKTOP", "kde")) {
-                # workaround for bsc#1046005
-                assert_and_click 'firefox_titlebar' if check_screen('firefox_titlebar', 2);
-            }
-        }
-    }
-}
-
 sub firefox_open_url {
-    my ($self, $url) = @_;
+    my ($self, $url, %args) = @_;
     my $counter = 1;
     while (1) {
-        # make sure firefox window is focused
-        assert_and_click 'firefox_titlebar' if check_screen('firefox_titlebar', 2);
-        wait_still_screen 1, 2;
         send_key 'alt-d';
         send_key 'delete';
         send_key 'alt-d';
@@ -704,7 +660,16 @@ sub firefox_open_url {
         }
     }
     enter_cmd_slow "$url";
-    assert_screen 'firefox-url-loaded', 180;
+    wait_still_screen 2;
+    while ($counter++ < 5) {
+        check_screen 'firefox-url-loaded', 60;
+        if (defined $args{assert_loaded_url} && !check_screen($args{assert_loaded_url})) {
+            record_info 'retry', "Needle $args{assert_loaded_url} didn't match";
+            send_key 'f5';
+            next;
+        }
+        last;
+    }
 }
 
 sub firefox_preferences {
@@ -933,12 +898,21 @@ sub gnote_search_and_close {
     my ($self, $string, $needle) = @_;
 
     send_key "ctrl-f";
+    if (is_tumbleweed) {
+        if (check_screen('focus_search_box', 5)) {
+            assert_and_click "focus_search_box";
+        } else {
+            assert_and_click "display_search_bar";
+            assert_and_click "focus_search_box";
+            record_soft_failure("bsc#1216592 The shortcut Ctrl-F doesn't work as expected in gnote 45.0");
+        }
+    }
     # The gnote interface is slow. So we can't start immediately searching. We need to wait
     wait_still_screen(2);
     type_string $string;
     assert_screen $needle, 5;
 
-    send_key "ctrl-w";
+    send_key "alt-f4";
 }
 
 # remove the created new note
@@ -948,12 +922,13 @@ sub cleanup_gnote {
     assert_and_click($needle, button => 'right');
     assert_and_click "delete-new-note";
     assert_and_click "really-delete-note";
-    send_key 'ctrl-w';
+    send_key 'alt-f4';
 }
 
 sub gnote_start_with_new_note {
     x11_start_program('gnote');
     send_key "ctrl-n";
+    send_key "shift-ctrl-n" if is_tumbleweed;
     assert_screen 'gnote-new-note', 5;
 }
 
@@ -1038,20 +1013,23 @@ sub add_input_resource {
 
     if (is_sle('<=15-sp3') || is_leap('<=15.3')) {
         x11_start_program "gnome-control-center region", target_match => "g-c-c-region-language";
-    } else {
+    }
+    else {
         x11_start_program "gnome-control-center keyboard", target_match => "g-c-c-keyboard";
     }
 
     assert_and_click 'ibus-input-source-add';
     assert_and_click 'ibus-input-language-list';
-    type_string $tag;
+    type_string_slow $tag;
 
     assert_and_click "ibus-input-$tag";
     if ($tag eq "japanese") {
         assert_and_dclick 'ibus-input-japanese-kkc';
-    } elsif ($tag eq "chinese") {
+    }
+    elsif ($tag eq "chinese") {
         assert_and_dclick 'ibus-input-chinese-pinyin';
-    } elsif ($tag eq "korean") {
+    }
+    elsif ($tag eq "korean") {
         assert_and_dclick 'ibus-input-korean-hangul';
     }
     assert_screen "ibus-input-added-$tag";
@@ -1059,4 +1037,71 @@ sub add_input_resource {
     assert_screen 'generic-desktop';
 }
 
+sub firefox_print2file_overview {
+    my ($self, $file) = @_;
+
+    # Prepare files for firefox printing
+    x11_start_program('gnome-terminal');
+    if (script_run("test -d ffprint")) {
+        assert_script_run "mkdir ffprint";
+    }
+    script_run "cd ffprint";
+    assert_script_run("wget " . autoinst_url . "/data/x11/firefox/$file");
+
+    if ($file eq "horizframetest") {
+        assert_script_run("wget " . autoinst_url . "/data/x11/firefox/horizframetest_files.tar.xz");
+        assert_script_run("tar xvf horizframetest_files.tar.xz");
+    }
+    elsif ($file eq "vertframetest") {
+        assert_script_run("wget " . autoinst_url . "/data/x11/firefox/vertframetest_files.tar.xz");
+        assert_script_run("tar xvf vertframetest_files.tar.xz");
+    }
+    elsif ($file eq "list") {
+        assert_script_run("wget " . autoinst_url . "/data/x11/firefox/list_files.tar.xz");
+        assert_script_run("tar xvf list_files.tar.xz");
+    }
+    send_key "alt-f4";
+    $self->start_firefox_with_profile;
+    $self->firefox_open_url("/home/$username/ffprint/$file", assert_loaded_url => "firefox-print-$file-display");
+    send_key "ctrl-p";
+    assert_and_click("firefox-print-$file-overview");
+}
+
+sub firefox_print {
+    my ($self, $file) = @_;
+
+    # Click the "Save" button on the print overview page
+    assert_and_click("firefox-print2pdf-save");
+
+    # Specify the path and name of output file
+    send_key "ctrl-a";
+    type_string("/home/$username/ffprint/$file-output.pdf");
+    wait_still_screen 2;
+    save_screenshot;
+
+    # Click save button on the save to destination page
+    assert_and_click("firefox-print-output-save");
+
+    wait_still_screen 5;
+
+    # Close firefox
+    send_key "alt-f4";
+}
+
+sub verify_firefox_print_output {
+    my ($self, $file) = @_;
+
+    # Verify the content and format of output file
+    x11_start_program("evince /home/$username/ffprint/$file-output.pdf", target_match => "evince-$file-output-default");
+    wait_still_screen 2;
+    send_key "alt-f10";    # maximize window
+    assert_screen("evince-$file-output-pdf", 5);
+    send_key "ctrl-w";    # close evince
+}
+
+sub cleanup_firefox_print {
+    assert_script_run "rm -rf /home/$username/ffprint/*";
+    send_key 'ctrl-d';
+    assert_screen 'generic-desktop';
+}
 1;

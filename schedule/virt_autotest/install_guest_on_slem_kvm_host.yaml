@@ -14,12 +14,11 @@ vars:
   SYSTEM_ROLE: kvm
   HOST_HYPERVISOR: kvm
   PATTERNS: default,kvm
-  IPXE: 0
   MAX_JOB_TIME: 10800
 schedule:
-  - "{{bootup_and_install}}"
+  # - "{{bootup_and_install}}"
   - virt_autotest/login_console
-  - virt_autotest/transactional/prepare_transactional_server
+  - virt_autotest/prepare_transactional_server
   - "{{install_guest}}"
 conditional_schedule:
   bootup_and_install:

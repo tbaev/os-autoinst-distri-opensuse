@@ -5,7 +5,7 @@
 
 # Summary: Execute SUT changes which should be permanent
 # - Grant permissions on serial device
-# - Add hvc0/hvc1 to /etc/securetty
+# - Add hvc0/hvc1 and hvc1/hvc2 to /etc/securetty
 # - Register modules if SCC_ADDONS, MEDIA_UPGRADE and in Regression flavor
 # are defined
 # - If system is vmware, set resolution to 1024x768 (and write to grub)
@@ -22,7 +22,7 @@ use bootloader_setup qw(change_grub_config grub_mkconfig);
 use registration;
 use services::registered_addons 'full_registered_check';
 use List::MoreUtils 'uniq';
-use migration 'disable_kernel_multiversion';
+use migration 'modify_kernel_multiversion';
 use strict;
 use warnings;
 
@@ -43,7 +43,7 @@ sub run {
 
     # Register the modules after media migration, so it can do regession
     if (get_var('MEDIA_UPGRADE') && get_var('DO_REGISTRY')) {
-        add_suseconnect_product(uc get_var('SLE_PRODUCT'), undef, undef, "-r " . get_var('SCC_REGCODE') . " --url " . get_var('SCC_URL'), 300, 1);
+        assert_script_run "SUSEConnect -r " . get_var('SCC_REGCODE') . " --url " . get_var('SCC_URL');
         if (is_sle('15+') && check_var('SLE_PRODUCT', 'sles')) {
             add_suseconnect_product(get_addon_fullname('base'), undef, undef, undef, 300, 1);
             add_suseconnect_product(get_addon_fullname('serverapp'), undef, undef, undef, 300, 1);
@@ -94,8 +94,7 @@ sub run {
 
     # enable multiversion for kernel-default based on bsc#1097111, for migration continuous cases only
     if (get_var('FLAVOR', '') =~ /Continuous-Migration/) {
-        record_soft_failure 'bsc#1097111 - File conflict of SLE12 SP3 and SLE15 kernel';
-        disable_kernel_multiversion;
+        modify_kernel_multiversion("enable");
     }
 
     assert_script_run 'rpm -q systemd-coredump || zypper -n in systemd-coredump || true', timeout => 200 if get_var('COLLECT_COREDUMPS');

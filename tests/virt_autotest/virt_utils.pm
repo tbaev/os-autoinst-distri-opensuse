@@ -1,6 +1,6 @@
 # SUSE's openQA tests
 #
-# Copyright 2012-2020 SUSE LLC
+# Copyright 2012-2023 SUSE LLC
 # SPDX-License-Identifier: FSFAP
 #
 package virt_utils;
@@ -21,38 +21,31 @@ use XML::Writer;
 use IO::File;
 use List::Util 'first';
 use LWP::Simple 'head';
-use proxymode;
-use version_utils 'is_sle';
 use virt_autotest::utils;
-use version_utils qw(is_sle get_os_release);
+use version_utils qw(is_sle is_alp get_os_release);
 
 our @EXPORT
-  = qw(enable_debug_logging update_guest_configurations_with_daily_build locate_sourcefile get_repo_0_prefix repl_repo_in_sourcefile repl_addon_with_daily_build_module_in_files repl_module_in_sourcefile handle_sp_in_settings handle_sp_in_settings_with_fcs handle_sp_in_settings_with_sp0 clean_up_red_disks lpar_cmd upload_virt_logs generate_guest_asset_name get_guest_disk_name_from_guest_xml compress_single_qcow2_disk get_guest_list download_guest_assets is_installed_equal_upgrade_major_release generateXML_from_data check_guest_disk_type recreate_guests perform_guest_restart collect_host_and_guest_logs cleanup_host_and_guest_logs monitor_guest_console start_monitor_guest_console stop_monitor_guest_console is_developing_sles is_registered_sles);
+  = qw(enable_debug_logging update_guest_configurations_with_daily_build locate_sourcefile get_repo_0_prefix repl_repo_in_sourcefile repl_addon_with_daily_build_module_in_files repl_module_in_sourcefile handle_sp_in_settings handle_sp_in_settings_with_fcs handle_sp_in_settings_with_sp0 clean_up_red_disks lpar_cmd generate_guest_asset_name get_guest_disk_name_from_guest_xml compress_single_qcow2_disk get_guest_list download_guest_assets is_installed_equal_upgrade_major_release generateXML_from_data check_guest_disk_type perform_guest_restart collect_host_and_guest_logs cleanup_host_and_guest_logs monitor_guest_console start_monitor_guest_console stop_monitor_guest_console is_developing_sles is_registered_sles);
 
 sub enable_debug_logging {
 
-    #turn on debug and log filter for libvirtd
-    #set log_level = 1 'debug'
-    #the size of libvirtd with debug level and without any filter on sles15sp3 xen is over 100G,
-    #which consumes all the disk space. Now get comfirmation from virt developers,
-    #log filter is set to store component logs with different levels.
-    my $libvirtd_conf_file = "/etc/libvirt/libvirtd.conf";
-    if (!script_run "ls $libvirtd_conf_file") {
-        script_run "sed -i '/^[# ]*log_level *=/{h;s/^[# ]*log_level *= *[0-9].*\$/log_level = 1/};\${x;/^\$/{s//log_level = 1/;H};x}' $libvirtd_conf_file";
-        script_run "sed -i '/^[# ]*log_outputs *=/{h;s%^[# ]*log_outputs *=.*[0-9].*\$%log_outputs=\"1:file:/var/log/libvirt/libvirtd.log\"%};\${x;/^\$/{s%%log_outputs=\"1:file:/var/log/libvirt/libvirtd.log\"%;H};x}' $libvirtd_conf_file";
-        script_run "sed -i '/^[# ]*log_filters *=/{h;s%^[# ]*log_filters *=.*[0-9].*\$%log_filters=\"1:qemu 1:libvirt 4:object 4:json 4:event 3:util 1:util.pci\"%};\${x;/^\$/{s%%log_filters=\"1:qemu 1:libvirt 4:object 4:json 4:event 3:util 1:util.pci\"%;H};x}' $libvirtd_conf_file";
-        script_run "grep -e log_level -e log_outputs -e log_filters $libvirtd_conf_file";
-    }
-    save_screenshot;
+    turn_on_libvirt_debugging_log;
 
-    # enable journal log with prvious reboot
-    my $journald_conf_file = "/etc/systemd/journald.conf";
-    if (!script_run "ls $journald_conf_file") {
+    # enable journal log with previous reboot
+    if (is_sle('>=15-SP6')) {
+        unless (get_var('AUTOYAST')) {
+            my $journald_conf_file = "/etc/systemd/journald.conf.d/01-virt-test.conf";
+            script_run("echo -e \"[Journal]\\\nStorage=persistent\" > $journald_conf_file");
+            script_run "systemd-analyze cat-config systemd/journald.conf | grep Storage";
+            script_run 'systemctl restart systemd-journald';
+        }
+    }
+    else {
+        my $journald_conf_file = "/etc/systemd/journald.conf";
         script_run "sed -i '/^[# ]*Storage *=/{h;s/^[# ]*Storage *=.*\$/Storage=persistent/};\${x;/^\$/{s//Storage=persistent/;H};x}' $journald_conf_file";
         script_run "grep Storage $journald_conf_file";
         script_run 'systemctl restart systemd-journald';
     }
-    save_screenshot;
 
     # enable qemu core dumps
     my $qemu_conf_file = "/etc/libvirt/qemu.conf";
@@ -62,13 +55,6 @@ sub enable_debug_logging {
     }
     save_screenshot;
 
-    #restart libvirtd to make debug level and coredump take effect
-    if (is_sle('<12')) {
-        script_run 'rclibvirtd restart';
-    }
-    else {
-        script_run 'systemctl restart libvirtd';
-    }
 }
 
 sub get_version_for_daily_build_guest {
@@ -89,8 +75,13 @@ sub get_version_for_daily_build_guest {
 sub locate_sourcefile {
     my $location = '';
     if (!is_s390x) {
-        $location = script_output("perl /usr/share/qa/tools/location_detect_impl.pl", 60);
-        $location =~ s/[\r\n]+$//;
+        $location = script_output("perl /usr/share/qa/tools/location_detect_impl.pl", 60, proceed_on_failure => 1);
+        if ($location) {
+            $location =~ s/[\r\n]+$//;
+        }
+        else {
+            $location = 'de';
+        }
     }
     else {
         #S390x LPAR just be only located at DE now.
@@ -301,16 +292,6 @@ sub lpar_cmd {
     }
 }
 
-sub upload_virt_logs {
-    my ($log_dir, $compressed_log_name) = @_;
-
-    my $full_compressed_log_name = "/tmp/$compressed_log_name.tar.gz";
-    script_run("tar -czf $full_compressed_log_name $log_dir; rm $log_dir -r", 60);
-    save_screenshot;
-    upload_logs "$full_compressed_log_name";
-    save_screenshot;
-}
-
 # Guest xml will be uploaded with name format [generated_name_by_this_func].xml
 # Guest disk will be uploaded with name format [generated_name_by_this_func].disk
 # When reusing these assets, needs to recover the names to original by reverting this process
@@ -319,10 +300,10 @@ sub generate_guest_asset_name {
 
     #get build number
     my $build_num;
-    #for clone job, get build number from SCC proxy which is set in Media
-    if (get_var('CASEDIR')) {
-        get_var('SCC_URL') =~ /^http.*all-([\d\.]*)\.proxy\.*/;
-        $build_num = $1;
+    # for a clone job, the setting BUILD must be set as it was in its original job, for example, BUILD=98.1
+    # or the job will not know in which build guest assets should be download or uploaded
+    if (get_var('CASEDIR') and get_var('BUILD') !~ /^\d+[\._]?\d*$/) {
+        die "Downloading guest assets is not allowed without a particular build number. Please trigger job with BUILD=<build_number> or with SKIP_GUEST_INSTALL=1 not to download guest assets from openqa server";
     }
     else {
         $build_num = get_required_var('BUILD');
@@ -361,13 +342,11 @@ sub get_guest_disk_name_from_guest_xml {
 # Please refer to https://qemu.readthedocs.io/en/latest/tools/qemu-img.html to ease your mind on working with --force-share and convert and many others.
 sub compress_single_qcow2_disk {
     my ($orig_disk, $compressed_disk) = @_;
+    my $timeout = '720';
+    my $cmd = "time nice ionice qemu-img convert --force-share -c -m 1 -p -O qcow2 $orig_disk $compressed_disk";
 
     if ($orig_disk =~ /qcow2/) {
-        my $cmd = "nice ionice qemu-img convert -c -p -O qcow2 $orig_disk $compressed_disk";
-        if (script_run($cmd, 360) ne 0) {
-            $cmd = "nice ionice qemu-img convert --force-share -c -p -O qcow2 $orig_disk $compressed_disk";
-            die("Disk compression failed from $orig_disk to $compressed_disk.") if (script_run($cmd, 360) ne 0);
-        }
+        die("Disk compression failed from $orig_disk to $compressed_disk.") if (script_run($cmd, timeout => $timeout, die => 0, retry => 2) ne 0);
         save_screenshot;
         record_info('Disk compression', "Disk compression done from $orig_disk to $compressed_disk.");
     }
@@ -620,22 +599,6 @@ sub check_guest_disk_type {
     }
 }
 
-#recreate all defined guests
-sub recreate_guests {
-    my $based_guest_dir = shift;
-    return if get_var('INCIDENT_ID');    # QAM does not recreate guests every time
-    my $get_vm_hostnames = "virsh list  --all | grep -e sles -e opensuse | awk \'{print \$2}\'";
-    my $vm_hostnames = script_output($get_vm_hostnames, 30, type_command => 0, proceed_on_failure => 0);
-    my @vm_hostnames_array = split(/\n+/, $vm_hostnames);
-    foreach (@vm_hostnames_array)
-    {
-        script_run("virsh destroy $_");
-        script_run("virsh undefine $_ || virsh undefine $_ --keep-nvram");
-        script_run("virsh define /$based_guest_dir/$_.xml");
-        script_run("virsh start $_");
-    }
-}
-
 #Perform restart operation on desired guests of local or remote host
 #User should check guest status as expected in his/her customized and
 #suitable way after restart if there are associated specific concerns
@@ -677,10 +640,11 @@ sub perform_guest_restart {
 #This subroutine collects desired logs from host and guest, and place them into folder /tmp/virt_logs_residence on host then compress it to /tmp/virt_logs_all.tar.gz
 #Please refer to virt_logs_collector.sh and fetch_logs_from_guest.sh in data/virt_autotest for their detailed functionality, implementation and usage
 sub collect_host_and_guest_logs {
-    my ($guest_wanted, $host_extra_logs, $guest_extra_logs) = @_;
+    my ($guest_wanted, $host_extra_logs, $guest_extra_logs, $log_token) = @_;
     $guest_wanted //= '';
     $host_extra_logs //= '';
     $guest_extra_logs //= '';
+    $log_token //= '';
 
     my $logs_collector_script_url = data_url("virt_autotest/virt_logs_collector.sh");
     script_output("curl -s -o ~/virt_logs_collector.sh $logs_collector_script_url", 180, type_command => 0, proceed_on_failure => 0);
@@ -694,9 +658,9 @@ sub collect_host_and_guest_logs {
     script_output("chmod +x ~/fetch_logs_from_guest.sh && ~/fetch_logs_from_guest.sh -g \"$guest_wanted\" -e \"$guest_extra_logs\"", 1800, type_command => 1, proceed_on_failure => 1);
     save_screenshot;
 
-    upload_logs("/tmp/virt_logs_all.tar.gz");
-    upload_logs("/var/log/virt_logs_collector.log");
-    upload_logs("/var/log/fetch_logs_from_guest.log");
+    upload_logs("/tmp/virt_logs_all.tar.gz", log_name => "virt_logs_all$log_token.tar.gz", timeout => 600);
+    upload_logs("/var/log/virt_logs_collector.log", log_name => "virt_logs_collector$log_token.log");
+    upload_logs("/var/log/fetch_logs_from_guest.log", log_name => "fetch_logs_from_guest$log_token.log");
     save_screenshot;
     script_run("rm -f -r /tmp/virt_logs_all.tar.gz /var/log/virt_logs_collector.log /var/log/fetch_logs_from_guest.log");
     save_screenshot;
@@ -709,7 +673,7 @@ sub cleanup_host_and_guest_logs {
     $extra_logs_to_cleanup //= '';
 
     #Clean dhcpd and named services up explicity
-    if (get_var('VIRT_AUTOTEST')) {
+    if (get_var('VIRT_AUTOTEST') and !is_alp) {
         script_run("brctl addbr br123;brctl setfd br123 0;ip addr add 192.168.123.1/24 dev br123;ip link set br123 up");
         if (!get_var('VIRT_UNIFIED_GUEST_INSTALL')) {
             my @control_operation = ('restart');

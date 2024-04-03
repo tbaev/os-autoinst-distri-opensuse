@@ -32,20 +32,24 @@ use testapi;
 use utils;
 use version_utils qw(is_sle is_jeos is_upgrade);
 use Utils::Architectures;
+use serial_terminal qw(select_serial_terminal select_user_serial_terminal);
 
 our $date_re = qr/[0-9]{4}-[0-9]{2}-[0-9]{2}/;
 
 sub lifecycle_output_check {
     my $output = shift;
-    if ($output =~ /Legacy Module.*2021-(07|12)-30|Python 2 Module.*2021-(07|12)-30|Containers Module.*2021-12-31/) {
-        # https://chat.suse.de/channel/qem-openqa-review/thread/KLrXWR5Sy7zprLFcx?jump=e2dxZRDbkXHE5DXQt
-        # https://progress.opensuse.org/issues/95593
-        record_soft_failure 'bsc#1194294 zypper lifecycle wrong EOL for python2 and legacy module';
+    if (is_sle('=15-sp1') && $output =~ /Python 2 Module.*2021-07-3(0|1)/) {
+        record_info 'poo#129026';
+        return;
+    }
+    # https://suse.slack.com/archives/C02D16TCP99/p1688366603014179
+    if (is_sle('=15-sp3') && $output =~ /Containers Module.*2023-06-30/) {
+        record_soft_failure 'jsc#MSC-658';
         return;
     }
     if (get_var('SCC_REGCODE_LTSS')) {
         if ($output =~ /No products.*before/) {
-            record_soft_failure('poo#95593 https://jira.suse.com/browse/MSC-70');
+            record_info('Softfail', "poo#95593 https://jira.suse.com/browse/MSC-70");
             return;
         }
         die "SUSE Linux Enterprise Server is end of support\nOutput: '$output'" unless $output =~ /SUSE Linux Enterprise Server/;
@@ -58,15 +62,17 @@ sub lifecycle_output_check {
 sub run {
     diag('fate#320597: Introduce \'zypper lifecycle\' to provide information about life cycle of individual products and packages');
 
-    select_console 'root-console';
+    select_serial_terminal;
     # First we'd make sure that we have a clean zypper cache env and all dirs have
     # 0755 and all files have 0644 pemmission.
     # For some reason the system will change the permission on /var/cache/zypp/{solv,raw}
     # files. this cause the zypper lifecycle failed when building cache for non-root user.
     assert_script_run('chmod -R u+rwX,og+rX /var/cache/zypp');
     zypper_call('in curl') if (script_run('rpm -qi curl') == 1);
+    # force reinstall release notes, package must not come from expected SLE-Product repo e.g. GMC
+    zypper_call('in -f release-notes*');
 
-    select_console 'user-console';
+    select_user_serial_terminal;
     my $overview = script_output('zypper lifecycle', 600);
     die "Missing header line:\nOutput: '$overview'" unless $overview =~ /Product end of support/;
     die "Missing link to lifecycle page:\nOutput: '$overview'"
@@ -112,15 +118,17 @@ sub run {
     my $testdate_after = '2620-02-04';
     my $testdate_before = '2620-02-02';
     # backup and create our lifecycle data with known content
-    select_console 'root-console';
-    assert_script_run "
-    if [ -f /var/lib/lifecycle/data/$prod.lifecycle ] ; then
-        mv /var/lib/lifecycle/data/$prod.lifecycle /var/lib/lifecycle/data/$prod.lifecycle.orig
-    fi
-    mkdir -p /var/lib/lifecycle/data
-    echo '$package, *, $testdate' > /var/lib/lifecycle/data/$prod.lifecycle";
+    select_serial_terminal;
+    my $backup = <<"EOF";
+if [ -f /var/lib/lifecycle/data/$prod.lifecycle ] ; then
+    mv /var/lib/lifecycle/data/$prod.lifecycle /var/lib/lifecycle/data/$prod.lifecycle.orig
+fi
+mkdir -p /var/lib/lifecycle/data
+echo '$package, *, $testdate' > /var/lib/lifecycle/data/$prod.lifecycle
+EOF
+    script_output $backup;
     # verify eol from lifecycle data
-    select_console 'user-console';
+    select_user_serial_terminal;
     $output = script_output "zypper lifecycle $package", 300;
     die "$package lifecycle entry incorrect:\nOutput: '$output'" unless $output =~ /$package(-\S+)?\s+$testdate/;
 
@@ -134,7 +142,7 @@ sub run {
     die "$package reported for date $testdate_before:\nOutput: '$output'" if $output =~ /$package(-\S+)?\s+$testdate/;
 
     # delete lifecycle data - package eol should default to product eol
-    select_console 'root-console';
+    select_serial_terminal;
     assert_script_run "rm -f /var/lib/lifecycle/data/$prod.lifecycle";
 
     # get product eol
@@ -152,21 +160,23 @@ sub run {
     }
     die "baseproduct eol not found in overview\nOutput: '$product_name'" unless $product_eol;
 
-    select_console 'user-console';
+    select_user_serial_terminal;
     # verify that package eol defaults to product eol
+    # dash is accepted in prod EOL, despite it does not match zypper lifecycle, see poo#126794
     $output = script_output "zypper lifecycle $package", 300;
-    unless ($output =~ /$package(-\S+)?\s+$product_eol/) {
+    unless ($output =~ /$package(-\S+)?\s+($product_eol|-$)/) {
         die "$package lifecycle entry incorrect:\nOutput: '$output', expected: '/$package-\\S+\\s+$product_eol'";
     }
 
     # restore original data, if any
-    select_console 'root-console';
-    assert_script_run "
-    if [ -f /var/lib/lifecycle/data/$prod.lifecycle.orig ] ; then
-        mv /var/lib/lifecycle/data/$prod.lifecycle.orig /var/lib/lifecycle/data/$prod.lifecycle
-    fi";
-    #
-    select_console 'user-console';
+    select_serial_terminal;
+    my $restore = <<"EOF";
+if [ -f /var/lib/lifecycle/data/$prod.lifecycle.orig ] ; then
+    mv /var/lib/lifecycle/data/$prod.lifecycle.orig /var/lib/lifecycle/data/$prod.lifecycle
+fi
+EOF
+    script_output $restore;
+    select_user_serial_terminal;
     # 4. verify that "zypper lifecycle --days N" and "zypper lifecycle --date
     # D" shows correct results
     assert_script_run 'zypper lifecycle --help';

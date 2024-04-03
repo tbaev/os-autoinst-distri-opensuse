@@ -4,7 +4,7 @@
 # SPDX-License-Identifier: FSFAP
 
 # Summary: The class introduces business actions for Warning Popups
-# Maintainer: QE YaST <qa-sle-yast@suse.de>
+# Maintainer: QE YaST and Migration (QE Yam) <qe-yam at suse de>
 
 package Installation::Popups::OKPopupController;
 use strict;
@@ -38,6 +38,11 @@ sub get_text {
 sub accept {
     my ($self) = @_;
     $self->get_ok_popup()->press_ok();
+}
+
+sub is_ok_popup_visible {
+    my ($self) = @_;
+    return $self->{OKPopup}->is_shown();
 }
 
 1;

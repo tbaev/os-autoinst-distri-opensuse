@@ -1,4 +1,4 @@
-PERL5LIB_:=../..:os-autoinst:lib:tests/installation:tests/x11:tests/qa_automation:tests/virt_autotest:tests/cpu_bugs:$$PERL5LIB
+PERL5LIB_:=../..:os-autoinst:lib:tests/installation:tests/x11:tests/qa_automation:tests/virt_autotest:tests/cpu_bugs:tests/sles4sap/saptune:$$PERL5LIB
 
 .PHONY: all
 all:
@@ -23,7 +23,6 @@ testing" && exit 2)
 
 tools/tidy: os-autoinst/
 	@test -e tools/tidy || ln -s ../os-autoinst/tools/tidy tools/
-	@test -e tools/absolutize || ln -s ../os-autoinst/tools/absolutize tools/
 	@test -e .perltidyrc || ln -s os-autoinst/.perltidyrc ./
 
 tools/lib/: os-autoinst/
@@ -34,7 +33,7 @@ check-links: tools/tidy tools/lib/ os-autoinst/
 
 .PHONY: check-links
 tidy-check: check-links
-	tools/tidy --check
+	tools/tidy --check --quiet
 
 .PHONY: tidy
 tidy: tools/tidy
@@ -61,18 +60,13 @@ test-compile-changed: os-autoinst/
 test_pod_whitespace_rule:
 	tools/check_pod_whitespace_rule
 
+.PHONY: test_pod_errors
+test_pod_errors:
+	tools/check_pod_errors
+
 .PHONY: test-yaml-valid
 test-yaml-valid:
-	$(eval YAMLS=$(shell sh -c "git ls-files schedule/ test_data/ | grep '\\.ya\?ml$$'"))
-	if test -n "$(YAMLS)"; then \
-		export PERL5LIB=${PERL5LIB_} ; echo "$(YAMLS)" | xargs tools/test_yaml_valid ;\
-		else \
-		echo "No yamls modified.";\
-	fi
-	if test -n "$(YAMLS)"; then \
-		which yamllint >/dev/null 2>&1 || echo "Command 'yamllint' not found, can not execute YAML syntax checks";\
-		echo "$(YAMLS)" | xargs yamllint -c .yamllint;\
-	fi
+	tools/check_yaml
 
 .PHONY: test-modules-in-yaml-schedule
 test-modules-in-yaml-schedule:
@@ -112,7 +106,7 @@ test-spec:
 	tools/update_spec --check
 
 .PHONY: test-static
-test-static: tidy-check test-yaml-valid test-modules-in-yaml-schedule test-merge test-dry test-no-wait_idle test-deleted-renamed-referenced-files test-unused-modules-changed test-soft_failure-no-reference test-spec test-invalid-syntax test-code-style test-metadata test_pod_whitespace_rule
+test-static: tidy-check test-yaml-valid test-modules-in-yaml-schedule test-merge test-dry test-no-wait_idle test-deleted-renamed-referenced-files test-unused-modules-changed test-soft_failure-no-reference test-spec test-invalid-syntax test-code-style test-metadata test_pod_whitespace_rule test_pod_errors
 
 .PHONY: test
 ifeq ($(TESTS),compile)
@@ -127,7 +121,8 @@ else
 test: unit-test test-static test-compile test-isotovideo perlcritic
 endif
 
-PERLCRITIC=PERL5LIB=tools/lib/perlcritic:$$PERL5LIB perlcritic --quiet --stern --include "strict" --include Perl::Critic::Policy::HashKeyQuote
+PERLCRITIC=PERL5LIB=tools/lib/perlcritic:$$PERL5LIB perlcritic --stern --include "strict" --include Perl::Critic::Policy::HashKeyQuote \
+  --verbose "::warning file=%f,line=%l,col=%c,title=%m - severity %s::%e\n" --quiet
 
 .PHONY: perlcritic
 perlcritic: tools/lib/
@@ -152,7 +147,7 @@ test-deleted-renamed-referenced-files:
 
 .PHONY: test-soft_failure-no-reference
 test-soft_failure-no-reference:
-	@! git --no-pager grep -E -e 'record_soft_failure\>.*\;' --and --not -e '([a-zA-Z]+#[a-zA-Z-]*[0-9]+|fate.suse.com/[0-9]+|\$reference)' lib/ tests/
+	@! git --no-pager grep -E -e 'record_soft_failure\>.*\;' --and --not -e '([a-zA-Z]+#[a-zA-Z-]*[0-9]+|fate.suse.com/[0-9]+|\$$(reference|bsc))' lib/ tests/
 
 .PHONY: test-invalid-syntax
 test-invalid-syntax:

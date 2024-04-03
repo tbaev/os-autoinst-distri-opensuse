@@ -14,8 +14,14 @@ conditional_schedule:
             'svirt-hyperv':
                 - installation/bootloader_hyperv
                 - installation/bootloader_uefi
-            'svirt-vmware65':
+            'svirt-vmware70':
                 - installation/bootloader_svirt
+                - installation/bootloader_uefi
+            's390x-kvm':
+                - installation/bootloader_start
+            'uefi-virtio-vga':
+                - installation/bootloader_uefi
+            '64bit-virtio-vga':
                 - installation/bootloader_uefi
     efi:
         UEFI:
@@ -35,21 +41,24 @@ conditional_schedule:
                 - jeos/firstrun
             'cloud-init':
                 - installation/first_boot
+                - console/system_prepare
+            'combustion':
+                - microos/verify_setup
+                - microos/image_checks
 schedule:
     - '{{bootloader}}'
     - '{{wizard}}'
     - jeos/image_info
     - jeos/record_machine_id
-    - console/system_prepare
     - console/force_scheduled_tasks
     - jeos/grub2_gfxmode
     - jeos/diskusage
     - jeos/build_key
     - console/prjconf_excluded_rpms
     - console/journal_check
-    - console/pam
     - microos/libzypp_config
     - console/suseconnect_scc
+    - console/pam
     - '{{maintenance}}'
     - '{{efi}}'
     - jeos/glibc_locale

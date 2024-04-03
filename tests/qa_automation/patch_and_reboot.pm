@@ -24,11 +24,12 @@ use testapi;
 use serial_terminal 'select_serial_terminal';
 use Utils::Architectures;
 use qam;
-use Utils::Backends 'use_ssh_serial_console';
+use Utils::Backends qw(use_ssh_serial_console is_pvm);
 use power_action_utils qw(power_action);
 use version_utils qw(is_sle);
 use serial_terminal qw(add_serial_console);
 use version_utils qw(is_jeos);
+use registration qw(add_suseconnect_product);
 
 sub run {
     my $self = shift;
@@ -37,6 +38,7 @@ sub run {
     quit_packagekit unless check_var('DESKTOP', 'textmode');
 
     zypper_call(q{mr -d $(zypper lr | awk -F '|' '{IGNORECASE=1} /nvidia/ {print $2}')}, exitcode => [0, 3]);
+    zypper_call(q{mr -e $(zypper lr | awk -F '|' '/Basesystem-Module/ {print $2}')}, exitcode => [0, 3]) if get_var('FLAVOR') =~ /TERADATA/;
 
     add_test_repositories;
 
@@ -63,7 +65,8 @@ sub run {
 
     # DESKTOP can be gnome, but patch is happening in shell, thus always force reboot in shell
     power_action('reboot', textmode => 1);
-    $self->wait_boot(bootloader_time => get_var('BOOTLOADER_TIMEOUT', 150));
+    reconnect_mgmt_console if is_pvm;
+    $self->wait_boot(ready_time => 600, bootloader_time => get_var('BOOTLOADER_TIMEOUT', 300));
 }
 
 sub test_flags {

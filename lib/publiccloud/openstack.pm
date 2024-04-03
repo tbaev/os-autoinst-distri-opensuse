@@ -13,7 +13,6 @@ use Mojo::JSON 'decode_json';
 use testapi;
 use publiccloud::openstack_client;
 
-has ssh_key => undef;
 has ssh_key_name => undef;
 has public_ip => undef;
 has instance_id => undef;
@@ -39,8 +38,7 @@ sub find_img {
 
 sub create_keypair {
     my ($self, $prefix) = @_;
-
-    return $self->ssh_key if ($self->ssh_key);
+    return $self->ssh_key if ($self->ssh_key and $self->ssh_key_name);
 
     for my $i (0 .. 9) {
         my $key_name = $prefix . "_" . $i;
@@ -76,12 +74,12 @@ sub upload_img {
     assert_script_run("openstack image create"
           . " --disk-format qcow2"
           . " --container-format bare"
+          . " --tag openqa"
           . " --file $file $img_name", timeout => 60 * 60);
 
     my $image_id = $self->find_img($img_name);
     die("Cannot find image after upload!") unless $image_id;
     record_info('INFO', "Image ID: $image_id");
-    return $image_id;
 }
 
 sub terraform_apply {
@@ -102,7 +100,6 @@ sub cleanup {
     my ($self) = @_;
     $self->terraform_destroy() if ($self->terraform_applied);
     $self->delete_keypair();
-    $self->provider_client->cleanup();
     $self->delete_floating_ip();
 }
 

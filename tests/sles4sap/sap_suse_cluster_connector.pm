@@ -68,18 +68,23 @@ sub run {
     my @resources = get_var('NW') ? ('ip', 'fs', 'sap') : ('ip', 'SAPHanaTopology', 'SAPHana');
     foreach my $rsc_type (@resources) {
         my $rsc = "rsc_${rsc_type}_${instance_sid}_${instance_type}${instance_id}";
+        wait_for_idle_cluster;
         exec_conn_cmd(binary => $binary, cmd => "lsn --res $rsc", log_file => $log_file);
     }
 
     # Test Stop/Start of SAP resource
     my $rsc = get_var('NW') ? "rsc_sap_${instance_sid}_${instance_type}${instance_id}" : "rsc_SAPHana_${instance_sid}_${instance_type}${instance_id}";
+    wait_for_idle_cluster;
     exec_conn_cmd(binary => $binary, cmd => "$_ --res $rsc --act stop", timeout => 120) foreach qw(fra cpa);
     wait_until_resources_stopped(timeout => 1200);
     save_state;    # do a check of the cluster with a screenshot
+    wait_for_idle_cluster;
     exec_conn_cmd(binary => $binary, cmd => "$_ --res $rsc --act start", timeout => 120) foreach qw(fra cpa);
 
     # Wait for the resources to be restarted
     wait_until_resources_started(timeout => 1200);
+    save_state;    # do a check of the cluster with a screenshot
+    assert_script_run 'crm_resource --cleanup';
 
     # Check for the state of the whole cluster
     check_cluster_state;

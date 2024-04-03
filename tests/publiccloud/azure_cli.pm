@@ -32,33 +32,31 @@ sub run {
     }
     assert_script_run('az version');
 
-    set_var 'PUBLIC_CLOUD_PROVIDER' => 'AZURE';
     my $provider = $self->provider_factory();
 
     my $resource_group = "openqa-cli-test-rg-$job_id";
     my $machine_name = "openqa-cli-test-vm-$job_id";
 
     my $openqa_ttl = get_var('MAX_JOB_TIME', 7200) + get_var('PUBLIC_CLOUD_TTL_OFFSET', 300);
-    my $created_by = get_var('PUBLIC_CLOUD_RESOURCE_NAME', 'openqa-vm');
+    my $openqa_url = get_var('OPENQA_URL', get_var('OPENQA_HOSTNAME'));
+    my $created_by = "$openqa_url/t$job_id";
     my $tags = "openqa-cli-test-tag=$job_id openqa_created_by=$created_by openqa_ttl=$openqa_ttl";
+    $tags .= " openqa_var_server=$openqa_url openqa_var_job_id=$job_id";
 
     # Configure default location and create Resource group
     assert_script_run("az configure --defaults location=southeastasia");
     assert_script_run("az group create -n $resource_group --tags '$tags'");
 
     # Pint - command line tool to query pint.suse.com to get the current image name
-    my $image_name = script_output(qq/pint microsoft images --active --json | jq -r '[.images[] | select( .urn | contains("sles-15-sp4:gen2") )][0].urn'/);
+    my $image_name = script_output(qq/pint microsoft images --active --json | jq -r '[.images[] | select( .urn | contains("sles-15-sp5:gen2") )][0].urn'/);
     die("The pint query output is empty.") unless ($image_name);
     record_info("PINT", "Pint query: " . $image_name);
 
     # VM creation
     my $vm_create = "az vm create --resource-group $resource_group --name $machine_name --public-ip-sku Standard --tags '$tags'";
     $vm_create .= " --image $image_name --size Standard_B1ms --admin-username azureuser --ssh-key-values ~/.ssh/id_rsa.pub";
-    my $output = script_output($vm_create, timeout => 600, proceed_on_failure => 1);
-    if ($output =~ /ValidationError.*object has no attribute/) {
-        record_soft_failure('bsc#1191482 - Failed to start/stop vms with azure cli');
-        return;
-    }
+    my $output = script_output($vm_create, timeout => 600);
+    die('Failed to start/stop vms with azure cli') if ($output =~ /ValidationError.*object has no attribute/);
 
     assert_script_run("az vm get-instance-view -g $resource_group -n $machine_name");
     assert_script_run("az vm list-ip-addresses -g $resource_group -n $machine_name");

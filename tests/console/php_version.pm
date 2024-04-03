@@ -17,12 +17,21 @@ use testapi;
 use serial_terminal 'select_serial_terminal';
 use apachetest;
 use version_utils qw(is_leap is_sle php_version);
-use registration qw(add_suseconnect_product get_addon_fullname);
+use registration qw(add_suseconnect_product remove_suseconnect_product get_addon_fullname);
 
 sub run {
     select_serial_terminal;
 
-    add_suseconnect_product(get_addon_fullname('script'), (is_sle('<15') ? '12' : undef)) if (is_sle('<15-sp4'));
+
+    if (is_sle && !main_common::is_updates_tests) {
+        # Check if BSC#1204824 is present
+        if (script_run("suseconnect -l | grep 'Web and Scripting Module'| grep '(Activated)'") == 0) {
+            die 'bsc#1204824 - Module activated already';
+        }
+        add_suseconnect_product(get_addon_fullname('script'));
+    }
+
+
 
     my ($php, $php_pkg, $php_ver) = php_version();
 
@@ -48,5 +57,9 @@ sub run {
 
     # test reading file
     assert_script_run('php -r \'echo readfile("/etc/hosts")."\\n";\' | grep localhost');
+}
+
+sub test_flags {
+    return {fatal => 1};
 }
 1;

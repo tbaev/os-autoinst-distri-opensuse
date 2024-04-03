@@ -1,6 +1,7 @@
 # SUSE's openQA tests
 #
-# Copyright 2022 SUSE LLC
+# Copyright 2022-2024 SUSE LLC
+# SPDX-License-Identifier: FSFAP
 #
 # Copying and distribution of this file, with or without modification,
 # are permitted in any medium without royalty provided the copyright
@@ -8,7 +9,7 @@
 # without any warranty.
 
 # Summary: Create VM in EC2 using aws binary
-# Maintainer: qa-c team <qa-c@suse.de>
+# Maintainer: QE-C team <qa-c@suse.de>
 
 use Mojo::Base 'publiccloud::basetest';
 use registration;
@@ -16,7 +17,6 @@ use testapi;
 use serial_terminal 'select_serial_terminal';
 use utils 'systemctl';
 use version_utils 'is_sle';
-use transactional qw(process_reboot trup_call);
 use registration qw(add_suseconnect_product get_addon_fullname);
 use containers::common 'install_docker_when_needed';
 use version_utils 'get_os_release';

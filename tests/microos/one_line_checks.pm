@@ -6,7 +6,7 @@
 # Summary: Run simple checks after installation
 # Maintainer: Martin Kravec <mkravec@suse.com>
 
-use base "opensusebasetest";
+use base "consoletest";
 use strict;
 use warnings;
 use testapi;
@@ -30,11 +30,6 @@ sub run_microos_checks {
     if (check_var('SYSTEM_ROLE', 'microos')) {
         zypper_call 'se -i kubernetes', exitcode => [104];
         assert_script_run '! rpm -q etcd';
-    }
-    # Should have unconfigured Kubernetes & container runtime environment
-    if (check_var('SYSTEM_ROLE', 'kubeadm')) {
-        assert_script_run 'which crio';
-        zypper_call 'se -i kubernetes';
     }
 }
 

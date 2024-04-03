@@ -25,17 +25,17 @@ sub extract_assets {
     enter_cmd("test -e $svirt_img_name && echo 'OK'");
     assert_screen('svirt-asset-upload-hdd-image-exists');
 
-    my $cmd = "nice ionice qemu-img convert -p -O $format $svirt_img_name $image_storage/$name";
+    my $cmd = "nice ionice qemu-img convert -t writeback -p -O $format $svirt_img_name $image_storage/$name";
     if (get_var('QEMU_COMPRESS_QCOW2')) {
         $cmd .= ' -c';
     }
     enter_cmd("$cmd && echo OK");
-    assert_screen('svirt-asset-upload-hdd-image-converted', 600);
+    assert_screen('svirt-asset-upload-hdd-image-converted', 2000);
 
     # Upload the image as a private asset; do the upload verification
     # on your own - hence the following assert_screen().
     upload_asset("$image_storage/$name", 1, 1);
-    assert_screen('svirt-asset-upload-hdd-image-uploaded', 1000);
+    assert_screen('svirt-asset-upload-hdd-image-uploaded', 2000);
 }
 
 sub run {

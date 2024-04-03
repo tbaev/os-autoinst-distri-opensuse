@@ -10,31 +10,56 @@
 #   4. Ansible playbook testing
 #   5. Ansible playbook execution
 #   6. Ansible Vault
-# Maintainer: Pavel Dostál <pdostal@suse.cz>
+# Maintainer: QE Core <qe-core@suse.de>, Pavel Dostál <pdostal@suse.cz>
 
 use warnings;
 use base "consoletest";
 use strict;
 use testapi qw(is_serial_terminal :DEFAULT);
-use serial_terminal qw(select_serial_terminal select_user_serial_terminal);
-use utils qw(zypper_call random_string systemctl file_content_replace);
-use version_utils qw(is_sle is_opensuse is_tumbleweed);
-use registration qw(add_suseconnect_product get_addon_fullname);
+use serial_terminal 'select_serial_terminal';
+use utils qw(zypper_call random_string systemctl file_content_replace ensure_serialdev_permissions);
+use version_utils qw(is_opensuse is_tumbleweed is_transactional is_microos is_sle is_jeos);
+use registration qw(add_suseconnect_product get_addon_fullname is_phub_ready);
+use transactional qw(trup_call check_reboot_changes);
+
+# git-core needed by ansible-galaxy
+# sudo is used by ansible to become root
+# python3-yamllint needed by ansible-test
+my $pkgs = 'ansible git-core python3-yamllint';
+# https://bugzilla.suse.com/show_bug.cgi?id=1210876 Nothing provides 'python3-virtualenv'
+# https://bugzilla.suse.com/show_bug.cgi?id=1210875 Package ansible-test requires Python2.7
+$pkgs .= ' ansible-test';
 
 sub run {
     select_serial_terminal;
 
     # 1. System setup
 
-    if (is_sle) {
-        add_suseconnect_product(get_addon_fullname('phub'));
+    unless (is_opensuse || (main_common::is_updates_tests && !(get_var('FIPS_ENABLED') || is_jeos))) {
+        # The Desktop module is required by the Development Tools module
+        add_suseconnect_product(get_addon_fullname('desktop'));
+        # Package 'ansible-test' needs python3-virtualenv from Development Tools module
+        add_suseconnect_product(get_addon_fullname('sdk'));
+
+        # Package 'python3-yamllint' and 'ansible' require PackageHub is available
+        add_suseconnect_product(get_addon_fullname('phub')) if (is_phub_ready());
+        zypper_call '--gpg-auto-import-keys ref';
     }
 
-    # Install ansible and ansible-test
-    # Install python3-yamllint needed for ansible-test
-    #   python3-yamllint is available from 15-SP2
-    # Install git needed for ansible-galaxy
-    zypper_call 'in ansible git-core python3-yamllint';
+    # Create user account, if image doesn't already contain user
+    # (which is the case for SLE images that were already prepared by openQA)
+    if (script_run("getent passwd $username") != 0) {
+        assert_script_run "useradd -m $testapi::username";
+        assert_script_run "echo '$testapi::username:$testapi::password' | chpasswd";
+    }
+    ensure_serialdev_permissions;
+
+    if (is_transactional) {
+        trup_call("pkg install $pkgs sudo");
+        check_reboot_changes;
+    } else {
+        zypper_call "in $pkgs sudo";
+    }
 
     # Start sshd
     systemctl 'start sshd';
@@ -42,27 +67,22 @@ sub run {
     # add $testapi::username to sudoers without password
     assert_script_run "echo '$testapi::username ALL=(ALL:ALL) NOPASSWD: ALL' | tee -a /etc/sudoers.d/ansible";
 
-    # Logout root and login $testapi::username
-    enter_cmd 'exit';
-    select_user_serial_terminal;
-
-    # Check that we are logged in as $testapi::username
-    validate_script_output('whoami', sub { m/$testapi::username/ });
-
-    # Check that we have sudo root permissions
-    validate_script_output('sudo whoami', sub { m/root/ });
-
     # Generate RSA key
-    assert_script_run 'ssh-keygen -b 2048 -t rsa -N "" -f ~/.ssh/id_rsa <<< y';
+    assert_script_run 'ssh-keygen -b 2048 -t rsa -N "" -f ~/.ssh/ansible_rsa';
 
-    # Make sure our public key is in the authorized_keys file
-    assert_script_run 'cat ~/.ssh/id_rsa.pub | tee -a ~/.ssh/authorized_keys';
+    # Make sure root public key is in the user's authorized_keys file
+    assert_script_run("install -o $testapi::username -g users -m 0700 -dD /home/$testapi::username/.ssh");
+    assert_script_run("install -o $testapi::username -g users -m 0644 ~/.ssh/ansible_rsa.pub /home/$testapi::username/.ssh/authorized_keys");
+
 
     # Learn public SSH host keys
     assert_script_run 'ssh-keyscan localhost >> ~/.ssh/known_hosts';
 
-    # Check that we can connect to localhost via SSH
-    validate_script_output 'ssh localhost whoami', sub { m/$testapi::username/ };
+    # Check that we can connect to localhost as the user via SSH
+    validate_script_output "ssh -i ~/.ssh/ansible_rsa $testapi::username\@localhost whoami", sub { m/$testapi::username/ };
+
+    # Check that the user can use sudo over SSH without password
+    validate_script_output "ssh -i ~/.ssh/ansible_rsa $testapi::username\@localhost sudo whoami", sub { m/root/ };
 
     # Download data/console/ansible/ directory
     assert_script_run 'curl ' . data_url('console/ansible/') . ' | cpio -id';
@@ -72,15 +92,23 @@ sub run {
     assert_script_run "mv data ~/ansible_collections/openqa/ansible";
     assert_script_run 'cd ~/ansible_collections/openqa/ansible';
 
+    # Place the right username to ansible_user in the hosts file
+    file_content_replace('hosts', ANSIBLEUSER => $testapi::username);
+
     # Call the zypper module properly (depends on version)
     file_content_replace('roles/test/tasks/main.yaml', COMMUNITYGENERAL => ((is_tumbleweed) ? 'community.general.' : ''));
+
+    if (is_sle('<15-SP5')) {
+        record_soft_failure 'bsc#1210875 Package ansible-test requires Python2.7';
+        script_run 'echo -e "[defaults]\ninterpreter_python = /usr/bin/python3" | tee ansible.cfg';
+    }
 
     # 2. Ansible basics
 
     # Check Ansible version
     record_info('ansible --version', script_output('ansible --version'));
 
-    my $hostname = script_output 'hostname';
+    my $hostname = script_output('hostnamectl --static');
     validate_script_output 'ansible -m setup localhost | grep ansible_hostname', sub { m/$hostname/ };
 
     my $arch = get_var 'ARCH';
@@ -104,16 +132,16 @@ sub run {
     # Check that community.general.zypper module is available
     assert_script_run 'ansible-doc -l community.general | grep zypper';
 
+    # Check the version of ansible-community from where we use the zypper module
+    # (this command may not be available for older ansible versions )
+    assert_script_run('ansible-community --version') if (script_run('which ansible-community') == 0);
+
     # Check the playbook
-    assert_script_run 'ansible-playbook -i hosts main.yaml --check', timeout => 300;
+    assert_script_run "ansible-playbook -i hosts main.yaml --check", timeout => 300;
 
     # Run the ansible sanity test
-    if (script_run('ansible-test')) {
-        record_soft_failure("boo#1204320 - Ansible: No module named 'ansible_test'");
-    } else {
-        script_run 'ansible-test --help';
-        assert_script_run 'ansible-test sanity';
-    }
+    script_run 'ansible-test --help';
+    assert_script_run 'ansible-test sanity';
 
     # 5. Ansible playbook execution
 
@@ -121,7 +149,7 @@ sub run {
     assert_script_run 'ansible -i hosts all --list-hosts';
 
     # Run the playbook
-    assert_script_run 'ansible-playbook -i hosts main.yaml', timeout => 600;
+    assert_script_run "ansible-playbook -i hosts main.yaml", timeout => 600;
 
     # Test that /tmp/ansible/uname.txt created by ansible has desired content
     my $uname = script_output 'uname -r';
@@ -135,6 +163,9 @@ sub run {
 
     # Test that /home/johnd/README.txt is readable and contains the expanded template
     validate_script_output 'sudo -u johnd cat /home/johnd/README.txt', sub { m/my $arch dynamic kingdom/ };
+
+    # Reboot into new snapshot if we test ansible.community.zypper on transactional system
+    check_reboot_changes if (is_transactional);
 
     # Check that Ed - the command line text edit is installed
     assert_script_run 'which ed';
@@ -156,20 +187,7 @@ sub run {
 }
 
 sub cleanup {
-    # Logout $testapi::username
-    enter_cmd 'exit';
-
-    # Make sure that root console is logged off before we reset the consoles
-    select_console 'root-console';
-    enter_cmd 'exit';
-
-    # Make sure that user console is logged off before we reset the consoles
-    select_console 'user-console';
-    enter_cmd 'exit';
-
-    # Reset consoles and log in root
-    reset_consoles;
-    select_serial_terminal;
+    assert_script_run 'cd';
 
     # Remove all the directories ansible created
     assert_script_run 'rm -rf ~/ansible_collections/ /tmp/ansible/';
@@ -177,8 +195,21 @@ sub cleanup {
     # Remove the ansible sudoers file
     assert_script_run 'rm -rf /etc/sudoers.d/ansible';
 
+    # Remove the ansihle_rsa key
+    assert_script_run 'rm -rf ~/.ssh/ansible_rsa*';
+
+    # Remove the johnd user created in the ansible playbook
+    assert_script_run 'userdel -rf johnd';
+
     # Remove ansible, yamllint and git
-    zypper_call 'rm ansible git-core python3-yamllint ed';
+    $pkgs .= ' ed';
+    if (is_transactional) {
+        trup_call("pkg remove $pkgs");
+        check_reboot_changes;
+    } else {
+        # ed has been installed in ansible-playbook
+        zypper_call "rm $pkgs";
+    }
 }
 
 sub post_run_hook {

@@ -8,6 +8,7 @@
 
 use Mojo::Base qw(windowsbasetest);
 use testapi;
+use utils qw(enter_cmd_slow);
 use version_utils qw(is_sle);
 use wsl qw(is_sut_reg is_fake_scc_url_needed);
 
@@ -54,14 +55,23 @@ sub enter_user_details {
 }
 
 sub license {
-    # license agreement
-    assert_screen 'wsl-license';
+    # License agreement
+    # If we are enabling SLED, this screen will be checked
+    # a second time after installing modules. That's the reason of the timeout
+    assert_screen 'wsl-license', timeout => 240;
     send_key 'alt-n';
 
     if (is_sle) {
         # license warning
-        assert_screen 'wsl-license-not-accepted';
-        send_key 'ret';
+        assert_screen(['wsl-license-not-accepted', 'wsl-sled-license-not-accepted']);
+        if (match_has_tag 'wsl-license-not-accepted') {
+            send_key 'ret';
+        }
+        else {
+            # When activating SLED, license agreement for workstation module appears,
+            # and this time the popup shows Yes or No options
+            send_key 'alt-n';
+        }
         # Accept license
         assert_screen 'wsl-license';
         send_key 'alt-a';
@@ -87,9 +97,22 @@ sub register_via_scc {
     wait_screen_change(sub { send_key 'alt-c' }, 10);
     wait_screen_change { type_string $reg_code, max_interval => 125, wait_screen_change => 2 };
     send_key 'alt-n';
-    assert_screen 'wsl-registration-repository-offer', 180;
+    assert_screen ['trust_nvidia_gpg_keys', 'wsl-registration-repository-offer'], timeout => 240;
+    send_key 'alt-t' if (match_has_tag 'trust_nvidia_gpg_keys');
+    assert_screen 'wsl-registration-repository-offer', timeout => 240;
     send_key 'alt-y';
     assert_screen 'wsl-extension-module-selection';
+    send_key 'alt-n';
+}
+
+sub wsl_gui_pattern {
+    assert_screen 'wsl-gui-pattern';
+    if (is_sut_reg) {
+        # Select product SLED if SLE_PRODUCT var is provided
+        send_key_until_needlematch('wsl_sled_install', 'alt-u') if (check_var('SLE_PRODUCT', 'sled'));
+        # Install wsl_gui pattern if WSL_GUI var is provided
+        send_key_until_needlematch('wsl_gui-pattern-install', 'alt-i') if (get_var('WSL_GUI'));
+    }
     send_key 'alt-n';
 }
 
@@ -98,7 +121,12 @@ sub run {
     assert_screen [qw(yast2-wsl-firstboot-welcome wsl-installing-prompt)], 480;
 
     if (match_has_tag 'yast2-wsl-firstboot-welcome') {
-        assert_and_click 'window-max';
+        # The new process of installing, appears in an already maximized window,
+        # but sometimes it loses focus. So I created another needle to check if
+        # the window is already maximized and click somewhere else to bring it to focus.
+        assert_screen(['window-max', 'window-minimize']);
+        assert_and_click 'window-max' if match_has_tag 'window-max';
+        assert_and_click 'window-minimize' if match_has_tag 'window-minimize';
         wait_still_screen stilltime => 3, timeout => 10;
         is_fake_scc_url_needed && set_fake_scc_url();
         send_key 'alt-n';
@@ -108,11 +136,24 @@ sub run {
         assert_screen 'local-user-credentials';
         enter_user_details([$realname, undef, $password, $password]);
         send_key 'alt-n';
+        # wsl-gui pattern installation (only in SLE15-SP4+ by now)
+        wsl_gui_pattern if (is_sle('>=15-SP4'));
         # Registration
         is_sle && register_via_scc();
+        # SLED Workstation license agreement
+        license if (check_var('SLE_PRODUCT', 'sled'));
         # And done!
-        assert_screen 'wsl-installation-completed', 240;
+
+        # This is an ongoing discussion and it seems that the screen only appears
+        # during the "development period". Also, it looks like that code was
+        # duplicated in L98 of this file. Didn't want to remove it completely
+        # just in case it returns...
+        assert_screen ['trust_nvidia_gpg_keys', 'wsl-installation-completed'], timeout => 240;
+        send_key 'alt-t' if (match_has_tag 'trust_nvidia_gpg_keys');
+
+        assert_screen('wsl-installation-completed', 240);
         send_key 'alt-f';
+        click_lastmatch if (check_screen('wsl-onedrive-popup'));
         # Back to CLI
         assert_screen 'wsl-linux-prompt';
     } else {
@@ -134,17 +175,17 @@ sub run {
     # Nothing to do in WSL2 pts w/o serialdev support
     # https://github.com/microsoft/WSL/issues/4322
     if (get_var('WSL2')) {
-        enter_cmd "exit";
+        enter_cmd_slow "exit\n";
         return;
     }
 
     is_fake_scc_url_needed || become_root;
     assert_script_run 'cd ~';
     assert_script_run "zypper ps";
-    enter_cmd 'exit';
+    enter_cmd_slow "exit\n";
     sleep 3;
     save_screenshot;
-    is_fake_scc_url_needed || enter_cmd 'exit';
+    is_fake_scc_url_needed || enter_cmd_slow "exit\n";
 }
 
 sub post_fail_hook {

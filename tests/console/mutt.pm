@@ -28,8 +28,7 @@ use utils;
 sub run {
     select_serial_terminal;
 
-    zypper_call("in mutt", exitcode => [0, 102, 103]);
-    zypper_call("in wget", exitcode => [0, 102, 103]);
+    zypper_call("-v in mutt wget", exitcode => [0, 102, 103], timeout => 1000);
 
     # Mutt is Mutt (bsc#1094717) and has build in support for IMAP and SMTP
     validate_script_output 'mutt -v', sub { m/\+USE_IMAP/ && m/\+USE_SMTP/ && not m/NeoMutt/ };
@@ -50,6 +49,9 @@ sub run {
 
     record_info 'receive mail', 'Run mutt as a user to read the mail';
     enter_cmd "mutt";
+    if (check_screen 'mutt-verify-certificate', 0) {
+        send_key 'q';
+    }
     send_key 'a';
     assert_screen 'mutt-message-list';
     send_key 'ret';

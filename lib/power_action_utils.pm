@@ -31,6 +31,7 @@ our @EXPORT = qw(
   power_action
   assert_shutdown_and_restore_system
   assert_shutdown_with_soft_timeout
+  check_bsc1215132
 );
 
 =head2 prepare_system_shutdown
@@ -140,7 +141,17 @@ sub poweroff_x11 {
 
     if (check_var("DESKTOP", "gnome")) {
         send_key "ctrl-alt-delete";
-        assert_screen 'logoutdialog', 15;
+        if (is_sle('=12-SP5')) {
+            unless (check_screen 'logoutdialog', 15) {
+                record_soft_failure 'poo#136901 - "ctrl-alt-del" key can not work sometimes';
+                # Use mouse click 'system power button' to shutdown the system
+                assert_and_click 'gnome-system_power_btn';
+                assert_and_click 'gnome-power_action_btn';
+            }
+        }
+        else {
+            assert_screen 'logoutdialog', 15;
+        }
         assert_and_click 'gnome-shell_shutdown_btn';
 
         if (get_var("SHUTDOWN_NEEDS_AUTH")) {
@@ -149,6 +160,8 @@ sub poweroff_x11 {
             # we need to kill all open ssh connections before the system shuts down
             prepare_system_shutdown;
             send_key "ret";
+            # Switch to sol console to observe system shutdown on IPMI backend
+            select_console 'sol', await_console => 0 if is_ipmi;
         }
     }
 
@@ -203,7 +216,6 @@ sub poweroff_x11 {
     }
 
     if (check_var("DESKTOP", "mate")) {
-        x11_start_program("mate-session-save --shutdown-dialog", valid => 0);
         send_key "ctrl-alt-delete";    # shutdown
         assert_and_click 'mate_shutdown_btn';
     }
@@ -315,11 +327,6 @@ sub power_action {
         $soft_fail_data = {bugref => 'bsc#1057637', soft_timeout => 60, timeout => $shutdown_timeout *= 3};
     }
 
-    # Kubeadm also requires some extra time
-    if (check_var 'SYSTEM_ROLE', 'kubeadm') {
-        $soft_fail_data = {bugref => 'poo#55127', soft_timeout => 90, timeout => $shutdown_timeout *= 2};
-    }
-
     # Sometimes QEMU CD-ROM pop-up is displayed on shutdown, see bsc#1137230
     if (is_opensuse && check_screen 'qemu-cd-rom-authentication-required') {
         $soft_fail_data = {bugref => 'bsc#1137230', soft_timeout => 60, timeout => $shutdown_timeout *= 5};
@@ -346,14 +353,14 @@ sub power_action {
         # instead of handling the still logged in system.
         handle_livecd_reboot_failure if get_var('LIVECD') && $action eq 'reboot';
         # Look aside before we are sure 'sut' console on VMware is ready, see poo#47150
-        select_console('svirt') if is_vmware && $action eq 'reboot';
+        select_console('svirt') if is_vmware && $action eq 'reboot' && !get_var('UEFI');
         reset_consoles;
         if ((check_var('VIRSH_VMM_FAMILY', 'xen') || get_var('S390_ZKVM')) && $action ne 'poweroff') {
             console('svirt')->start_serial_grab;
         }
         # When 'sut' is ready, select it
         # GRUB's serial terminal configuration relies on installation/add_serial_console.pm
-        if (is_vmware && $action eq 'reboot') {
+        if (is_vmware && $action eq 'reboot' && !get_var('UEFI')) {
             die 'GRUB not found on serial console' unless (is_jeos || wait_serial('GNU GRUB', 180));
             select_console('sut');
         }
@@ -424,7 +431,7 @@ Example:
 
 sub assert_shutdown_with_soft_timeout {
     my ($args) = @_;
-    $args->{timeout} //= is_s390x ? 600 : get_var('DEBUG_SHUTDOWN') ? 180 : 60;
+    $args->{timeout} //= (is_s390x || is_ipmi) ? 600 : get_var('DEBUG_SHUTDOWN') ? 180 : 60;
     $args->{soft_timeout} //= 0;
     $args->{bugref} //= "No bugref specified";
     if ($args->{soft_timeout}) {
@@ -436,4 +443,17 @@ sub assert_shutdown_with_soft_timeout {
         record_info('Softfail', "$args->{soft_failure_reason}", result => 'softfail');
     }
     assert_shutdown($args->{timeout} - $args->{soft_timeout});
+}
+
+
+=head2 check_bsc1215132
+
+  Validate dependencies which provides shutdown/poweroff/reboot commands.
+  Use this in the post_fail_hook to raise a softfail of the reported bug.
+=cut
+
+sub check_bsc1215132 {
+    record_soft_failure("bsc1215132: Possible missing dependency on systemd")
+      if (script_run("rpm -q --provides systemd | grep systemd-sysvinit") ||
+        script_run("rpm -q --provides systemd | grep shutdown"));
 }

@@ -43,11 +43,20 @@ sub run {
     }
     record_info('INFO', 'Setting debug level for wicked logs');
     file_content_replace('/etc/sysconfig/network/config', '--sed-modifier' => 'g', '^WICKED_DEBUG=.*' => 'WICKED_DEBUG="all"', '^WICKED_LOG_LEVEL=.*' => 'WICKED_LOG_LEVEL="debug2"');
-    file_content_replace('/etc/systemd/journald.conf', '--debug' => 1,
+    $self->write_cfg('/etc/systemd/journald.conf.d/99-openqa-wicked-tests.conf', <<EOT);
+        [Journal]
         # see: https://github.com/systemd/systemd/commit/f0367da7d1a61ad698a55d17b5c28ddce0dc265a
-        '^#?RateLimitInterval=.*' => 'RateLimitInterval=0',
-        '^#?RateLimitIntervalSec=.*' => 'RateLimitIntervalSec=0',
-        '^#?RateLimitBurst=.*' => 'RateLimitBurst=0');
+        RateLimitInterval=0
+        RateLimitIntervalSec=0
+        RateLimitBurst=0
+EOT
+    record_info('journald.conf', script_output('systemd-analyze cat-config --no-pager systemd/journald.conf'));
+    # Prepare jounral to write to disk
+    assert_script_run('mkdir -p /var/log/journal');
+    assert_script_run('systemd-tmpfiles --create --prefix /var/log/journal');
+    assert_script_run('journalctl --flush');
+    assert_script_run('journalctl --sync');
+
     #preparing directories for holding config files
     assert_script_run('mkdir -p /data/{static_address,dynamic_address}');
 
@@ -78,7 +87,15 @@ sub run {
         if (is_sle('<12-sp1')) {
             file_content_replace('/etc/dhcpd.conf', '^\s*ddns-update-style' => '# ddns-update-style', '^\s*dhcp-cache-threshold' => '# dhcp-cache-threshold');
         }
+        if (my $mtu = get_var('MM_MTU')) {
+            file_content_replace('/etc/dhcpd.conf', 'interface-mtu 1380' => "interface-mtu $mtu");
+        }
         file_content_replace('/etc/sysconfig/dhcpd', '--sed-modifier' => 'g', '^DHCPD_INTERFACE=.*' => 'DHCPD_INTERFACE="' . $ctx->iface() . '"');
+
+        if (check_var('WICKED', 'basic')) {
+            $self->prepare_containers();
+        }
+
         # avoid usage of --now as <=sle-sp1 doesn't support it
         systemctl 'enable dhcpd.service';
         systemctl 'start dhcpd.service';
@@ -127,6 +144,11 @@ sub run {
             for my $pkg ('wicked', 'wicked-service') {
                 die("Missing installation of package $pkg!") unless grep { $_ eq $pkg } @installed_packages;
             }
+            for my $pkg (qw(wicked-debuginfo wicked-debugsource)) {
+                if (script_run("zypper search --repo $repo_id $pkg") == 0) {
+                    zypper_call("in --force -y --from $repo_id --force-resolution $pkg");
+                }
+            }
             my @zypper_ps_progs = split(/\s+/, script_output('zypper ps  --print "%s"', qr/^\s*$/));
             for my $ps_prog (@zypper_ps_progs) {
                 die("The following programm $ps_prog use deleted files") if grep { /$ps_prog/ } @installed_packages;
@@ -153,6 +175,10 @@ sub run {
         }
         wicked::wlan::prepare_packages() if (check_var('WICKED', 'wlan'));
 
+        if ($self->valgrind_enable()) {
+            $need_reboot = 1;
+            $package_list .= ' valgrind';
+        }
         $package_list .= ' openvswitch iputils';
         $package_list .= ' libteam-tools libteamdctl0 ' if check_var('WICKED', 'advanced') || check_var('WICKED', 'aggregate');
         $package_list .= ' gcc' if check_var('WICKED', 'advanced');
@@ -160,6 +186,7 @@ sub run {
         $self->reset_wicked();
         $self->reboot() if $need_reboot;
         record_info('PKG', script_output(q(rpm -qa 'wicked*' --qf '%{NAME}\n' | sort | uniq | xargs rpm -qi)));
+        record_info('ps', script_output(q(ps -aux)));
         wicked::wlan::prepare_sut() if (check_var('WICKED', 'wlan'));
     }
 }

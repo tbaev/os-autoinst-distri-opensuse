@@ -4,7 +4,7 @@
 # SPDX-License-Identifier: FSFAP
 
 # Summary: The module provides interface to act on the Overview page
-# Maintainer: QE YaST <qa-sle-yast@suse.de>
+# Maintainer: QE YaST and Migration (QE Yam) <qe-yam at suse de>
 
 package Installation::InstallationSettings::InstallationSettingsPage;
 use strict;
@@ -60,7 +60,7 @@ sub is_loaded_completely {
     eval {
         $result = YuiRestClient::Wait::wait_until(object => sub {
                 my $overview_content = $self->get_overview_content();
-                return ($overview_content =~ m/SSH port will be/);
+                return ($overview_content =~ m/Boot Loader Type/);
         }, timeout => 60, message => "Overview content is not loaded.");
     };
     $result ? 1 : 0;

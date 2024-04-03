@@ -20,6 +20,8 @@ use y2_module_guitest '%setup_nis_nfs_x11';
 use x11utils 'turn_off_gnome_screensaver';
 use y2_module_consoletest;
 use scheduler 'get_test_suite_data';
+use YaST::workarounds;
+use version_utils qw(is_sle);
 
 sub setup_verification {
     script_run 'rpcinfo -u localhost ypserv';    # ypserv is running
@@ -34,7 +36,7 @@ sub setup_verification {
 sub nis_server_configuration {
     my $test_data = get_test_suite_data();
     # NIS Server Setup
-    assert_screen 'nis-server-setup-status', 150;
+    assert_screen 'nis-server-setup-status', 600;
     send_key 'alt-m';    # NIS master server
     save_screenshot;
     send_key $cmd{next};
@@ -54,6 +56,7 @@ sub nis_server_configuration {
     send_key 'alt-o';    # OK
     send_key $cmd{next};
     # NIS Server Maps Setup
+    apply_workaround_poo124652('nis-server-server-maps-setup') if (is_sle('>=15-SP4'));
     assert_screen 'nis-server-server-maps-setup';
     send_key 'tab';    # jump to map list
     my $c = 1;    # select all maps
@@ -65,7 +68,7 @@ sub nis_server_configuration {
     assert_screen 'nis-server-server-maps-setup-finished';
     send_key $cmd{next};
     # NIS Server Query Hosts
-    assert_screen 'nis-server-query-hosts-setup';
+    apply_workaround_poo124652('nis-server-query-hosts-setup') if (is_sle('>=15-SP4'));
     send_key 'alt-a';    # add
     assert_screen 'nis-server-network-conf-popup';
     type_string $setup_nis_nfs_x11{net_mask};
@@ -87,7 +90,7 @@ sub nfs_server_configuration {
     send_key 'alt-n';    # next / OK
 
     # Setup Directories to Export
-    assert_screen 'nfs-server-export';
+    apply_workaround_poo124652('nfs-server-export');
     send_key 'alt-d';
     assert_screen 'nfs-server-export-popup';
     type_string $setup_nis_nfs_x11{nfs_dir};

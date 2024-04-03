@@ -18,9 +18,10 @@ sub run {
     my ($self) = shift;
     my $file_contexts_local = $selinuxtest::file_contexts_local;
     my $test_boolean = "fips_mode";
-    my $test_dir = "/testdir";
+    # /tmp is required for SLE Micro since / is read-only
+    my $test_dir = "/tmp/testdir";
     my $test_file = "testfile";
-    my $fcontext_type_default = "default_t";    # or, "user_tmp_t";
+    my $fcontext_type_default = "user_tmp_t";    # or, "default_t" if the file would be in / instead of /tmp;
     my $fcontext_type1 = "etc_t";
     my $fcontext_type2 = "bin_t";
     my $fcontext_type3 = "var_t";

@@ -12,6 +12,7 @@ use version 'is_lax';
 use Carp 'croak';
 use Utils::Backends;
 use Utils::Architectures;
+use SemVer;
 
 use constant {
     VERSION => [
@@ -25,10 +26,12 @@ use constant {
           is_selfinstall
           is_gnome_next
           is_jeos
+          is_community_jeos
           is_krypton_argon
           is_leap
           is_opensuse
           is_tumbleweed
+          is_slowroll
           is_rescuesystem
           is_sles4sap
           is_sles4sap_standard
@@ -44,6 +47,9 @@ use constant {
           is_openstack
           is_leap_migration
           is_tunneled
+          is_bootloader_grub2
+          is_bootloader_sdboot
+          is_plasma6
           requires_role_selection
           check_version
           get_os_release
@@ -103,7 +109,7 @@ Returns true if called on jeos
 =cut
 
 sub is_jeos {
-    return get_var('FLAVOR', '') =~ /^JeOS/;
+    return get_var('FLAVOR', '') =~ /JeOS/;
 }
 
 =head2 is_vmware
@@ -153,7 +159,7 @@ sub is_rescuesystem {
 
 =head2 is_virtualization_server
 
-Returns true if called on a virutalization server
+Returns true if called on a virtualization server
 =cut
 
 sub is_virtualization_server {
@@ -173,7 +179,7 @@ sub is_livecd {
 
 Usage: check_version('>15.0', get_var('VERSION'), '\d{2}')
 Query format: [= > < >= <=] version [+] (Example: <=12-sp3 =12-sp1 <4.0 >=15 3.0+)
-Check agains: product version to check against - probably get_var('VERSION')
+Check against: product version to check against - probably get_var('VERSION')
 Regex format: checks query version format (Example: /\d{2}\.\d/)#
 =cut
 
@@ -190,6 +196,12 @@ sub check_version {
         if (is_lax($pv) && is_lax($qv)) {
             $pv = version->declare($pv);
             $qv = version->declare($qv);
+        }
+        elsif (index($pv, "sp") == -1 && index($qv, "sp") == -1) {
+            eval {
+                $pv = SemVer->declare($pv);
+                $qv = SemVer->declare($qv);
+            }
         }
         return $pv ge $qv if $+{plus} || $+{op} eq '>=';
         return $pv le $qv if $+{op} eq '<=';
@@ -223,7 +235,7 @@ sub is_microos {
         return $flavor =~ /DVD/;    # DVD and Staging-?-DVD
     }
     elsif ($filter eq 'VMX') {
-        return $flavor !~ /DVD/;    # If not DVD it's VMX
+        return $flavor =~ /image|default|kvm/i;
     }
     elsif ($filter eq 'Tumbleweed') {
         return $version_is_tw;
@@ -303,9 +315,21 @@ Returns true if called on tumbleweed
 sub is_tumbleweed {
     # Tumbleweed and its stagings
     return 0 unless check_var('DISTRI', 'opensuse');
-    return 1 if get_var('VERSION') =~ /Tumbleweed/;
+    return 1 if get_var('VERSION') =~ /Tumbleweed|Slowroll/;
     return 1 if is_gnome_next;
     return get_var('VERSION') =~ /^Staging:/;
+}
+
+=head2 is_slowroll
+
+Returns true if called on slowroll
+=cut
+
+sub is_slowroll {
+    # Slowroll and its stagings
+    return 0 unless check_var('DISTRI', 'opensuse');
+    return 1 if get_var('VERSION') =~ /Slowroll/;
+    # Staging has VERSION=Slowroll:Staging which is covered by the line above
 }
 
 =head2 is_leap
@@ -344,7 +368,6 @@ sub is_opensuse {
     return 1 if check_var('DISTRI', 'opensuse');
     return 1 if check_var('DISTRI', 'microos');
     return 1 if check_var('DISTRI', 'leap-micro');
-    return 1 if check_var('DISTRI', 'alp');
     return 0;
 }
 
@@ -409,7 +432,7 @@ Returns true if called on a real time system
 =cut
 
 sub is_rt {
-    return (check_var('SLE_PRODUCT', 'rt') || get_var('FLAVOR') =~ /rt/i);
+    return (check_var('SLE_PRODUCT', 'rt') || get_var('FLAVOR') =~ /-rt/i);
 }
 
 =head2 is_hpc
@@ -571,7 +594,7 @@ sub is_using_system_role {
       && (install_this_version() || install_to_other_at_least('12-SP2'))
       || (is_sles4sap() && main_common::is_updates_test_repo())
       || is_sle('=15')
-      || (is_sle('>15') && (check_var('SCC_REGISTER', 'installation') || get_var('ADDONS') || get_var('ADDONURL')))
+      || (is_sle('>15') && (check_var('SCC_REGISTER', 'installation') || get_var('ADDONS') || get_var('ADDONURL') || get_var('FLAVOR') =~ /TERADATA/))
       || (is_sle('15-SP2+') && check_var('FLAVOR', 'Full'))
       || (is_opensuse && !is_leap('<15.1'))    # Also on leap 15.1, TW, MicroOS
 }
@@ -676,7 +699,7 @@ It parses the info from /etc/os-release file, which can reside in any physical h
 The file can also be placed anywhere as long as it can be reached somehow by its absolute file path,
 which should be passed in as the second argument os_release_file, for example, "/etc/os-release"
 At the same time, connection method to the entity in which the file reside should be passed in as the
-firt argument go_to_target, for example, "ssh root at name or ip address" or "way to download the file"
+first argument go_to_target, for example, "ssh root at name or ip address" or "way to download the file"
 For use only on locahost, no argument needs to be specified
 =cut
 
@@ -696,25 +719,19 @@ sub get_os_release {
 
 Identify running os without any dependencies parsing the I</etc/os-release>.
 
-=item C<distri_name>
+=over 4
 
-The expected distribution name to compare.
+=item C<distri_name> - The expected distribution name to compare.
 
-=item C<line>
+=item C<line> - The line we'll be parsing and checking.
 
-The line we'll be parsing and checking.
+=item C<go_to_target> - Command connecting to the SUT
 
-=item C<go_to_target>
-
-Command connecting to the SUT
-
-=item C<os_release_file>
-
-The full path to the Operating system identification file.
-Default to I</etc/os-release>.
+=item C<os_release_file> - The full path to the Operating system identification file. Default to I</etc/os-release>.
 
 Returns 1 (true) if the ID_LIKE variable contains C<distri_name>.
 
+=back
 =cut
 
 sub check_os_release {
@@ -763,6 +780,37 @@ Returns true if TUNNELED is set to 1
 sub is_tunneled {
     return get_var('TUNNELED', 0);
 }
+
+=head2 is_bootloader_grub2
+
+Returns true if the SUT uses GRUB2 as bootloader
+=cut
+
+sub is_bootloader_grub2 {
+    return get_var('BOOTLOADER', 'grub2') eq 'grub2';
+}
+
+=head2 is_bootloader_sdboot
+
+Returns true if the SUT uses systemd-boot as bootloader
+=cut
+
+sub is_bootloader_sdboot {
+    return get_var('BOOTLOADER', 'grub2') eq 'systemd-boot';
+}
+
+=head2 is_plasma6
+
+Returns true if the SUT uses Plasma 6.
+=cut
+
+sub is_plasma6 {
+    return 0 unless check_var('DESKTOP', 'kde');
+    return 1 if is_krypton_argon;
+    return 0 if is_leap("<16.0");
+    return 1;
+}
+
 
 =head2 has_test_issues
 
@@ -829,7 +877,7 @@ sub package_version_cmp {
 
 =head2 is_quarterly_iso
 
-Returns true if called in quaterly iso testing
+Returns true if called in quarterly iso testing
 =cut
 
 sub is_quarterly_iso {
@@ -842,8 +890,11 @@ sub is_quarterly_iso {
 
 Get SLES version from VERSION_ID in /etc/os-release. This subroutine also supports
 performing query on remote machine if dst_machine is given specific ip address or
-fqdn text of the remote machine. The default location that contains VERSION_ID is
-file /etc/os-release if nothing else is passed in to argument verid_file.
+fqdn text of the remote machine. If C<dst_machine> is given it will run on the remote
+as B<root>. To run it as another user, C<dst_machine> can be also specified as [user@]hostname.
+
+The default location that contains VERSION_ID is file /etc/os-release if nothing else
+is passed in to argument verid_file.
 
 =cut
 
@@ -853,7 +904,13 @@ sub get_version_id {
     $args{verid_file} //= '/etc/os-release';
 
     my $cmd = "cat $args{verid_file} | grep VERSION_ID | grep -Eo \"[[:digit:]]{1,}\\.[[:digit:]]{1,}\"";
-    $cmd = "ssh root\@$args{dst_machine} " . "$cmd" if ($args{dst_machine} ne 'localhost');
+    if ($args{dst_machine} ne 'localhost') {
+        if ($args{dst_machine} =~ /^(\w+)@.+/) {
+            $cmd = "ssh $args{dst_machine} " . "$cmd";
+        } else {
+            $cmd = "ssh root\@$args{dst_machine} " . "$cmd";
+        }
+    }
     return script_output($cmd);
 }
 
@@ -875,5 +932,14 @@ sub php_version {
         $php_ver = '8';
     }
     ($php, $php_pkg, $php_ver);
+}
+
+=head2 is_community_jeos
+
+Returns true for tests using the images built by the "JeOS" package on OBS
+=cut
+
+sub is_community_jeos {
+    return (get_var('FLAVOR', '') =~ /JeOS-for-(AArch64|RISCV|RPi)/);
 }
 

@@ -1,6 +1,6 @@
 # SUSE's openQA tests
 #
-# Copyright 2022 SUSE LLC
+# Copyright 2022-2023 SUSE LLC
 # SPDX-License-Identifier: FSFAP
 #
 # Summary: Test deploy a helm chart in a k3s
@@ -12,7 +12,7 @@
 # - check the correct deployment of the helm chart
 # - cleanup system (helm and k3s)
 #
-# Maintainer: qa-c team <qa-c@suse.de>
+# Maintainer: QE-C team <qa-c@suse.de>
 
 use Mojo::Base 'publiccloud::basetest';
 use testapi;
@@ -54,6 +54,15 @@ sub run {
             add_suseconnect_product(get_addon_fullname('pcm')) if is_sle;
             zypper_call("in jq aws-cli", timeout => 300);
 
+            # publiccloud::aws_client needs to demand PUBLIC_CLOUD_REGION due to other places where
+            # we don't want to have defaults and want tests to fail when region is not defined
+            # so this is workaround to keep variable required for publiccloud::aws_client
+            # but not for cases where we using publiccloud::ecr which also must to init publiccloud::aws_client
+            # and in this case we CAN NOT define it on job level because publiccloud::aws_client
+            # will be initialized together with publiccloud::azure_client so same variable will need
+            # to have two different values
+            set_var('PUBLIC_CLOUD_REGION', 'eu-central-1') unless get_var('PUBLIC_CLOUD_REGION');
+
             $provider = publiccloud::eks->new();
         }
         elsif ($k8s_backend eq 'AZURE') {
@@ -63,6 +72,15 @@ sub run {
               if is_sle('=12-sp5');
             zypper_call('in jq azure-cli', timeout => 300);
 
+            # publiccloud::azure_client needs to demand PUBLIC_CLOUD_REGION due to other places where
+            # we don't want to have defaults and want tests to fail when region is not defined
+            # so this is workaround to keep variable required for publiccloud::azure_client
+            # but not for cases where we using publiccloud::acr which also must to init publiccloud::azure_client
+            # and in this case we CAN NOT define it on job level because publiccloud::aws_client
+            # will be initialized together with publiccloud::azure_client so same variable will need
+            # to have two different values
+            set_var('PUBLIC_CLOUD_REGION', 'westeurope') unless get_var('PUBLIC_CLOUD_REGION');
+
             $provider = publiccloud::aks->new();
         }
         elsif ($k8s_backend eq 'GCE') {
@@ -70,7 +88,7 @@ sub run {
             gcloud_install();
 
             # package needed by init():
-            my $pkg = is_sle('=15-SP4') ? "in chrony" : "in ntp";
+            my $pkg = is_sle('>=15') ? "in chrony" : "in ntp";
             zypper_call($pkg, timeout => 300);
 
             $provider = publiccloud::gke->new();
@@ -84,10 +102,10 @@ sub run {
 
     install_helm();
 
-    assert_script_run('curl --create-dir -vo ~/helm-test/Chart.yaml ' . data_url('containers/helm-test/') . 'Chart.yaml');
-    assert_script_run('curl --create-dir -vo ~/helm-test/values.yaml ' . data_url('containers/helm-test/') . 'values.yaml');
-    assert_script_run('curl --create-dir -vo ~/helm-test/templates/job.yaml ' . data_url('containers/helm-test/templates/') . 'job.yaml');
-    assert_script_run('curl --create-dir -vo ~/helm-test/templates/NOTES.txt ' . data_url('containers/helm-test/templates/') . 'NOTES.txt');
+    assert_script_run('curl --create-dirs -vo ~/helm-test/Chart.yaml ' . data_url('containers/helm-test/') . 'Chart.yaml');
+    assert_script_run('curl --create-dirs -vo ~/helm-test/values.yaml ' . data_url('containers/helm-test/') . 'values.yaml');
+    assert_script_run('curl --create-dirs -vo ~/helm-test/templates/job.yaml ' . data_url('containers/helm-test/templates/') . 'job.yaml');
+    assert_script_run('curl --create-dirs -vo ~/helm-test/templates/NOTES.txt ' . data_url('containers/helm-test/templates/') . 'NOTES.txt');
 
     assert_script_run("kubectl create namespace helm-ns-$job_id");
     assert_script_run("kubectl config set-context --current --namespace=helm-ns-$job_id");

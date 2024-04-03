@@ -1,17 +1,16 @@
 # SUSE's openQA tests
 #
-# Copyright 2019-2020 SUSE LLC
+# Copyright 2019-2023 SUSE LLC
 # SPDX-License-Identifier: GPL-2.0-or-later
 
 # Summary: Routed virtual network test:
 #    - Create Routed virtual network
 #    - Confirm Routed virtual network
 #    - Destroy Routed virtual network
-# Maintainer: Leon Guo <xguo@suse.com>
+# Maintainer: Leon Guo <xguo@suse.com>, qe-virt@suse.de
 
 use base "virt_feature_test_base";
 use virt_utils;
-use set_config_as_glue;
 use virt_autotest::virtual_network_utils;
 use virt_autotest::utils;
 use strict;
@@ -52,7 +51,10 @@ sub run_test {
         assert_script_run("virsh undefine $guest || virsh undefine $guest --keep-nvram");
         assert_script_run("virsh define $guest.clone");
         assert_script_run("rm -rf $guest.clone");
-        assert_script_run("virt-clone -o $guest -n $guest.clone -f /var/lib/libvirt/images/$guest.clone");
+        record_info "Clone a virtual machine from $guest";
+        #setup a timeout value to clone a given guest system,
+        #refer to poo#124107 for more details
+        assert_script_run("virt-clone -o $guest -n $guest.clone -f /var/lib/libvirt/images/$guest.clone", 360);
         assert_script_run("virsh start $guest");
         ensure_online $guest, skip_network => 1;
         assert_script_run("virsh start $guest.clone");
@@ -110,17 +112,8 @@ sub post_fail_hook {
 
     $self->SUPER::post_fail_hook;
 
-    #Restart libvirtd service
-    virt_autotest::utils::restart_libvirtd();
-
     #Destroy created virtual networks
     virt_autotest::virtual_network_utils::destroy_vir_network();
-
-    #Restore br123 for virt_autotest
-    virt_autotest::virtual_network_utils::restore_standalone();
-
-    #Restore Guest systems
-    virt_autotest::virtual_network_utils::restore_guests();
 }
 
 1;

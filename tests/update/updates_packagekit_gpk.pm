@@ -1,6 +1,6 @@
 # SUSE's openQA tests
 #
-# Copyright 2016-2019 SUSE LLC
+# Copyright 2016-2023 SUSE LLC
 # SPDX-License-Identifier: FSFAP
 
 # Package: PackageKit gnome-packagekit
@@ -43,12 +43,36 @@ sub setup_system {
     send_key("ctrl-d");
 }
 
+sub close_pop_up_windows {
+    if (check_screen([qw(Could_not_get_updates Could_not_get_update_details need_restart_application)], timeout => 5)) {
+        record_soft_failure 'poo#130468';
+        send_key 'alt-c';
+        wait_still_screen 3;
+        save_screenshot;
+    }
+}
+
 sub tell_packagekit_to_quit {
     # tell the PackageKit daemon to stop in order to next load with new libzypp
     # this is different from quit_packagekit
     x11_start_program('xterm');
     script_run("pkcon quit");
     send_key("ctrl-d");
+}
+
+sub handle_failed_update {
+    my $counter = @_;
+    # click to expand more details
+    click_lastmatch;
+    save_screenshot;
+    if (check_screen('updates_failed_temp_unaccessible')) {
+        die 'updates_failed 10 times with 30 sec sleep time between iterations' if $counter == 11;
+        sleep 30;
+        assert_and_click('pkit_close');
+    }
+    else {
+        die "Failed to process request";
+    }
 }
 
 # Update with GNOME PackageKit Update Viewer
@@ -63,7 +87,7 @@ sub run {
     select_console 'x11', await_console => 0;
     ensure_unlocked_desktop;
 
-    my @updates_tags = qw(updates_none updates_available package-updater-privileged-user-warning updates_restart_application updates_installed-restart);
+    my @updates_tags = qw(updates_none updates_available package-updater-privileged-user-warning updates_restart_application updates_installed-restart updates_failed);
     my @updates_installed_tags = qw(updates_none updates_installed-logout updates_installed-restart updates_restart_application updates_failed);
 
     setup_system;
@@ -80,7 +104,12 @@ sub run {
 
         if (match_has_tag("updates_none")) {
             send_key 'ret';
+            close_pop_up_windows;
             return;
+        }
+        elsif (match_has_tag('updates_failed')) {
+            handle_failed_update($counter);
+            next;
         }
         elsif (match_has_tag("updates_available")) {
             send_key "alt-i";    # install
@@ -94,9 +123,10 @@ sub run {
                     pop @updates_installed_tags;
                 }
                 if (match_has_tag("updates_failed")) {
-                    assert_and_click("updates_failed");
-                    save_screenshot;
-                    die "Failed to process request";
+                    handle_failed_update($counter);
+                    assert_screen('updates_available');
+                    send_key "alt-i";    # install
+                    next;
                 }
             } while (match_has_tag 'Policykit');
             if (match_has_tag("updates_none")) {
@@ -110,6 +140,7 @@ sub run {
             }
             elsif (match_has_tag("updates_installed-logout") || match_has_tag("updates_restart_application")) {
                 wait_screen_change { send_key "alt-c"; };    # close
+                close_pop_up_windows;
 
                 # The logout is not acted upon, which may miss a libzypp update
                 # Force reloading of packagekitd (bsc#1075260, poo#30085)

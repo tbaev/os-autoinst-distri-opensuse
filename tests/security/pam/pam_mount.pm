@@ -10,8 +10,8 @@ use base 'opensusebasetest';
 use strict;
 use warnings;
 use testapi;
-use utils 'zypper_call';
-use utils 'script_run_interactive';
+use utils qw(zypper_call script_run_interactive enter_cmd_slow);
+use Utils::Architectures qw(is_aarch64);
 use base 'consoletest';
 
 sub run {
@@ -20,14 +20,14 @@ sub run {
     # so switch to root-console here
     select_console 'root-console';
 
-    # Install the pam-mount package, since this service package is not installed by default
-    zypper_call 'in pam_mount';
+    # Install runtime dependencies
+    zypper_call("in pam_mount cryptsetup");
 
     # Define the uesr and encrypt key for the volume
     my $user = 'bernhard';
     my $key = 'SUSE_t595_qw';
     my $testfile = 'testfile';
-    assert_script_run "modprobe loop";
+    is_aarch64 ? enter_cmd_slow('modprobe loop') : assert_script_run "modprobe loop";
     my $loopdev = script_output 'losetup -f';
     my $loop_vol = 'enc_loop';
 

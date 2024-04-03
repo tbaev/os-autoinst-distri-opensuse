@@ -13,16 +13,17 @@ use strict;
 use warnings;
 use testapi;
 use utils 'assert_screen_with_soft_timeout';
+use version_utils 'is_plasma6';
 
 sub run {
     x11_start_program 'dolphin';
 
     # Go to ~/Documents
-    assert_and_click 'dolphin_icon_documents';
+    assert_and_click 'dolphin_icon_documents', dclick => is_plasma6;
     assert_screen_with_soft_timeout('dolphin_documents_empty', timeout => 90, soft_timeout => 30, bugref => 'boo#1112021');
 
     # Create a new folder
-    send_key 'f10';
+    send_key(is_plasma6 ? 'ctrl-shift-n' : 'f10');
     assert_screen 'dolphin_new_folder_dialog';
     type_string 'stuff';
     assert_screen 'dolphin_new_folder';
@@ -67,8 +68,14 @@ sub run {
     # Remove the directory forcibly
     assert_screen 'dolphin_icon_stuff';
     send_key 'shift-delete';
-    assert_screen 'dolphin_force_remove';
-    send_key 'ret';
+    # Only before 22.11 the delete button was focused by default,
+    # click it directly on newer versions.
+    assert_screen([qw(dolphin_force_remove dolphin_force_remove_button)]);
+    if (match_has_tag('dolphin_force_remove_button')) {
+        click_lastmatch;
+    } else {
+        send_key 'ret';
+    }
 
     # Remove the places entry again
     assert_and_click('dolphin_places_stuff', button => 'right');

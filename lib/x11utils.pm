@@ -9,10 +9,10 @@ use Exporter;
 use strict;
 use warnings;
 use testapi;
-use version_utils qw(is_sle is_leap);
+use version_utils qw(is_sle is_leap is_plasma6);
 use utils 'assert_and_click_until_screen_change';
 use Utils::Architectures;
-use Utils::Backends 'is_pvm';
+use Utils::Backends qw(is_pvm is_qemu);
 
 our @EXPORT = qw(
   desktop_runner_hotkey
@@ -26,6 +26,7 @@ our @EXPORT = qw(
   select_user_gnome
   turn_off_screensaver
   turn_off_kde_screensaver
+  turn_off_plasma_tooltips
   turn_off_plasma_screen_energysaver
   turn_off_plasma_screenlocker
   turn_off_gnome_screensaver
@@ -35,6 +36,7 @@ our @EXPORT = qw(
   turn_off_gnome_show_banner
   untick_welcome_on_next_startup
   start_root_shell_in_xterm
+  x11_start_program_xterm
   handle_gnome_activities
 );
 
@@ -73,9 +75,9 @@ sub ensure_unlocked_desktop {
 
     # press key to update screen, wait shortly before and after to not match cached screen
     my $wait_time = get_var('UPGRADE') ? 10 : 3;
-    wait_still_screen($wait_time);
+    wait_still_screen($wait_time, timeout => 15);
     send_key 'ctrl';
-    wait_still_screen($wait_time);
+    wait_still_screen($wait_time, timeout => 15);
     while ($counter--) {
         my @tags = qw(displaymanager displaymanager-password-prompt generic-desktop screenlock screenlock-password authentication-required-user-settings authentication-required-modify-system guest-disabled-display oh-no-something-has-gone-wrong);
         push(@tags, 'blackscreen') if get_var("DESKTOP") =~ /minimalx|xfce/;    # Only xscreensaver and xfce have a blackscreen as screenlock
@@ -151,6 +153,13 @@ sub ensure_unlocked_desktop {
                 next if match_has_tag 'generic-desktop';
             }
             send_key 'ret';
+            if (is_s390x && is_sle('<15-sp3')) {
+                # on s390x after login can the screen be black poo#125930
+                wait_still_screen;
+                mouse_set(600, 600);
+                mouse_click;
+                mouse_hide(1);
+            }
         }
         if (match_has_tag 'generic-desktop') {
             send_key 'esc';
@@ -177,7 +186,16 @@ sub ensure_unlocked_desktop {
         die 'ensure_unlocked_desktop repeated too much. Check for X-server crash.' if ($counter eq 1);    # die loop when generic-desktop not matched
         if (match_has_tag('screenlock') || match_has_tag('blackscreen')) {
             wait_screen_change {
-                send_key 'esc';    # end screenlock
+                if (is_qemu && (is_sle('=15-sp3') || is_sle('=15-sp2'))) {
+                    # sometimes screensaver can't be unlocked with key presses poo#125930
+                    mouse_set(600, 600);
+                    mouse_click;
+                    mouse_hide(1);
+                }
+                else {
+                    # ESC of KDE turns the monitor off and CTRL does not work on older SLES versions to unlock the screen
+                    send_key(is_sle("<15-SP4") ? 'esc' : 'ctrl');    # end screenlock
+                }
                 diag("Screen lock present");
             };
             next;    # Go directly to assert_screen, skip wait_still_screen (and don't collect $200)
@@ -212,11 +230,7 @@ sub handle_additional_polkit_windows {
         # expected that polkit authentication window can open for first time login.
         # see bsc#1177446 for more information.
         # Base latest feedback of bsc#1192992,authentication should never open if is_sle  >= 15SP4
-        if (is_sle('>=15-sp4')) {
-            record_soft_failure 'bsc#1192992 - authentication should never open if is_sle >= 15SP4';
-        } else {
-            record_info('authentication open for first time login');
-        }
+        record_info('authentication open for first time login, for bsc#1192992, authentication should never open if is_sle>=154');
         wait_still_screen(5);
         my $counter = 5;
         while (check_screen('authentication-required-user-settings', 10) && $counter) {
@@ -259,12 +273,21 @@ sub handle_login {
     $mypwd //= $testapi::password;
     $user_selected //= 0;
 
+    wait_still_screen 3;
     save_screenshot();
     # wait for DM, avoid screensaver and try to login
-    # Previously this pressed esc, but that makes the text field in SDDM lose focus
-    # we need send key 'esc' to quit screen saver when desktop is gnome
-    my $mykey = check_var('DESKTOP', 'gnome') ? 'esc' : 'shift';
-    send_key_until_needlematch('displaymanager', $mykey, 31, 3);
+    # ESC of KDE turns the monitor off and CTRL does not work on older SLES versions to unlock the screen
+    my $mykey = is_sle("<15-SP4") ? 'esc' : 'ctrl';    # end screenlock
+    if (is_qemu && (is_sle('=15-sp3') || is_sle('=15-sp2'))) {
+        # sometimes screensaver can't be unlocked with key presses poo#125930
+        mouse_set(600, 600);
+        mouse_click;
+        mouse_hide(1);
+    }
+    else {
+        # ESC of KDE turns the monitor off and CTRL does not work on older SLES versions to unlock the screen
+        send_key_until_needlematch('displaymanager', $mykey, 31, 3);
+    }
     if (get_var('ROOTONLY')) {
         # we now use this tag to support login as root
         if (check_screen 'displaymanager-username-notlisted', 10) {
@@ -293,11 +316,7 @@ sub handle_login {
     handle_additional_polkit_windows($mypwd) if check_screen([qw(authentication-required-user-settings authentication-required-modify-system)], 15);
     assert_screen([qw(generic-desktop gnome-activities opensuse-welcome)], 180);
     if (match_has_tag('gnome-activities')) {
-        send_key_until_needlematch [qw(generic-desktop opensuse-welcome language-change-required-update-folder)], 'esc';
-        if (match_has_tag('language-change-required-update-folder')) {
-            assert_and_click('reserve_old_folder_name');
-            assert_screen([qw(generic-desktop opensuse-welcome)]);
-        }
+        send_key_until_needlematch [qw(generic-desktop opensuse-welcome)], 'esc', 5, 10;
     }
 }
 
@@ -380,7 +399,8 @@ Turns off the Plasma desktop screen energy saving.
 =cut
 
 sub turn_off_plasma_screen_energysaver {
-    x11_start_program('kcmshell5 powerdevilprofilesconfig', target_match => [qw(kde-energysaver-enabled energysaver-disabled)]);
+    my $kcmshell = is_plasma6 ? 'kcmshell6' : 'kcmshell5';
+    x11_start_program("$kcmshell powerdevilprofilesconfig", target_match => [qw(kde-energysaver-enabled energysaver-disabled)]);
     assert_and_click 'kde-disable-energysaver' if match_has_tag('kde-energysaver-enabled');
     assert_screen 'kde-energysaver-disabled';
     # Was 'alt-o' before, but does not work in Plasma 5.17 due to kde#411758
@@ -390,19 +410,35 @@ sub turn_off_plasma_screen_energysaver {
 
 =head2 turn_off_plasma_screenlocker
 
- turnoff_plasma_screenlocker()
+ turn_off_plasma_screenlocker()
 
 Turns off the Plasma desktop screenlocker.
 
 =cut
 
 sub turn_off_plasma_screenlocker {
-    x11_start_program('kcmshell5 screenlocker', target_match => [qw(kde-screenlock-enabled screenlock-disabled)]);
+    my $kcmshell = is_plasma6 ? 'kcmshell6' : 'kcmshell5';
+    x11_start_program("$kcmshell screenlocker", target_match => [qw(kde-screenlock-enabled screenlock-disabled)]);
     assert_and_click 'kde-disable-screenlock' if match_has_tag('kde-screenlock-enabled');
     assert_screen 'screenlock-disabled';
     # Was 'alt-o' before, but does not work in Plasma 5.17 due to kde#411758
     send_key 'ctrl-ret';
     assert_screen 'generic-desktop';
+}
+
+=head2 turn_off_plasma_tooltips
+
+  turn_off_plasma_tooltips()
+
+Disable Plasma tooltips, especially the one triggered by the "Peek Desktop" below the default
+mouse_hide location can break needles and break or slow down matches.
+
+=cut
+
+sub turn_off_plasma_tooltips {
+    my $kwriteconfig = is_plasma6 ? 'kwriteconfig6' : 'kwriteconfig5';
+    x11_start_program("$kwriteconfig --file plasmarc --group PlasmaToolTips --key Delay -- -1",
+        target_match => 'generic-desktop', no_wait => 1) if check_var('DESKTOP', 'kde');
 }
 
 =head2 turn_off_kde_screensaver
@@ -505,7 +541,12 @@ sub untick_welcome_on_next_startup {
         assert_and_click_until_screen_change("opensuse-welcome-show-on-boot", 5, 5);
         # Moving the cursor already causes screen changes - do not fail the check
         # immediately but allow some time to reach the final state
-        last if check_screen("opensuse-welcome-show-on-boot-unselected", timeout => 5);
+        check_screen([qw(discover-close opensuse-welcome-show-on-boot-unselected)], timeout => 5);
+        # With Plasma 6, it can happen that the "updates available" notification appears underneath
+        # the cursor in between matching and clicking. Addressing this after the fact is more
+        # reliable than trying to avoid it, which would be racy on its own.
+        click_lastmatch if match_has_tag("discover-close");
+        last if match_has_tag("opensuse-welcome-show-on-boot-unselected");
         die "Unable to untick 'Show on next startup'" if $retry == 5;
     }
     for my $retry (1 .. 5) {
@@ -548,6 +589,23 @@ sub start_root_shell_in_xterm {
     mouse_set(400, 400);
     mouse_click(['left']);
     become_root;
+}
+
+=head2 x11_start_program_xterm
+
+    x11_start_program_xterm()
+
+Start xterm, if it is not focused, record a soft-failure and focus the xterm window.
+
+=cut
+
+sub x11_start_program_xterm {
+    x11_start_program('xterm', target_match => [qw(xterm xterm-without-focus)]);
+    if (match_has_tag 'xterm-without-focus') {
+        record_soft_failure('poo#111752: xterm is not focused');
+        click_lastmatch;
+        assert_screen 'xterm';
+    }
 }
 
 =head2 handle_gnome_activities

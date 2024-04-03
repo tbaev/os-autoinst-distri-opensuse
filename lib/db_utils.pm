@@ -9,11 +9,14 @@ use strict;
 use warnings;
 use testapi;
 use mmapi qw(get_current_job_id);
+use JSON qw(encode_json);
 
 our @EXPORT = qw(
   influxdb_push_data
   influxdb_read_data
   push_image_data_to_db
+  check_postgres_db
+  is_ok_url
 );
 
 sub build_influx_kv {
@@ -40,12 +43,18 @@ sub build_influx_query {
 
 =head2 influxdb_push_data
 
-    influxdb_push_data($url, $db, $data [, quiet => 1])
+    influxdb_push_data($url, $db, $org, $token, $data [, quiet => 1] [, proceed_on_failure => 1])
 
 Builds an influx-db query and write it to the given database specified with
-C<url> and C<db> for the Influx DB name.
-C<data> is a hash containing the table name in Influx DB, the tags
-and the values to plot.
+C<url>, C<org> and C<db> for the Influx DB organization and database name.
+C<token> is used for user authentication.
+C<quiet> is a boolean flag to hide output results, default true.
+C<proceed_on_failure> is a boolean flag to continue and not die when return_code not ok, default false.
+C<data> is a hash containing the table name in Influx DB, the tags and the values to plot.
+
+Return code: 
+    1, when ok and data uploaded to remote db
+    undef or die, when push failed 
 
 Example of data:
     $data = {
@@ -56,37 +65,59 @@ Example of data:
 =cut
 
 sub influxdb_push_data {
-    my ($url, $db, $data, %args) = @_;
+    my ($url, $db, $org, $token, $data, %args) = @_;
     $args{quiet} //= 1;
+    $args{proceed_on_failure} //= 0;
     $data = build_influx_query($data);
-    my $cmd = sprintf("curl -i -X POST '%s/write?db=%s' --write-out 'RETURN_CODE:%%{response_code}' --data-binary '%s'", $url, $db, $data);
-    record_info('curl', $cmd);
-    my $output = script_output($cmd, quiet => $args{quiet});
+    my $cmd = sprintf("curl -iLk -X POST '$url/api/v2/write?org=$org&bucket=$db' --header 'Authorization: Token $token' --write-out 'RETURN_CODE:%%{response_code}' --data-binary '%s'", $data);
+    # Hide the token in the info box
+    my $out = $cmd;
+    $out =~ s/$token/<redacted>/;
+    record_info('curl POST', $out);
+
+    my $output = script_output($cmd, quiet => $args{quiet}, proceed_on_failure => $args{proceed_on_failure});
     my ($return_code) = $output =~ /RETURN_CODE:(\d+)/;
-    die("Fail to push data into Influx DB:\n$output") unless ($return_code >= 200 && $return_code < 300);
+    unless ($return_code >= 200 && $return_code < 300) {
+        my $msg = "Failed pushing data into Influx DB:\n$output\n";
+        record_info("FAIL push db", $msg, result => 'fail') if ($args{proceed_on_failure});
+        die($msg) unless ($args{proceed_on_failure});
+        return;
+    }
+    return 1;
 }
 
 =head2 influxdb_read_data
 
 Builds an Influx DB query and read data from specified database
-with C<url_base> and C<db> for the Influx DB name. C<query> contains
-SELECT query for given DB.
+with C<url_base>, C<db> and C<org> for the Influx DB name.
+C<token> contains the access token.
+C<query> contains SELECT query for given DB.
 
 returns json with results of SELECT query.
 
 =cut
 
 sub influxdb_read_data {
-    my ($url_base, $db, $query) = @_;
+    my ($url_base, $db, $org, $token, $query) = @_;
+
     my $ua = Mojo::UserAgent->new();
     $ua->max_redirects(5);
-    my $mojo_url = Mojo::URL->new($url_base . '/query');
-    $mojo_url->query(db => $db, q => $query);
-    my $res = $ua->get($mojo_url)->res;
-    unless ($res && $res->json) {
+
+    my $mojo_url = Mojo::URL->new("$url_base/query");
+    $mojo_url->query(orgID => $org, db => $db, q => $query);
+    my $res = $ua->post($mojo_url => {Authorization => "Token $token", Accept => "application/json", 'Content-type' => "application/json"})->res;
+    if ($res->code != 200) {
         die sprintf("Failed to get data from InfluxDB. \n Response code : %s \n Message: %s \n", $res->code, $res->message);
+    } else {
+        my $json = $res->json;
+        my @results = $json->{results};
+        # Check if we got an error object as reply
+        my $result = $results[0][0];
+        if (defined($result->{error})) {
+            die($result->{error});
+        }
+        return $json;
     }
-    return $res->json;
 }
 
 
@@ -100,22 +131,9 @@ Pushes data to specified with C<url> and C<db> for the Postgres DB name using cu
 sub push_image_data_to_db {
     my ($product, $image, $value, %args) = @_;
     my $db_log = "/tmp/db.log";
-    my $db_ip = get_var('POSTGRES_IP');
+    my $db_ip = get_required_var('POSTGRES_IP');
     my $db_port = get_var('POSTGRES_PORT', '5444');
-    my $token = get_var('_SECRET_DATABASE_PWD');
-    unless ($db_ip) {
-        record_soft_failure("poo#113120 - Missing variable POSTGRES_IP. Can't push data to DB.");
-        return 0;
-    }
-    unless ($token) {
-        record_soft_failure("poo#113120 - Missing variable _SECRET_DATABASE_PWD. Can't push data to DB.");
-        return 0;
-    }
-    script_run("read -s pg_pwd", 0);
-    type_password("-H \"Authorization: Bearer $token\"\n");
-    assert_script_run('echo $pg_pwd > /etc/postgres_conf');
-    assert_script_run('echo \'-H "Content-Type: application/json"\' >> /etc/postgres_conf');
-
+    my $token = get_required_var('_SECRET_DATABASE_PWD');
 
     my $openqa_host = get_required_var('OPENQA_HOSTNAME');
     my $job_url;
@@ -128,7 +146,7 @@ sub push_image_data_to_db {
     } else {
         $job_url = $openqa_host . '/' . $job_id;
     }
-    record_info('job_url', $job_url);
+    bmwqemu::diag('job_url', $job_url);
     return 0 unless ($job_url);
 
     $args{distri} //= get_required_var('DISTRI');
@@ -136,29 +154,91 @@ sub push_image_data_to_db {
     $args{arch} //= get_required_var('ARCH');
     $args{flavor} //= get_required_var('FLAVOR');
     $args{build} //= get_required_var('BUILD');
-    $args{type} //= '';
-    (my $build = $args{build}) =~ s/\_.*//;    #To remove unneeded strings, e.g. 15.11_init-image -> 15.11
+    $args{table} //= 'size';
+    $args{url} = $job_url;
+    $args{asset} = $image;
+    $args{value} = $value;
+    $args{product} = $product;
+    $args{build} =~ s/\_.*//;    #To remove unneeded strings, e.g. 15.11_init-image -> 15.11
 
-    my $cmd = 'curl -i -K /etc/postgres_conf -X POST http://' . $db_ip . ':' . $db_port . '/size -d \'{';
-    $cmd .= '"product": "' . $product . '", ';
-    $cmd .= '"distri": "' . $args{distri} . '", ';
-    $cmd .= '"version": "' . $args{version} . '", ';
-    $cmd .= '"arch": "' . $args{arch} . '", ';
-    $cmd .= '"flavor": "' . $args{flavor} . '", ';
-    $cmd .= '"build": "' . $build . '", ';
-    $cmd .= '"asset": "' . $image . '", ';
-    $cmd .= '"url": "' . $job_url . '", ';
-    $cmd .= '"type": "' . $args{type} . '", ';
-    $cmd .= '"value": "' . $value . '"}\'';
-    record_info('db cmd', $cmd);
-    script_run("echo '$cmd' | tee -a $db_log");
-    my $cmd_output = script_output("$cmd 2>&1 | tee -a $db_log", proceed_on_failure => 1);
+    my $ua = Mojo::UserAgent->new;
+    $ua = $ua->max_connections(5);
+    $ua = $ua->max_redirects(3);
+    $ua = $ua->connect_timeout(30);
+
+    my $url = sprintf('http://%s:%s/%s', $db_ip, $db_port, $args{table});
+    bmwqemu::diag("Database URL: $url");
+    my $table = delete $args{table};
+
+    #my $data = encode_json(\%args);
+    bmwqemu::diag("Collected image data: " . encode_json(\%args));
+
+    my $res = $ua->post("$url" => {Authorization => "Bearer $token", Accept => "application/json",
+            'Content-type' => "application/json"} => json => \%args)->result();
+
     # if successful push, it should return 'HTTP/1.1 201 Created'
-    if ($cmd_output =~ /(?=.*201 Created)/) {
-        record_info("DB", "Image data has been successfully pushed to the Database.");
-    } elsif ($cmd_output =~ /(?=.*409 Conflict)/) {
-        record_info("DB", "This image info already exists DB.");
+    if ($res->code == 201) {
+        bmwqemu::diag("Image data has been successfully pushed to the Database ($table), RC => " . $res->code);
+    } elsif ($res->code == 409) {
+        bmwqemu::diag("This image info already exists in $table, RC => " . $res->code);
+        # return to the caller that conflict has been found
+        # caller should exit the test case module immediately
     } else {
-        record_soft_failure("poo#113120 - There has been a problem pushing data to the DB.");
+        record_info('DB error', "There has been a problem pushing data to the $table. RC => " . $res->code, result => 'softfail');
     }
+
+    return $res->code;
+}
+
+sub check_postgres_db {
+    my $image = shift;
+    my $db_ip = get_var('POSTGRES_IP');
+    my $db_port = get_var('POSTGRES_PORT', '5444');
+    my $db_db = get_var('POSTGRES_DB', 'size');
+    my $db_log = "/tmp/db.log";
+
+    ## We only allow data push to the database if all of the following conditions are met:
+    ## 1. The job must hold the POSTGRES_IP setting (database host)
+    ## 2. The job shouldn't be a verification run
+    ## 3. The job must be executed from OSD or O3
+
+    ## Check if database host ist set
+    return 0 unless ($db_ip);
+
+    ## Check if job is a verification run
+    # CASEDIR var is always set (check vars.json). If not explicitly specified, the value is "sle/sle-micro" for OSD and "opensuse/leap-micro" for O3
+    return 0 if (get_required_var('CASEDIR') !~ m/^sle$|^opensuse$|^(sle|leap)-micro$/);
+
+    ## Check if job is executed on OSD/O3
+    my $job_url;
+    my $openqa_host = get_required_var('OPENQA_HOSTNAME');
+    if ($openqa_host =~ /openqa1-opensuse|openqa.opensuse.org/) {    # O3 hostname
+        $job_url = 'https://openqa.opensuse.org/tests/' . get_current_job_id();
+    } elsif ($openqa_host =~ /openqa.suse.de/) {    # OSD hostname
+        $job_url = 'https://openqa.suse.de/tests/' . get_current_job_id();
+    } else {
+        return 0;
+    }
+
+    ## Probe the database
+    # A successful query should return 'HTTP/1.1 200 OK'
+    # Empty records will return  '{"results":[{"statement_id":0}]}'
+    # Existing records will return '{"results":[{"statement_id":0,"series":[{"name":"size","columns":["time","value"],"values"' ...
+    my $request = "curl -IfLv 'http://$db_ip:$db_port/$db_db'";
+    if (script_run("$request 2>&1 >/var/tmp/db_curl.tmp", timeout => 120, die_on_timeout => 0) != 0) {
+        my $output = script_output("cat /var/tmp/db_curl.tmp");
+        record_info("db error", "cannot reach POSTGREST database\n$request\n$output", result => 'fail');
+        return 0;
+    }
+    return 1;
+}
+
+sub is_ok_url {
+    # url connectivity check
+    # Parameters: url[:port] [, timeout: default=90]
+    my ($url, %args) = @_;
+    $args{timeout} //= 120;
+    my $cmd = "curl -skf --connect-timeout " . $args{timeout} . " " . $url . " >/dev/null";
+    # t+3 to let curl trigger first.
+    return (script_run($cmd, timeout => ($args{timeout} + 3), die_on_timeout => 0) == 0);
 }

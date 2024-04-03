@@ -7,7 +7,7 @@
 # Summary: Add rmt configuration test and basic configuration via
 #    rmt-wizard, test enable/disable products/repo, test rmt sync
 #    rmt mirror, test import SMT data to RMT
-# Maintainer: Yutao wang <yuwang@suse.com>
+# Maintainer: QE YaST and Migration (QE Yam) <qe-yam at suse de>
 
 use base "consoletest";
 use strict;
@@ -15,11 +15,13 @@ use warnings;
 use testapi;
 use repo_tools;
 use utils;
+use serial_terminal qw(select_serial_terminal);
 
 sub run {
     select_console 'root-console';
     record_info('RMT server setup', 'Start to setup a rmt server');
     rmt_wizard();
+    select_serial_terminal;
     # sync from SCC
     rmt_sync;
     # enable all modules of products at one arch

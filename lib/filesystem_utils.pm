@@ -34,7 +34,8 @@ our @EXPORT = qw(
   lsblk_command
   validate_lsblk
   get_partition_table_via_blkid
-  is_lsblk_able_to_display_mountpoints);
+  is_lsblk_able_to_display_mountpoints
+  generate_xfstests_list);
 
 =head2 str_to_mb
 
@@ -275,12 +276,24 @@ sub format_partition {
     if ($filesystem =~ /ext4/) {
         $options = $args{options} // "-F";
     }
+    elsif ($filesystem =~ /ocfs2/) {
+        $options = $args{options} // "-F --fs-features=local --fs-feature-level=max-features";
+    }
     else {
         $options = $args{options} // "-f";
     }
     script_run("umount -f $part");
     sleep 1;
-    assert_script_run("mkfs.$filesystem $options $part");
+    if ($filesystem =~ /ocfs2/) {
+        # mkfs.ocfs2 will still require input y even you used -F
+        background_script_run("mkfs.$filesystem $options $part");
+        sleep 1;
+        script_run('y');
+        wait_still_screen(10, 60);
+    }
+    else {
+        assert_script_run("mkfs.$filesystem $options $part");
+    }
 }
 
 =head2 df_command
@@ -495,6 +508,36 @@ sub validate_lsblk {
         }
     }
     return $errors;
+}
+
+=head2
+
+Generate xfstests subtests list
+This function translate test range to single tests, with xfstests test name format.
+Input an parameter with list of subtest name, Return a hash of test list.
+e.g. generate "xfs/001-003,xfs/005" into "{xfs/001 => 1, xfs/002 => 1, xfs/003 => 1, xfs/005 => 1}"
+
+=cut
+
+sub generate_xfstests_list {
+    my $raw_list = shift;
+    return unless $raw_list;
+    my @split_list = split(/,/, $raw_list);
+    my @test_list;
+    foreach my $test_item (@split_list) {
+        $test_item =~ m"\w+/";
+        my ($test_category, $test_num) = ($&, $');
+        if ($test_num =~ /^(\d{3})-(\d{3})$/) {
+            push(@test_list, map { $_ = "$test_category$_" } ($1 .. $2));
+        }
+        elsif ($test_num =~ /^\d{3}$/) {
+            push(@test_list, "$test_category$test_num");
+        }
+        else {
+            die "Invalid test list: $test_item";
+        }
+    }
+    return map { $_ => 1 } @test_list;
 }
 
 1;

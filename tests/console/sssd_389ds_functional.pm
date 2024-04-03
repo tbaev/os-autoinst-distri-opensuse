@@ -26,44 +26,86 @@ use registration 'add_suseconnect_product';
 
 sub run {
     select_serial_terminal;
+
+    # Install runtime dependencies
+    zypper_call("in sudo nscd");
+
     my $docker = "podman";
     if (is_sle) {
-        $docker = "docker";
-        add_suseconnect_product('PackageHub', undef, undef, undef, 300, 1);
+        $docker = "docker" if is_sle("<15-SP5");
         is_sle('<15') ? add_suseconnect_product("sle-module-containers", 12) : add_suseconnect_product("sle-module-containers");
     }
-    zypper_call("in sssd sssd-ldap openldap2-client sshpass $docker");
+    zypper_call("in sssd sssd-ldap openldap2-client $docker");
 
-    #For released sle versions use sle15sp3 base image by default. For developing sle use corresponding image in registry.suse.de
+    #For released sle versions use sle15sp4 base image by default. For developing sle use corresponding image in registry.suse.de
     my $pkgs = "awk systemd systemd-sysvinit 389-ds openssl";
     my $tag = "";
     if (is_opensuse) {
         $tag = (is_tumbleweed) ? "registry.opensuse.org/opensuse/tumbleweed" : "registry.opensuse.org/opensuse/leap";
-    } else {
-        $tag = 'registry.suse.com/suse/sle15:15.3';
-        if (get_var("SCC_URL") =~ /\Qproxy.scc.suse.de\E/) {
+    }
+    else {
+        $tag = 'registry.suse.com/suse/sle15:15.5';
+        if (check_var('BETA', '1') || (get_var('SCC_URL') =~ /proxy\.scc/)) {
             my ($v, $sp) = split("-SP", get_var("VERSION"));
-            $tag = $sp > 0 ? "registry.suse.de/suse/sle-$v-sp$sp/ga/publish/images/suse/sle$v:$v.$sp" : "registry.suse.de/suse/sle-$v/ga/publish/images/suse/sle$v:$v.0";
+            $tag = $sp > 0 ? "registry.suse.de/suse/sle-$v-sp$sp/ga/images/suse/sle$v:$v.$sp" : "registry.suse.de/suse/sle-$v/ga/images/suse/sle$v:$v.0";
             ensure_ca_certificates_suse_installed;
         }
     }
     systemctl("enable --now $docker") if ($docker eq "docker");
     #build image, create container, setup 389-ds database and import testing data
     assert_script_run("mkdir /tmp/sssd && cd /tmp/sssd");
-    assert_script_run("curl " . "--remote-name-all " . data_url("sssd/398-ds/{user_389.ldif,access.ldif,Dockerfile_$docker,instance_389.inf}"));
+
+    my @artifacts = qw(
+      user_389.ldif
+      access.ldif
+      instance_389.inf
+      sssd.conf
+      nsswitch.conf
+      config
+    );
+
+    push(@artifacts, "Dockerfile_$docker");    # qw doesn't do interpolation.
+
+    # Download all the artifacts to current dir, permissions will be handled by install commands below.
+    my $data_url = sprintf("sssd/398-ds/{%s}", join(',', @artifacts));
+    assert_script_run("curl --remote-name-all " . data_url($data_url));
+
+    assert_script_run(qq(sed -i '/gpg-auto-import-keys/i\\RUN zypper rr SLE_BCI' Dockerfile_$docker)) if (check_var('BETA', '1'));
     assert_script_run(qq($docker build -t ds389_image --build-arg tag="$tag" --build-arg pkgs="$pkgs" -f Dockerfile_$docker .), timeout => 600);
-    assert_script_run("$docker run -itd --shm-size=256m --name ds389_container --hostname ldapserver --privileged -v /sys/fs/cgroup:/sys/fs/cgroup:ro --restart=always ds389_image") if ($docker eq "docker");
-    assert_script_run("$docker run -itd --shm-size=256m --name ds389_container --hostname ldapserver ds389_image") if ($docker eq "podman");
+
+    # Cleanup the container in case a previous run did not cleanup properly, no need to assert
+    script_run(qq($docker rm -f ds389_container));
+
+    my $container_run_389_ds = "$docker run -itd --shm-size=256m --name ds389_container --hostname ldapserver";
+
+    if ($docker eq "docker") {
+        $container_run_389_ds .= " --privileged -v /sys/fs/cgroup:/sys/fs/cgroup:ro --restart=always";
+    }
+
+    assert_script_run("$container_run_389_ds ds389_image");
+    # wait up to 60 seconds for container running
+    my $retries = 60;
+    while ($retries--) {
+        last if script_output("$docker inspect -f '{{.State.Running}}' ds389_container") =~ /true/;
+        sleep 1;
+    }
+    die "Cannot start container" unless $retries;
+
+    assert_script_run("$docker exec ds389_container chown dirsrv:dirsrv /var/lib/dirsrv");
     assert_script_run("$docker exec ds389_container sed -n '/ldapserver/p' /etc/hosts >> /etc/hosts");
     assert_script_run("$docker exec ds389_container dscreate from-file /tmp/instance_389.inf");
     assert_script_run('ldapadd -x -H ldap://ldapserver -D "cn=Directory Manager" -w opensuse -f user_389.ldif');
     assert_script_run('ldapadd -x -H ldap://ldapserver -D "cn=Directory Manager" -w opensuse -f access.ldif');
 
     # Configure sssd on the host side
+    assert_script_run('mkdir -p /etc/sssd/');
     assert_script_run("$docker cp ds389_container:/etc/dirsrv/slapd-frist389/ca.crt /etc/sssd/ldapserver.crt");
-    assert_script_run("curl " . data_url("sssd/398-ds/sssd.conf") . " -o /etc/sssd/sssd.conf");
-    assert_script_run("curl " . data_url("sssd/398-ds/nsswitch.conf") . " -o /etc/nsswitch.conf");
-    assert_script_run("curl " . data_url("sssd/398-ds/config") . " --create-dirs -o ~/.ssh/config");
+
+    # nssswitch must be readable by all users
+    assert_script_run("install --mode 0644 -D ./nsswitch.conf /etc/nsswitch.conf");
+    assert_script_run("install --mode 0600 -D ./sssd.conf /etc/sssd/sssd.conf");
+    assert_script_run("install --mode 0600 -D ./config ~/.ssh/config");
+
     systemctl("disable --now nscd.service");
     systemctl("enable --now sssd.service");
 
@@ -72,30 +114,62 @@ sub run {
     validate_script_output("id alice", sub { m/uid=9998\(alice\)/ });
     #remote user authentification test
     assert_script_run("pam-config -a --sss --mkhomedir");
-    validate_script_output('sshpass -p open5use ssh mary@localhost whoami', sub { m/mary/ });
+
+    select_console 'root-console';
+
+    user_test();
     #Change password of remote user
-    assert_script_run('sshpass -p open5use ssh alice@localhost \'echo -e "open5use\nn0vell88\nn0vell88" | passwd\'');
-    validate_script_output('sshpass -p n0vell88 ssh alice@localhost echo "login as new password!"', sub { m/new password/ });
-    validate_script_output('ldapwhoami -x -H ldap://ldapserver -D uid=alice,ou=users,dc=sssdtest,dc=com -w n0vell88', sub { m/alice/ }); #verify password changed in remote 389-ds.
-        #Sudo run a command as another user
-    assert_script_run("sed -i '/Defaults targetpw/s/^/#/' /etc/sudoers");
-    validate_script_output('sshpass -p open5use ssh mary@localhost "echo open5use|sudo -S -l"', sub { m#/usr/bin/cat# });
+    enter_cmd('ssh -oStrictHostKeyChecking=no alice@localhost', wait_still_screen => 5);
+    enter_cmd('open5use', wait_still_screen => 5);
+    enter_cmd('echo -e "open5use\nn0vell88\nn0vell88" | passwd', wait_still_screen => 1);
+    enter_cmd('exit', wait_still_screen => 1);
+    #verify password changed in remote 389-ds.
+    validate_script_output('ldapwhoami -x -H ldap://ldapserver -D uid=alice,ou=users,dc=sssdtest,dc=com -w n0vell88', sub { m/alice/ });
+    #Sudo run a command as another user
+    assert_script_run("echo 'Defaults !targetpw' >/etc/sudoers.d/notargetpw");
+    enter_cmd('ssh -oStrictHostKeyChecking=no mary@localhost', wait_still_screen => 5);
+    enter_cmd('open5use', wait_still_screen => 5);
+    enter_cmd('echo open5use|sudo -S -l > /tmp/sudouser', wait_still_screen => 1);
+    enter_cmd('exit', wait_still_screen => 1);
+    validate_script_output('cat /tmp/sudouser', sub { m#/usr/bin/cat# });
     assert_script_run(qq(su -c 'echo "file read only by owner alice" > hello && chmod 600 hello' -l alice));
-    validate_script_output('sshpass -p open5use ssh mary@localhost "echo open5use|sudo -S -u alice /usr/bin/cat /home/alice/hello"', sub { m/file read only by owner alice/ });
+    sudo_user_test();
     #Change back password of remote user
-    assert_script_run('sshpass -p n0vell88 ssh alice@localhost \'echo -e "n0vell88\nopen5use\nopen5use" | passwd\'');
-    validate_script_output('sshpass -p open5use ssh alice@localhost echo "Password changed back!"', sub { m/Password changed back/ });
+    enter_cmd('ssh -oStrictHostKeyChecking=no alice@localhost', wait_still_screen => 5);
+    enter_cmd('n0vell88', wait_still_screen => 5);
+    enter_cmd('echo -e "n0vell88\nopen5use\nopen5use" | passwd', wait_still_screen => 1);
+    enter_cmd('exit', wait_still_screen => 1);
+    enter_cmd('ssh -oStrictHostKeyChecking=no alice@localhost', wait_still_screen => 5);
+    enter_cmd('open5use', wait_still_screen => 5);
+    enter_cmd('echo "Password changed back!" > /tmp/passwdback', wait_still_screen => 1);
+    enter_cmd('exit', wait_still_screen => 1);
+    validate_script_output('cat /tmp/passwdback', sub { m/Password changed back/ });
 
     #offline identity lookup and authentification
-    assert_script_run("$docker stop ds389_container") if ($docker eq "docker");
+    assert_script_run("$docker stop ds389_container");
     #offline cached remote user indentity lookup
     validate_script_output("id alice", sub { m/uid=9998\(alice\)/ });
     #offline remote user authentification test
-    validate_script_output('sshpass -p open5use ssh mary@localhost whoami', sub { m/mary/ });
+    user_test();
     #offline sudo run a command as another user
-    validate_script_output('sshpass -p open5use ssh mary@localhost "echo open5use|sudo -S -u alice /usr/bin/cat /home/alice/hello"', sub { m/file read only by owner alice/ });
+    sudo_user_test();
 }
 
+sub user_test {
+    enter_cmd('ssh -oStrictHostKeyChecking=no mary@localhost', wait_still_screen => 5);
+    enter_cmd('open5use', wait_still_screen => 5);
+    enter_cmd('whoami > /tmp/mary', wait_still_screen => 1);
+    enter_cmd('exit', wait_still_screen => 1);
+    validate_script_output('cat /tmp/mary', sub { m/mary/ });
+}
+
+sub sudo_user_test {
+    enter_cmd('ssh -oStrictHostKeyChecking=no mary@localhost', wait_still_screen => 5);
+    enter_cmd('open5use', wait_still_screen => 5);
+    enter_cmd('echo open5use|sudo -S -u alice /usr/bin/cat /home/alice/hello > /tmp/readonly', wait_still_screen => 5);
+    enter_cmd('exit', wait_still_screen => 1);
+    validate_script_output('cat /tmp/readonly', sub { m/file read only by owner alice/ });
+}
 sub test_flags {
     return {always_rollback => 1};
 }

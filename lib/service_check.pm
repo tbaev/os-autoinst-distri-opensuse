@@ -10,7 +10,7 @@ check service status or service function before and after migration
 # SPDX-License-Identifier: FSFAP
 
 # Summary: check service status before and after migration.
-# Maintainer: GAO WEI <wegao@suse.com>
+# Maintainer: QE YaST and Migration (QE Yam) <qe-yam at suse de>
 
 package service_check;
 
@@ -228,11 +228,6 @@ service package name.
 
 sub _is_applicable {
     my ($srv_pkg_name) = @_;
-    if ($srv_pkg_name eq 'kdump' && is_s390x) {
-        # workaround for bsc#116300 on s390x
-        record_soft_failure 'bsc#1163000 - System does not come back after crash on s390x';
-        return 0;
-    }
     # This feature is used only by hpc
     return 0 if ($srv_pkg_name eq 'hpcpackage_remain' && !check_var('SLE_PRODUCT', 'hpc'));
     if (get_var('EXCLUDE_SERVICES')) {
@@ -337,7 +332,7 @@ sub check_services {
         my $srv_proc_name = $service->{$s}->{srv_proc_name};
         my $support_ver = $service->{$s}->{support_ver};
         my $service_type = 'Systemd';
-        next unless (($service->{$s}->{before_migration} eq 'PASS') && _is_applicable($srv_pkg_name));
+        next if (defined($service->{$s}->{before_migration}) && ($service->{$s}->{before_migration} eq 'FAIL') || !_is_applicable($srv_pkg_name));
         record_info($srv_pkg_name, "service check after migration");
         eval {
             if (is_sle($support_ver, get_var('ORIGIN_SYSTEM_VERSION'))) {

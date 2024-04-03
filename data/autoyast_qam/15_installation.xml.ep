@@ -2,7 +2,12 @@
 <!DOCTYPE profile>
 <profile xmlns="http://www.suse.com/1.0/yast2ns" xmlns:config="http://www.suse.com/1.0/configns">
   <suse_register>
+    % unless ($check_var->('FLAVOR', 'Server-DVD-Updates-TERADATA') or $check_var->('FLAVOR', 'Server-DVD-Incidents-TERADATA')) {
     <do_registration config:type="boolean">true</do_registration>
+    % }
+    % if ($check_var->('FLAVOR', 'Server-DVD-Updates-TERADATA') or $check_var->('FLAVOR', 'Server-DVD-Incidents-TERADATA')) {
+    <do_registration config:type="boolean">false</do_registration>
+    % }
     <email><%= $get_var->('SCC_EMAIL') %></email>
     <reg_code><%= $get_var->('SCC_REGCODE') %></reg_code>
     <install_updates config:type="boolean">true</install_updates>
@@ -35,6 +40,13 @@
       % for my $repo (@$repos) {
       <listentry>
         <media_url><%= $repo %></media_url>
+      </listentry>
+      % }
+      % if ($check_var->('VERSION', '15-SP3')) {
+      <listentry>
+        <media_url>http://dist.suse.de/ibs/SUSE/Updates/SLE-Product-SLES/15-SP3-ERICSSON/x86_64/update/</media_url>
+        <name>15-SP3-ERICSSON-Updates</name>
+        <alias>15-SP3-ERICSSON-Updates</alias>
       </listentry>
       % }
     </add_on_products>
@@ -124,7 +136,7 @@
       <dhcp_hostname config:type="boolean">true</dhcp_hostname>
       <hostname>susetest</hostname>
       <nameservers config:type="list">
-        <nameserver>10.160.0.1</nameserver>
+        <nameserver>10.144.53.53</nameserver>
       </nameservers>
       <resolv_conf_policy>auto</resolv_conf_policy>
       <searchlist config:type="list">
@@ -163,7 +175,12 @@
         <route>
           <destination>default</destination>
           <device>eth0</device>
+          % if ( $get_var->('WORKER_HOSTNAME') =~ /prg2/ ) {
+          <gateway>10.145.10.254</gateway>
+          % }
+          % if ( $get_var->('WORKER_HOSTNAME') =~ /nue2/ ) {
           <gateway>10.161.159.254</gateway>
+          % }
           <netmask>-</netmask>
         </route>
       </routes>

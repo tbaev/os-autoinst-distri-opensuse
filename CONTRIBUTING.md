@@ -19,11 +19,26 @@ Redmine project. Look for tickets with [easy] or [easy-hack] tags.
 
 ## How to get this repository working
 
-Upon setting up a new openQA instance, it's also necessary to install some aditional dependencies that are inherent to this repository,
-for which there are two ways:
+Upon setting up a new openQA instance, it's also necessary to install some
+additional dependencies that are inherent to this repository.
 
-* In case you're using cpanm (with or without local::lib, or others), from within the working copy: call `cpanm -n --mirror http://no.where/ --installdeps . `
-* In case you're using openSUSE: `zypper in os-autoinst-distri-opensuse-deps perl-JSON-Validator gnu_parallel`
+* On openSUSE to install an openQA worker and all dependencies do:
+
+```
+zypper in os-autoinst-distri-opensuse-deps-worker perl-JSON-Validator gnu_parallel
+```
+
+* If you just want to just install the dependencies without the openQA worker:
+
+
+```
+zypper in os-autoinst-distri-opensuse-deps perl-JSON-Validator gnu_parallel
+```
+
+* Otherwise most of the dependencies are available using cpanm (with or without
+local::lib, or others), from within the working copy: call
+`cpanm -n --mirror http://no.where/ --installdeps .`
+
 * For linting YAML, you need the openSUSE package `python3-yamllint` or install `yamllint` via pip
 
 #### Relevant documentation
@@ -61,8 +76,8 @@ and additionally the following rules:
   `$self` object. Do not parse any parameter if you do not need any.
 * [DRY](https://en.wikipedia.org/wiki/Don't_repeat_yourself)
 * Use defined architecture and backend functions defined in
-  'lib/Utils/Architecture.pm' and 'lib/Utils/Backends.pm' for checking specific 
-  ARCH and BACKEND types instead of calling the function calls check_var(). 
+  'lib/Utils/Architectures.pm' and 'lib/Utils/Backends.pm' for checking specific
+  ARCH and BACKEND types instead of calling the function calls `check_var()`.
   If they don't exist, add them.
 * Avoid `sleep()`: Do not use `sleep()` or simulate a sleep-like
   functionality. This introduces the risk of either unnecessarily wasting time
@@ -97,9 +112,11 @@ and additionally the following rules:
   according schedule for Tumbleweed tests, e.g. in schedule/ or main.pm.
   Exceptions are any special SLE-specific behaviour or packages not in
   Tumbleweed or the case not being relevant otherwise.
-* Avoid "dead code": Don't add disabled code as nobody but you will understand
-  why this is not active. Better leave it out and keep in your local git
-  repository, either in `git stash` or a temporary "WIP"-commit.
+* Avoid "dead code": Is generally discouraged to add disabled code as others will lack
+  the context as to why this is not active. Better leave it out and keep in your local git
+  repository, either in `git stash` or a temporary "WIP"-commit. If it needs to
+  be added, it should come with an accompanying comment stating the reasons why
+  it must be there.
 * Details in commit messages: The commit message should have enough details,
   e.g. what issue is fixed, why this needs to change, to which versions of which
   product it applies, link to a bug or a feature entry, the choices you made,
@@ -108,14 +125,29 @@ and additionally the following rules:
   reviewers fall in love with you :) https://mtlynch.io/code-review-love/
   Keep in mind that the text in the github pull request description is only
   visible on github, not in the git log which can be considered permanent
-  information storage.
+  information storage.  
+  Commits will be checked automatically by [this workflow defined in
+  `os-autoinst/os-autoinst-common`][4] to enforce the following rules:
+    * The commit subject **must not**:
+        * exceed 72 characters in length.
+        * end with a dot.
+    * The commit subject **must** start with a capital or tag. For example:
+        * `Fix deep issue in test module`
+        * `bugfix: Fix deep issue in a library`
+    * There must be an empty newline between the commit subject and the commit
+      body.
+
+    More rules could be added in the check and not necessarily be explicitly
+    described in this document. Keep an eye on the pull request check, it will
+    report any offending rule defined in the workflow.
+
 * Add comments to the source code if the code is not self-explanatory:
   Comments in the source code should describe the choices made, to answer the
   question "why is the code like this". The git commit message should describe
   "why did we change it".
 * Consider "multi-tag `assert_screen` with `match_has_tag`": Please use a
   multi-tag `assert_screen` with `match_has_tag` instead of `check_screen`
-  with non-zero timeout to prevent introducing any timing dependant behaviour,
+  with non-zero timeout to prevent introducing any timing dependent behaviour,
   to save test execution time as well as state more explicitly from the testers
   point of view what are the expected alternatives. For example:
 * Avoid use of egrep and fgrep. The two commands are deprecated, so please use 
@@ -135,26 +167,31 @@ if (match_has_tag('yast2_missing_package')) {
   jsc#SLE-19640 -> Jira ticket
   Maniphest#T5531
   fate.suse.com/123
-  $reference -> if you have to use a variable to define a reference ticket
+  $reference or $bsc (for convenience) -> if you have to use a variable to define a reference ticket
   If you don't have a reference ticket, and still want to mark a specific
   step as soft_fail, please use `record_info` with softfail tag:
   record_info($title [, $output] [, result => softfail] [, resultname => $resultname]);
 
 ### Preparing a new Pull Request
 * All code needs to be tidy, for this use `make prepare` the first time you
-  set up your local environment, use `make tidy` before commiting your changes,
+  set up your local environment, use `make tidy` before committing your changes,
   ensure your new code adheres to our coding style or use `make tidy-full` if
   you have already few commits.
 * Every pull request is tested by our CI system for different perl versions,
   if something fails, run `make test` (don't forget to `make prepare` if your setup is new)
   but the CI results are available too, in case they need to be investigated further
-* Whenever possible, [provide a verification run][1] of a job that runs the code [provided in the pull request][2]
+* Whenever possible, [provide a verification run][1] of a job that runs the code.
+  This can also be done by mentioning the job to be cloned via
+  `openqa: Clone https://openqa.opensuse.org/tests/<JOB_ID>` in the PR description.
+  This only works for jobs on https://openqa.opensuse.org. For other jobs you can
+  use the [openqa-clone-custom-git-refspec][2] script.
 
 Also see the [DoD/DoR][3] as a helpful (but not mandatory) guideline for new contributions.
 
 [1]: https://open.qa/docs/#_cloning_existing_jobs_openqa_clone_job
 [2]: https://open.qa/docs/#_triggering_tests_based_on_an_any_remote_git_refspec_or_open_github_pull_request
 [3]: https://progress.opensuse.org/projects/openqatests/wiki/Wiki#Definition-of-DONEREADY
+[4]: https://github.com/os-autoinst/os-autoinst-common/blob/master/.github/workflows/base-commit-message-checker.yml
 
 
 ### Handling separate product codebases or versions

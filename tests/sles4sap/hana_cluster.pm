@@ -53,7 +53,7 @@ sub run {
             add_to_known_hosts($_);
         }
         assert_script_run "scp -qr /usr/sap/$sid/SYS/global/security/rsecssfs/* root\@$node2:/usr/sap/$sid/SYS/global/security/rsecssfs/";
-        assert_script_run qq(su - $sapadm -c "hdbsql -u system -p $sles4sap::instance_password -i $instance_id -d SYSTEMDB \\"BACKUP DATA FOR FULL SYSTEM USING FILE ('backup')\\""), 300;
+        assert_script_run qq(su - $sapadm -c "hdbsql -u system -p $sles4sap::instance_password -i $instance_id -d SYSTEMDB \\"BACKUP DATA FOR FULL SYSTEM USING FILE ('backup')\\""), 900;
         assert_script_run "su - $sapadm -c 'hdbnsutil -sr_enable --name=$node1'";
 
         # Synchronize the nodes
@@ -61,9 +61,13 @@ sub run {
         barrier_wait "HANA_CREATED_CONF_$cluster_name";
 
         # Upload the configuration into the cluster
-        assert_script_run 'crm configure property maintenance-mode=true';
-        assert_script_run "crm configure load update $cluster_conf";
-        assert_script_run 'crm configure property maintenance-mode=false';
+        my @crm_cmds = ("crm configure load update $cluster_conf",
+            "crm resource refresh msl_SAPHana_${sid}_HDB${instance_id}",
+            "crm resource maintenance msl_SAPHana_${sid}_HDB${instance_id} off");
+        foreach my $cmd (@crm_cmds) {
+            wait_for_idle_cluster;
+            assert_script_run $cmd;
+        }
     }
     else {
         # Synchronize the nodes
@@ -71,6 +75,7 @@ sub run {
 
         assert_script_run "su - $sapadm -c 'sapcontrol -nr $instance_id -function StopSystem HDB'";
         assert_script_run "until su - $sapadm -c 'hdbnsutil -sr_state' | grep -q 'online: false' ; do sleep 1 ; done", 120;
+        sleep bmwqemu::scale_timeout(30);
         $self->do_hana_sr_register(node => $node1);
         sleep bmwqemu::scale_timeout(10);
         my $start_cmd = "su - $sapadm -c 'sapcontrol -nr $instance_id -function StartSystem HDB'";
@@ -94,12 +99,17 @@ sub run {
 
     # Synchronize the nodes
     barrier_wait "HANA_LOADED_CONF_$cluster_name";
+    save_state;
 
     # Wait for resources to be started
     wait_until_resources_started(timeout => 300);
 
     # And check for the state of the whole cluster
     check_cluster_state;
+    $self->check_replication_state;
+    $self->check_hanasr_attr;
+    $self->check_landscape;
+    assert_script_run 'cs_clusterstate';
 }
 
 1;

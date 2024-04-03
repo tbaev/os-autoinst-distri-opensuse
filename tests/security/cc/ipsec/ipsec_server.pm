@@ -17,6 +17,7 @@ use atsec_test;
 use Utils::Architectures;
 use lockapi;
 use mmapi 'get_children';
+use network_utils 'iface';
 
 sub run {
     my ($self) = @_;
@@ -24,7 +25,7 @@ sub run {
 
     # We don't run setup_multimachine in s390x, but we need to know the server and client's
     # ip address, so we add a known ip to NETDEV.
-    my $netdev = get_var('NETDEV', 'eth0');
+    my $netdev = iface;
     assert_script_run("ip addr add $atsec_test::server_ip/24 dev $netdev") if (is_s390x);
 
     assert_script_run("cd $audit_test::test_dir/ipsec_configuration/server");
@@ -54,7 +55,7 @@ sub run {
     # Restart the strongswan service
     assert_script_run('systemctl restart strongswan');
 
-    mutex_wait('IPSEC_CLEINT_DONE', (keys %$children)[0]);
+    mutex_wait('IPSEC_CLIENT_DONE', (keys %$children)[0]);
 
     # Stop StrongSWAN
     assert_script_run('systemctl stop strongswan');

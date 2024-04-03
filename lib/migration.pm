@@ -23,20 +23,21 @@ our @EXPORT = qw(
   register_system_in_textmode
   deregister_dropped_modules
   disable_installation_repos
-  disable_kernel_multiversion
+  modify_kernel_multiversion
   record_disk_info
   check_rollback_system
   reset_consoles_tty
   set_scc_proxy_url
   set_zypp_single_rpmtrans
   remove_dropped_modules_packages
+  workaround_bsc_1220091
 );
 
 sub setup_sle {
     select_console 'root-console';
 
-    if (is_ppc64le && is_sle('<=12-sp5')) {
-        record_soft_failure('bsc#1195046 - ncurses display a wrong checker board character');
+    # https://bugzilla.suse.com/show_bug.cgi?id=1205290#c3
+    if (is_sle('<=12-SP5')) {
         systemctl('restart systemd-vconsole-setup.service');
     }
 
@@ -93,7 +94,7 @@ sub register_system_in_textmode {
         register_addons_cmd();
     }
     else {
-        yast_scc_registration();
+        yast_scc_registration(yast2_opts => '--ncurses');
     }
     # Once SCC registration is done, disable IN_PATCH_SLE so it does not interfere
     # with further calls to accept_addons_license (in upgrade for example)
@@ -114,7 +115,7 @@ sub deregister_dropped_modules {
     for my $name (grep($_, split(/,/, $droplist))) {
         record_info "deregister $name", "deregister $name module and remove it from SCC_ADDONS";
         if ($name eq 'ltss') {
-            if (check_var('SLE_PRODUCT', 'hpc')) {
+            if ((check_var('CROSS_PRODUCT_MIGRATION', 'from_hpc')) || (check_var('SLE_PRODUCT', 'hpc'))) {
                 remove_suseconnect_product('SLE_HPC-LTSS');
             } elsif ((is_sle('12+') && check_var('SLE_PRODUCT', 'sles')) || (check_var('SLE_PRODUCT', 'sles4sap'))) {
                 remove_suseconnect_product('SLES-LTSS');    # sles4sap also uses SLES-LTSS as its ltss
@@ -149,7 +150,7 @@ sub remove_dropped_modules_packages {
 # https://documentation.suse.com/sles/15-SP2/html/SLES-all/cha-upgrade-online.html#sec-upgrade-online-zypper
 sub disable_installation_repos {
     if (is_s390x) {
-        zypper_call "mr -d `zypper lr -u | awk '/ftp:.*?openqa.suse.de|10.160.0.207|10.160.0.100/ {print \$1}'`";
+        zypper_call "mr -d `zypper lr -u | awk '/ftp:.*?openqa.suse.de|10.145.10.207|10.160.0.100/ {print \$1}'`";
     }
     else {
         zypper_call "mr -d -l";
@@ -158,9 +159,13 @@ sub disable_installation_repos {
 
 # Based on bsc#1097111, need to disable kernel multiversion before migration, and enable it after migration
 # https://documentation.suse.com/sles/15-SP3/html/SLES-all/cha-update-preparation.html#sec-update-preparation-multiversion
-sub disable_kernel_multiversion {
-    my $sed_para = check_var('VERSION', get_var('ORIGIN_SYSTEM_VERSION')) ? 's/^multiversion/#multiversion/g' : 's/^#multiversion/multiversion/g';
+# Acceplable arguements "disable" e.g. modify_kernel_multiversion("disable");
+# Any other arguement will enable multiversion kernel.
+sub modify_kernel_multiversion {
+    my ($modification) = @_;
+    my $sed_para = ($modification eq 'disable') ? 's/^multiversion/#multiversion/g' : 's/^#multiversion/multiversion/g';
     script_run("sed -i $sed_para /etc/zypp/zypp.conf");
+    record_info("Modification", "multiversion kernel " . $modification . "d");
 }
 
 # Record disk info to help debug diskspace exhausted
@@ -245,6 +250,19 @@ sub set_zypp_single_rpmtrans {
 
     assert_script_run 'export ZYPP_SINGLE_RPMTRANS=1 ' if get_var('ZYPP_SINGLE_RPMTRANS');
 
+}
+
+=head2 workaround_bsc_1220091
+    workaround_bsc_1220091()
+
+This function is used for removing libopenssl-1_1-devel for bsc#1220091
+We need to remove package libopenssl-1_1-devel before migration.
+
+=cut
+
+sub workaround_bsc_1220091 {
+    my $pkg = 'libopenssl-1_1-devel';
+    zypper_call("rm $pkg") unless script_run("rpm -q $pkg");
 }
 
 1;

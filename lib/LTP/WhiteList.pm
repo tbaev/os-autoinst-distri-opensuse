@@ -18,13 +18,18 @@ use Mojo::UserAgent;
 use Mojo::File 'path';
 use YAML::PP;
 
-sub new {
-    my $class = shift;
-    my $self = bless({}, $class);
-    my $path = get_var('LTP_KNOWN_ISSUES_LOCAL');
+my %file_cache;
 
-    if (!defined($path) && get_var('LTP_KNOWN_ISSUES')) {
-        $path = _download_whitelist();
+sub new {
+    my ($class, $url) = @_;
+    my $self = bless({}, $class);
+    my $path;
+
+    $path = get_var('LTP_KNOWN_ISSUES_LOCAL') unless defined($url);
+    $url //= get_var('LTP_KNOWN_ISSUES');
+
+    if (!defined($path) && defined($url)) {
+        $path = _download_whitelist($url);
     }
 
     $self->{whitelist} = _load_whitelist_file($path) if $path;
@@ -33,13 +38,15 @@ sub new {
 }
 
 sub _download_whitelist {
-    my $path = get_var('LTP_KNOWN_ISSUES');
+    my $path = shift;
     return undef unless defined($path);
+
+    return $file_cache{$path} if exists($file_cache{$path});
 
     my $res = Mojo::UserAgent->new(max_redirects => 5)->get($path)->result;
     unless ($res->is_success) {
         record_info("$path not downloaded!", $res->message, result => 'softfail');
-        set_var('LTP_KNOWN_ISSUES_LOCAL', '');
+        $file_cache{$path} = '';
         return;
     }
 
@@ -50,7 +57,7 @@ sub _download_whitelist {
     save_tmp_file($basename, $res->body);
     copy($lfile, "ulogs/$basename");
 
-    set_var('LTP_KNOWN_ISSUES_LOCAL', $lfile);
+    $file_cache{$path} = $lfile;
     return $lfile;
 }
 
@@ -65,7 +72,7 @@ sub find_whitelist_entry {
         @issues = @{$suite};
     }
     else {
-        $test =~ s/_postun$//g if check_var('KGRAFT', 1) && check_var('UNINSTALL_INCIDENT', 1);
+        $test =~ s/_postun$//g if check_var('KGRAFT', 1) && (check_var('UNINSTALL_INCIDENT', 1) || check_var('KGRAFT_DOWNGRADE', 1));
         return undef unless exists $suite->{$test};
         @issues = @{$suite->{$test}};
     }
@@ -119,10 +126,16 @@ sub override_known_failures {
         }
     }
 
-    my $msg = "Failure in LTP:$suite:$testname is known, overriding to softfail";
-    bmwqemu::diag($msg);
-    $testmod->{result} = 'softfail';
-    $testmod->record_soft_failure_result(join("\n", $msg, ($entry->{message} // ())));
+    if ($entry->{keep_fail}) {
+        $testmod->record_resultfile('Known', $entry->{message}, result => 'fail');
+    }
+    else {
+        my $msg = "Failure in LTP:$suite:$testname is known, overriding to softfail";
+        bmwqemu::diag($msg);
+        $testmod->{result} = 'softfail';
+        $testmod->record_soft_failure_result(join("\n", $msg, ($entry->{message} // ())));
+    }
+
     return 1;
 }
 

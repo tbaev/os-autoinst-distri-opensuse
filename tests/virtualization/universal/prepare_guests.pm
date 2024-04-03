@@ -10,7 +10,7 @@
 # PATCH_WITH_ZYPPER and UPDATE_PACKAGE are not defined in settings. They
 # should be specified on command line when scheduling tests.
 #
-# Maintainer: Pavel Dostál <pdostal@suse.cz>, Felix Niederwanger <felix.niederwanger@suse.de>
+# Maintainer: QE-Virtualization <qe-virt@suse.de>
 
 use base 'consoletest';
 use virt_autotest::common;
@@ -81,7 +81,8 @@ sub run {
     # Use serial terminal, unless defined otherwise. The unless will go away once we are certain this is stable
     #    select_serial_terminal unless get_var('_VIRT_SERIAL_TERMINAL', 1) == 0;
     select_console('root-console');
-    systemctl("restart libvirtd");
+    # Note: TBD for modular libvirt. See poo#129086 for detail.
+    restart_libvirtd;
     assert_script_run('for i in $(virsh list --name|grep -v Domain-0);do virsh destroy $i;done');
     assert_script_run('for i in $(virsh list --name --inactive); do if [[ $i == win* ]]; then virsh undefine $i; else virsh undefine $i --remove-all-storage; fi; done');
     script_run 'virt-manager';

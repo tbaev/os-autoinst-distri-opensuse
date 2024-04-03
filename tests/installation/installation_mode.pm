@@ -5,7 +5,7 @@
 # SPDX-License-Identifier: FSFAP
 
 # Summary: Installation/upgrade mode selection during installation
-# Maintainer: QA SLE YaST team <qa-sle-yast@suse.de>
+# Maintainer: QE YaST and Migration (QE Yam) <qe-yam at suse de>
 
 use strict;
 use warnings;
@@ -15,7 +15,7 @@ use testapi;
 sub run {
     # autoconf phase
     # includes downloads
-    assert_screen [qw(partitioning-edit-proposal-button before-role-selection inst-instmode online-repos)], 120;
+    assert_screen [qw(partitioning-edit-proposal-button before-role-selection inst-instmode online-repos)], 700;
     if (match_has_tag("partitioning-edit-proposal-button") || match_has_tag("before-role-selection") || match_has_tag("online-repos")) {
         # new desktop selection workflow
         set_var('NEW_DESKTOP_SELECTION', 1);

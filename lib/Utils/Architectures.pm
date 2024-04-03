@@ -27,8 +27,11 @@ use constant {
           is_arm
           is_ppc64le
           is_ppc64
+          is_riscv
           is_orthos_machine
           is_supported_suse_domain
+          is_zvm
+          is_32bit
         )
     ]
 };
@@ -154,6 +157,18 @@ sub is_ppc64 {
     return check_var('ARCH', 'ppc64');
 }
 
+=head2 is_riscv
+
+ is_riscv();
+
+ Returns whether ARCH is a riscv (currently only riscv64).
+
+=cut
+
+sub is_riscv {
+    return check_var('ARCH', 'riscv64');
+}
+
 =head2 is_orthos_machine
 
  is_orthos_machine();
@@ -180,6 +195,30 @@ sub is_supported_suse_domain {
     my $sut_fqdn = get_var('SUT_IP', 'nosutip');
     return 1 if $sut_fqdn =~ /(arch\.suse\.de|qa2\.suse\.asia|qa\.suse\.de)/im;
     return 0;
+}
+
+=head2 is_zvm
+
+ is_zvm();
+
+Returns C<true if machine is s390x zVM>.
+
+=cut
+
+sub is_zvm {
+    return (get_var('MACHINE') =~ /zvm/i);
+}
+
+=head2 is_32bit
+
+ is_32bit();
+
+Returns C<true if machine is 32 bit architecture>.
+
+=cut
+
+sub is_32bit {
+    return is_i586 || is_i686 || is_arm;
 }
 
 1;

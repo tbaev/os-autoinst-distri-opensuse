@@ -12,13 +12,16 @@ use testapi qw(is_serial_terminal :DEFAULT);
 use Mojo::Base -base;
 use publiccloud::instance;
 use publiccloud::instances;
-use publiccloud::utils qw(is_azure is_ec2);
+use publiccloud::ssh_interactive 'select_host_console';
+use publiccloud::utils qw(is_azure is_gce is_ec2 is_hardened get_ssh_private_key_path);
 use Carp;
 use List::Util qw(max);
 use Data::Dumper;
 use Mojo::JSON qw(decode_json encode_json);
 use utils qw(file_content_replace script_retry);
 use mmapi;
+use db_utils qw(is_ok_url);
+use version_utils qw(is_openstack);
 
 use constant TERRAFORM_DIR => get_var('PUBLIC_CLOUD_TERRAFORM_DIR', '/root/terraform');
 use constant TERRAFORM_TIMEOUT => 30 * 60;
@@ -28,6 +31,8 @@ has terraform_env_prepared => 0;
 has terraform_applied => 0;
 has resource_name => sub { get_var('PUBLIC_CLOUD_RESOURCE_NAME', 'openqa-vm') };
 has provider_client => undef;
+
+has ssh_key => get_ssh_private_key_path();
 
 =head1 METHODS
 
@@ -62,7 +67,7 @@ sub find_img {
     die('find_image() isn\'t implemented');
 }
 
-=head2 upload_image
+=head2 upload_img
 
 Upload a image to the CSP. Required parameter is the
 location of the C<image> file.
@@ -74,8 +79,8 @@ Retrieves the image-id after upload or die.
 
 =cut
 
-sub upload_image {
-    die('find_image() isn\'t implemented');
+sub upload_img {
+    die('upload_img() isn\'t implemented');
 }
 
 
@@ -151,11 +156,13 @@ Creates an ssh keypair in a given file path by $args{ssh_private_key_file}
 =cut
 
 sub create_ssh_key {
-    my ($self, %args) = @_;
-    $args{ssh_private_key_file} //= '/root/.ssh/id_rsa';
-    if (script_run('test -f ' . $args{ssh_private_key_file}) != 0) {
-        assert_script_run('SSH_DIR=`dirname ' . $args{ssh_private_key_file} . '`; mkdir -p $SSH_DIR');
-        assert_script_run('ssh-keygen -b 2048 -t rsa -q -N "" -C "" -m pem -f ' . $args{ssh_private_key_file});
+    my ($self) = @_;
+    my $alg = $self->ssh_key;
+    $alg =~ s@[a-z0-9/-_~.]*id_@@;
+    record_info($alg, "The $alg key will be generated.");
+    if (script_run('test -f ' . $self->ssh_key) != 0) {
+        assert_script_run('SSH_DIR=`dirname ' . $self->ssh_key . '`; mkdir -p $SSH_DIR');
+        assert_script_run('ssh-keygen -t ' . $alg . ' -q -N "" -C "" -m pem -f ' . $self->ssh_key);
     }
 }
 
@@ -191,11 +198,11 @@ sub run_img_proof {
     $cmd .= '--service-account-file "' . $args{credentials_file} . '" ' if ($args{credentials_file});
     #TODO: this if is just dirty hack which needs to be replaced with something more sane ASAP.
     $cmd .= '--access-key-id $AWS_ACCESS_KEY_ID --secret-access-key $AWS_SECRET_ACCESS_KEY ' if (is_ec2());
-    $cmd .= "--ssh-key-name '" . $args{key_name} . "' " if ($args{key_name});
+    $cmd .= '--ssh-key-name $(realpath ' . $args{key_name} . ') ' if ($args{key_name});
     $cmd .= '-u ' . $args{user} . ' ' if ($args{user});
-    $cmd .= '--ssh-private-key-file "' . $args{instance}->ssh_key . '" ';
+    $cmd .= '--ssh-private-key-file $(realpath ' . $self->ssh_key . ') ';
     $cmd .= '--running-instance-id "' . ($args{running_instance_id} // $args{instance}->instance_id) . '" ';
-    $cmd .= "--beta $beta " if ($beta);
+    $cmd .= "--beta " if ($beta);
     if ($exclude) {
         # Split exclusion tests by command and add them individually
         for my $excl (split ',', $exclude) {
@@ -203,6 +210,9 @@ sub run_img_proof {
             $cmd .= "--exclude $excl ";
         }
     }
+
+    # Tell img-proof to generate SCAP report on hardened images
+    $cmd = "SCAP_REPORT=/var/tmp/report.html " . $cmd if is_hardened;
 
     $cmd .= $args{tests};
     record_info("img-proof cmd", $cmd);
@@ -232,16 +242,50 @@ If PUBLIC_CLOUD_IMAGE_ID is set, then this value will be used
 
 sub get_image_id {
     my ($self, $img_url) = @_;
+
     my $predefined_id = get_var('PUBLIC_CLOUD_IMAGE_ID');
     return $predefined_id if ($predefined_id);
+
+    # If a URI is given, then no image ID should be determined
+    return '' if (get_var('PUBLIC_CLOUD_IMAGE_URI'));
+
+    # Determine image ID from image filename
     $img_url //= get_required_var('PUBLIC_CLOUD_IMAGE_LOCATION');
     my ($img_name) = $img_url =~ /([^\/]+)$/;
     $self->{image_cache} //= {};
     return $self->{image_cache}->{$img_name} if ($self->{image_cache}->{$img_name});
+
     my $image_id = $self->find_img($img_name);
     die("Image $img_name is not available in the cloud provider") unless ($image_id);
     $self->{image_cache}->{$img_name} = $image_id;
     return $image_id;
+}
+
+=head2 get_image_uri
+
+Retrieves the CSP image uri if exists, otherwise exception is thrown.
+This is currently used specifically in Azure so the subroutine will die afterwards.
+=cut
+
+sub get_image_uri {
+    my ($self) = @_;
+    my $image_uri = get_var("PUBLIC_CLOUD_IMAGE_URI");
+    die 'The PUBLIC_CLOUD_IMAGE_URI variable makes sense only for Azure' if ($image_uri && !is_azure);
+    if (!!$image_uri && $image_uri =~ /^auto$/mi) {
+        my $definition = $self->generate_azure_image_definition();
+        my $version = $self->generate_img_version();    # PUBLIC_CLOUD_BUILD PUBLIC_CLOUD_BUILD_KIWI
+        my $subscriptions = $self->provider_client->subscription;
+        my $resource_group = $self->resource_group;
+        my $image_gallery = $self->image_gallery;
+        $image_uri = "/subscriptions/$subscriptions/resourceGroups/$resource_group/providers/";
+        $image_uri .= "Microsoft.Compute/galleries/$image_gallery/images/$definition/versions/$version";
+        record_info 'IMAGE_URI', "Calculated IMAGE_URI=$image_uri";
+    } elsif (!!$image_uri) {
+        record_info 'IMAGE_URI', "Provided IMAGE_URI=$image_uri";
+    } else {
+        record_info 'IMAGE_URI', 'IMAGE_URI not found!';
+    }
+    return $image_uri;
 }
 
 =head2 create_instance
@@ -267,20 +311,38 @@ publiccloud::instance objects.
 C<image>         defines the image_id to create the instance.
 C<instance_type> defines the flavor of the instance. If not specified, it will load it
                      from PUBLIC_CLOUD_INSTANCE_TYPE.
+C<timeout>             Parameter to pass to instance::wait_for_ssh.
+C<proceed_on_failure>  Same as timeout.
 
 =cut
 
 sub create_instances {
     my ($self, %args) = @_;
     $args{check_connectivity} //= 1;
-
+    $args{check_guestregister} //= 1;
     my @vms = $self->terraform_apply(%args);
+    my $url = get_var('PUBLIC_CLOUD_PERF_DB_URI', 'http://publiccloud-ng.qa.suse.de:8086');
+
     foreach my $instance (@vms) {
         record_info("INSTANCE", $instance->{instance_id});
         if ($args{check_connectivity}) {
-            $instance->wait_for_ssh();
+            $instance->wait_for_ssh(timeout => $args{timeout},
+                proceed_on_failure => $args{proceed_on_failure});
             # Install server's ssh publicckeys to prevent authenticity interactions
             assert_script_run(sprintf('ssh-keyscan %s >> ~/.ssh/known_hosts', $instance->public_ip));
+        }
+        # check guestregister conditional, default yes:
+        $instance->wait_for_guestregister() if ($args{check_guestregister});
+        # Performance data: boottime
+        if (!is_openstack && is_ok_url($url)) {
+            local $@;
+            eval {
+                my $btime = $instance->measure_boottime($instance, 'first');
+                $instance->store_boottime_db($btime, $url);
+            };
+            record_info("WARN", "Boottime measures cannot be provided", result => 'fail') if ($@);
+        } else {
+            record_info("WARN", "Cannot connect url:" . $url, result => 'fail');
         }
     }
     return @vms;
@@ -354,40 +416,41 @@ Calls terraform tool and applies the corresponding configuration .tf file
 
 sub terraform_apply {
     my ($self, %args) = @_;
-    my @instances;
-    my $create_extra_disk = 'false';
-    my $extra_disk_size = 0;
     my $terraform_timeout = get_var('TERRAFORM_TIMEOUT', TERRAFORM_TIMEOUT);
+    my $terraform_vm_create_timeout = get_var('TERRAFORM_VM_CREATE_TIMEOUT');
+
+    my $image_uri = $self->get_image_uri();
+    my $image_id = $self->get_image_id();
 
     $args{count} //= '1';
     my $instance_type = get_var('PUBLIC_CLOUD_INSTANCE_TYPE');
-    my $image = $self->get_image_id();
-    my $ssh_private_key_file = '/root/.ssh/id_rsa';
     my $cloud_name = $self->conv_openqa_tf_name;
 
     record_info('WARNING', 'Terraform apply has been run previously.') if ($self->terraform_applied);
 
     $self->terraform_prepare_env();
 
-    record_info('INFO', "Creating instance $instance_type from $image ...");
+    # 1) Terraform init
+
     if (get_var('PUBLIC_CLOUD_SLES4SAP')) {
+        record_info('INFO', "Creating instance $instance_type from $image_id ...");
         assert_script_run('cd ' . TERRAFORM_DIR . "/$cloud_name");
         my $sap_media = get_required_var('HANA');
         my $sap_regcode = get_required_var('SCC_REGCODE_SLES4SAP');
         my $storage_account_name = get_var('STORAGE_ACCOUNT_NAME');
         my $storage_account_key = get_var('STORAGE_ACCOUNT_KEY');
         # Enable specifying resource group name to allow running multiple tests simultaneously
-        my $resource_group = get_var('PUBLIC_CLOUD_RESOURCE_GROUP', 'qashapopenqa');
+        my $resource_group = get_var('PUBLIC_CLOUD_RESOURCE_GROUP', 'qesaposd');
         my $sle_version = get_var('FORCED_DEPLOY_REPO_VERSION') ? get_var('FORCED_DEPLOY_REPO_VERSION') : get_var('VERSION');
         $sle_version =~ s/-/_/g;
         my $ha_sap_repo = get_var('HA_SAP_REPO') ? get_var('HA_SAP_REPO') . '/SLE_' . $sle_version : '';
-        my $suffix = sprintf("%04x", rand(0xffff));
+        my $suffix = get_current_job_id();
         my $fencing_mechanism = get_var('FENCING_MECHANISM', 'sbd');
         file_content_replace('terraform.tfvars',
             q(%MACHINE_TYPE%) => $instance_type,
             q(%REGION%) => $self->provider_client->region,
             q(%HANA_BUCKET%) => $sap_media,
-            q(%SLE_IMAGE%) => $image,
+            q(%SLE_IMAGE%) => $image_id,
             q(%SCC_REGCODE_SLES4SAP%) => $sap_regcode,
             q(%STORAGE_ACCOUNT_NAME%) => $storage_account_name,
             q(%STORAGE_ACCOUNT_KEY%) => $storage_account_key,
@@ -398,11 +461,12 @@ sub terraform_apply {
         upload_logs(TERRAFORM_DIR . "/$cloud_name/terraform.tfvars", failok => 1);
         script_retry('terraform init -no-color', timeout => $terraform_timeout, delay => 3, retry => 6);
         assert_script_run("terraform workspace new ${resource_group}${suffix} -no-color", $terraform_timeout);
-    }
-    else {
+    } else {
         assert_script_run('cd ' . TERRAFORM_DIR);
         script_retry('terraform init -no-color', timeout => $terraform_timeout, delay => 3, retry => 6);
     }
+
+    # 2) Terraform plan
 
     my $cmd = 'terraform plan -no-color ';
     if (!get_var('PUBLIC_CLOUD_SLES4SAP')) {
@@ -411,8 +475,29 @@ sub terraform_apply {
             my $value = $args{vars}->{$key};
             $cmd .= sprintf(q(-var '%s=%s' ), $key, escape_single_quote($value));
         }
-        $cmd .= "-var 'image_id=" . $image . "' " if ($image);
-        if (is_azure) {
+
+        # image_uri and image_id are mutally exclusive
+        if ($image_uri && $image_id) {
+            die "PUBLIC_CLOUD_IMAGE_URI and PUBLIC_CLOUD_IMAGE_ID are mutually exclusive";
+        } elsif ($image_uri) {
+            $cmd .= "-var 'image_uri=" . $image_uri . "' ";
+            record_info('INFO', "Creating instance $instance_type from $image_uri ...");
+        } elsif ($image_id) {
+            $cmd .= "-var 'image_id=" . $image_id . "' ";
+            record_info('INFO', "Creating instance $instance_type from $image_id ...");
+        }
+        if (is_ec2) {
+            my $vpc_security_group_ids = script_output("aws ec2 describe-security-groups --region '" . $self->provider_client->region . "' --filters 'Name=group-name,Values=tf-sg' --query 'SecurityGroups[0].GroupId' --output text");
+            my $availability_zone = script_output("aws ec2 describe-instance-type-offerings --location-type availability-zone  --filters Name=instance-type,Values=" . $instance_type . "  --region '" . $self->provider_client->region . "' --query 'InstanceTypeOfferings[0].Location' --output 'text'");
+            my $subnet_id = script_output("aws ec2 describe-subnets --region '" . $self->provider_client->region . "' --filters 'Name=tag:Name,Values=tf-subnet' 'Name=availabilityZone,Values=" . $availability_zone . "' --query 'Subnets[0].SubnetId' --output text");
+            my $ipv6_address_count = get_var('PUBLIC_CLOUD_EC2_IPV6_ADDRESS_COUNT', 1);
+            $cmd .= "-var 'vpc_security_group_ids=$vpc_security_group_ids' ";
+            $cmd .= "-var 'availability_zone=$availability_zone' ";
+            $cmd .= "-var 'subnet_id=$subnet_id' ";
+            $cmd .= "-var 'ipv6_address_count=$ipv6_address_count' " if ($ipv6_address_count);
+        } elsif (is_azure) {
+            my $subnet_id = script_output("az network vnet subnet list -g 'tf-" . $self->provider_client->region . "-rg' --vnet-name 'tf-network' --query '[0].id' --output 'tsv'");
+            $cmd .= "-var 'subnet_id=$subnet_id' " if ($subnet_id);
             # Note: Only the default Azure terraform profiles contains the 'storage-account' variable
             my $storage_account = get_var('PUBLIC_CLOUD_STORAGE_ACCOUNT');
             $cmd .= "-var 'storage-account=$storage_account' " if ($storage_account);
@@ -422,7 +507,9 @@ sub terraform_apply {
         $cmd .= "-var 'region=" . $self->provider_client->region . "' ";
         $cmd .= "-var 'name=" . $self->resource_name . "' ";
         $cmd .= "-var 'project=" . $args{project} . "' " if $args{project};
-        $cmd .= "-var 'enable_confidential_vm=true' " if $args{confidential_compute};
+        $cmd .= "-var 'enable_confidential_vm=true' " if ($args{confidential_compute} && is_gce());
+        $cmd .= "-var 'enable_confidential_vm=enabled' " if ($args{confidential_compute} && is_ec2());
+        $cmd .= "-var 'vm_create_timeout=" . $terraform_vm_create_timeout . "' " if $terraform_vm_create_timeout;
         $cmd .= sprintf(q(-var 'tags=%s' ), escape_single_quote($self->terraform_param_tags));
         if ($args{use_extra_disk}) {
             $cmd .= "-var 'create-extra-disk=true' ";
@@ -433,12 +520,25 @@ sub terraform_apply {
     if (get_var('FLAVOR') =~ 'UEFI') {
         $cmd .= "-var 'uefi=true' ";
     }
-
+    if (get_var('PUBLIC_CLOUD_NVIDIA')) {
+        $cmd .= "-var gpu=true ";
+    }
+    unless (is_openstack) {
+        $cmd .= "-var 'ssh_public_key=" . $self->ssh_key . ".pub' ";
+    }
     $cmd .= "-out myplan";
     record_info('TFM cmd', $cmd);
 
     script_retry($cmd, timeout => $terraform_timeout, delay => 3, retry => 6);
-    my $ret = script_run('terraform apply -no-color -input=false myplan', $terraform_timeout);
+
+    # 3) Terraform apply
+
+    # Valid values according to documentation: TRACE, DEBUG, INFO, WARN, ERROR & OFF
+    # https://developer.hashicorp.com/terraform/internals/debugging
+    my $tf_log = get_var("TERRAFORM_LOG", "");
+
+    # The $terraform_timeout must higher than $terraform_vm_create_timeout (See also var.vm_create_timeout in *.tf file)
+    my $ret = script_run("TF_LOG=$tf_log terraform apply -no-color -input=false myplan", $terraform_timeout);
     $self->terraform_applied(1);    # Must happen here to prevent resource leakage
     unless (defined $ret) {
         if (is_serial_terminal()) {
@@ -447,7 +547,8 @@ sub terraform_apply {
         else {
             send_key('ctrl-\\');    # Send QUIT signal
         }
-        assert_script_run('true');    # make sure we have a prompt
+        assert_script_run('true');    # Make sure we have a prompt
+        script_run("killall -KILL terraform");    # Send SIGKILL in case SIGQUIT doesn't work
         record_info('ERROR', 'Terraform apply failed with timeout', result => 'fail');
         assert_script_run('cd ' . TERRAFORM_DIR);
         $self->on_terraform_apply_timeout();
@@ -455,10 +556,10 @@ sub terraform_apply {
     }
     die('Terraform exit with ' . $ret) if ($ret != 0);
 
+    # 4) Terraform output
+
     my $output = decode_json(script_output("terraform output -json"));
-    my $vms;
-    my $ips;
-    my $resource_id;
+    my ($vms, $ips, $resource_id);
     if (get_var('PUBLIC_CLOUD_SLES4SAP')) {
         foreach my $vm_type ('hana', 'drbd', 'netweaver') {
             push @{$vms}, @{$output->{$vm_type . '_name'}->{value}};
@@ -471,14 +572,14 @@ sub terraform_apply {
         $resource_id = $output->{resource_id}->{value} if (get_var('PUBLIC_CLOUD_AZURE_NFS_TEST'));
     }
 
+    my @instances;
     foreach my $i (0 .. $#{$vms}) {
         my $instance = publiccloud::instance->new(
             public_ip => @{$ips}[$i],
             resource_id => $resource_id,
             instance_id => @{$vms}[$i],
             username => $self->provider_client->username,
-            ssh_key => $ssh_private_key_file,
-            image_id => $image,
+            image_id => $image_id,
             region => $self->provider_client->region,
             type => $instance_type,
             provider => $self
@@ -499,31 +600,38 @@ Destroys the current terraform deployment
 
 sub terraform_destroy {
     my ($self) = @_;
+    record_info('TFM DESTROY', 'Running terraform_destroy() now');
     # Do not destroy if terraform has not been applied or the environment doesn't exist
     return unless ($self->terraform_applied);
 
-    my $cmd;
+    select_host_console(force => 1);
+
+    my $cmd = 'terraform destroy -no-color -auto-approve ';
     record_info('INFO', 'Removing terraform plan...');
     if (get_var('PUBLIC_CLOUD_SLES4SAP')) {
         assert_script_run('cd ' . TERRAFORM_DIR . '/' . $self->conv_openqa_tf_name);
-        $cmd = 'terraform destroy -no-color -auto-approve';
     }
     else {
         assert_script_run('cd ' . TERRAFORM_DIR);
         # Add region variable also to `terraform destroy` (poo#63604) -- needed by AWS.
-        $cmd = sprintf(q(terraform destroy -no-color -auto-approve -var 'region=%s'), $self->provider_client->region);
+        $cmd .= "-var 'region=" . $self->provider_client->region . "' ";
+        $cmd .= "-var 'ssh_public_key=" . $self->ssh_key . ".pub' ";
         # Add image_id, offer and sku on Azure runs, if defined.
         if (is_azure) {
             my $image = $self->get_image_id();
+            my $image_uri = $self->get_image_uri();
             my $offer = get_var('PUBLIC_CLOUD_AZURE_OFFER');
             my $sku = get_var('PUBLIC_CLOUD_AZURE_SKU');
             my $storage_account = get_var('PUBLIC_CLOUD_STORAGE_ACCOUNT');
-            $cmd .= " -var 'image_id=$image'" if ($image);
-            $cmd .= " -var 'offer=$offer'" if ($offer);
-            $cmd .= " -var 'sku=$sku'" if ($sku);
-            $cmd .= " -var 'storage-account=$storage_account'" if ($storage_account);
+            $cmd .= "-var 'image_id=$image' " if ($image);
+            $cmd .= "-var 'image_uri=${image_uri}' " if ($image_uri);
+            $cmd .= "-var 'offer=$offer' " if ($offer);
+            $cmd .= "-var 'sku=$sku' " if ($sku);
+            $cmd .= "-var 'storage-account=$storage_account' " if ($storage_account);
         }
     }
+    # Ignore lock to avoid "Error acquiring the state lock"
+    $cmd .= "-lock=false ";
     # Retry 3 times with considerable delay. This has been introduced due to poo#95932 (RetryableError)
     # terraform keeps track of the allocated and destroyed resources, so its safe to run this multiple times.
     my $ret = script_retry($cmd, retry => 3, delay => 60, timeout => get_var('TERRAFORM_TIMEOUT', TERRAFORM_TIMEOUT), die => 0);
@@ -555,10 +663,14 @@ c<{"key": "value"}> where c<value> must be a string.
 sub terraform_param_tags
 {
     my ($self) = @_;
+    my $openqa_var_server = get_var('OPENQA_URL', get_var('OPENQA_HOSTNAME'));
+    # Remove the http:// https:// and/or the slash at the end
+    $openqa_var_server =~ s@^https?://|/$@@gm;
     my $tags = {
         openqa_ttl => get_var('MAX_JOB_TIME', 7200) + get_var('PUBLIC_CLOUD_TTL_OFFSET', 300),
-        openqa_var_JOB_ID => get_current_job_id(),
-        openqa_var_NAME => get_var(NAME => '')
+        openqa_var_job_id => get_current_job_id(),
+        openqa_var_name => get_var(NAME => ''),
+        openqa_var_server => $openqa_var_server
     };
 
     return encode_json($tags);

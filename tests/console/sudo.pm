@@ -20,6 +20,10 @@ use warnings;
 use testapi;
 use utils 'zypper_call';
 use version_utils qw(is_sle is_public_cloud);
+use publiccloud::utils qw(is_azure is_byos);
+
+my $test_password = 'Sud0_t3st';
+my $parm_user = '';
 
 sub sudo_with_pw {
     my ($command, %args) = @_;
@@ -29,11 +33,11 @@ sub sudo_with_pw {
     my $password = $args{password} //= $testapi::password;
     assert_script_run 'sudo -K';
     if ($command =~ /sudo -i|sudo -s|sudo su/) {
-        enter_cmd "expect -c 'spawn $command;expect \"password\";send \"$password\\r\";interact'";
+        enter_cmd "expect -c 'spawn $command;expect \"password\" {send \"$password\\r\";interact'} default {exit 1}";
         sleep 2;
     }
     else {
-        assert_script_run("expect -c '${env}spawn $command;expect \"password\";send \"$password\\r\";interact'$grep", timeout => $args{timeout});
+        assert_script_run("expect -c '${env}spawn $command;expect \"password\" {send \"$password\\r\";interact} default {exit 1}'$grep", timeout => $args{timeout});
     }
 }
 
@@ -43,21 +47,16 @@ sub test_sudoers {
     sudo_with_pw 'sudo zypper -n in -f yast2', password => $sudo_password, timeout => 300;
 }
 
-sub run {
-    my $test_password = 'Sud0_t3st';
-    select_console 'root-console';
-    zypper_call 'in sudo expect';
-    # Prepare a file with content '1' for later IO redirection test
-    assert_script_run 'echo 1 >/run/openqa_sudo_test';
-    # prepare sudoers and test user
-    assert_script_run 'echo "bernhard ALL = (root) NOPASSWD: /usr/bin/journalctl, /usr/bin/dd, /usr/bin/cat, PASSWD: /usr/bin/zypper, /usr/bin/su, /usr/bin/id, /bin/bash" >/etc/sudoers.d/test';
+sub prepare_sudoers {
+    my $root_no_pass = shift // 0;
+    $parm_user = ' (root)' if $root_no_pass;
+    assert_script_run "echo 'bernhard ALL =$parm_user NOPASSWD: /usr/bin/journalctl, /usr/bin/dd, /usr/bin/cat, PASSWD: /usr/bin/zypper, /usr/bin/su, /usr/bin/id, /bin/bash' >/etc/sudoers.d/test";
     # use script_run because yes is still writing to the pipe and then command is exiting with 141
     script_run "groupadd sudo_group && useradd -m -d /home/sudo_test -G sudo_group,\$(stat -c %G /dev/$serialdev) sudo_test && yes $test_password|passwd -q sudo_test";
-    assert_script_run 'echo "%sudo_group ALL = (root) NOPASSWD: /usr/bin/journalctl, PASSWD: /usr/bin/zypper" >/etc/sudoers.d/sudo_group';
-    # on publiccloud the root password is not yet set
-    # note: due to security reasons, the root password must be reset afterwards
-    my $password = $testapi::password;
-    assert_script_run("echo -e '$password\n$password' | passwd root") if is_public_cloud;
+    assert_script_run "echo '%sudo_group ALL =$parm_user NOPASSWD: /usr/bin/journalctl, PASSWD: /usr/bin/zypper' >/etc/sudoers.d/sudo_group";
+}
+
+sub full_test {
     select_console 'user-console';
     # check if password is required
     assert_script_run 'sudo -K && ! timeout 5 sudo id -un';
@@ -89,6 +88,9 @@ sub run {
     sudo_with_pw 'sudo env', grep => '-v ENVVAR=test132', env => 'ENVVAR test132';
     # sudoers configuration
     test_sudoers;
+    become_root;
+    assert_script_run 'test -f /etc/sudoers || (cp /usr/etc/sudoers /etc/sudoers && touch /tmp/sudoers.copied)';
+    enter_cmd 'exit';
     sudo_with_pw 'sudo sed -i "s/^Defaults\[\[\:space\:\]\]*targetpw/Defaults\ !targetpw/" /etc/sudoers';
     sudo_with_pw 'sudo sed -i "s/^ALL\[\[\:space\:\]\]*ALL/#ALL ALL/" /etc/sudoers';
     sudo_with_pw 'sudo su - sudo_test';
@@ -98,16 +100,39 @@ sub run {
     enter_cmd "exit", wait_still_screen => 3;
 }
 
+sub run {
+    select_console 'root-console';
+    zypper_call 'in sudo expect';
+    select_console 'user-console';
+    # Check if sudo asks for the root password.
+    # On Azure from SLE15 onwards, 'Defaults targetpw' is disabled. There sudo is expected to ask for the user password
+    my $exp_user = (is_azure && is_sle(">=15")) ? "$testapi::username" : "root";
+    validate_script_output("expect -c 'spawn sudo id -un;expect \"password for $exp_user\" {send \"$testapi::password\\r\";interact}'", sub { $_ =~ m/^root$/m });
+
+    foreach my $num (0, 1) {
+        record_info "iteration $num";
+        select_console 'root-console';
+        # Prepare a file with content '1' for later IO redirection test
+        assert_script_run 'echo 1 >/run/openqa_sudo_test';
+        prepare_sudoers("$num");
+        full_test;
+    }
+}
+
 sub post_run_hook {
     select_console 'root-console';
     # change sudoers back to default
     assert_script_run 'sed -i "s/^Defaults\[\[\:space\:\]\]*\!targetpw/Defaults\ targetpw/" /etc/sudoers';
     assert_script_run 'sed -i "s/^#ALL\[\[\:space\:\]\]*ALL/ALL ALL/" /etc/sudoers';
     assert_script_run 'rm -f /etc/sudoers.d/test /etc/sudoers.d/sudo_group';
+    script_run 'test -f /tmp/sudoers.copied && rm /etc/sudoers /tmp/sudoers.copied';
     # remove test user
     assert_script_run 'userdel -r sudo_test && groupdel sudo_group';
-    # remove root password on publiccloud again
-    assert_script_run("passwd root --lock") if is_public_cloud;
+}
+
+sub post_fail_hook {
+    script_run('tar -cf /var/tmp/sudoers.tmp /etc/sudoers');
+    upload_logs('/var/tmp/sudoers.tmp');
 }
 
 1;

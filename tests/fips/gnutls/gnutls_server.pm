@@ -12,10 +12,17 @@ use testapi;
 use strict;
 use warnings;
 use utils qw(zypper_call);
+use version_utils qw(is_transactional);
+use transactional qw(trup_call process_reboot);
 
 sub run {
     select_console "root-console";
-    zypper_call 'in gnutls';
+    if (is_transactional) {
+        trup_call('pkg install gnutls');
+        process_reboot(trigger => 1);
+    } else {
+        zypper_call('in gnutls');
+    }
 
     # Create test folder
     my $test_dir = "gnutls";
@@ -32,7 +39,8 @@ ca
 cert_signing_key
 EOF
     assert_script_run "certtool --generate-privkey > $pri_ca_key";
-    assert_script_run "echo '$ca_tmpl_cont' > $ca_tmpl";
+    $ca_tmpl_cont =~ s/\n/\\n/g;
+    assert_script_run "echo -e '$ca_tmpl_cont' > $ca_tmpl";
     assert_script_run "certtool --generate-self-signed --load-privkey $pri_ca_key --template $ca_tmpl --outfile $pri_ca_out";
 
     # Generate a server certificate
@@ -48,7 +56,8 @@ signing_key
 dns_name = test.gnutls.org
 EOF
     assert_script_run "certtool --generate-privkey > $ser_pri_key";
-    assert_script_run "echo '$ser_tmpl_cont' > $ser_tmpl";
+    $ser_tmpl_cont =~ s/\n/\\n/g;
+    assert_script_run "echo -e '$ser_tmpl_cont' > $ser_tmpl";
     assert_script_run
 "certtool --generate-certificate --load-privkey $ser_pri_key --load-ca-certificate $pri_ca_out --load-ca-privkey $pri_ca_key --template $ser_tmpl --outfile $ser_ca_out";
 
@@ -63,7 +72,8 @@ encryption_key
 signing_key
 EOF
     assert_script_run "certtool --generate-privkey > $cli_pri_key";
-    assert_script_run "echo '$cli_tmpl_cont' > $cli_tmpl";
+    $cli_tmpl_cont =~ s/\n/\\n/g;
+    assert_script_run "echo -e '$cli_tmpl_cont' > $cli_tmpl";
     assert_script_run
 "certtool --generate-certificate --load-privkey $cli_pri_key --load-ca-certificate $pri_ca_out --load-ca-privkey $pri_ca_key --template $cli_tmpl --outfile $cli_out";
 

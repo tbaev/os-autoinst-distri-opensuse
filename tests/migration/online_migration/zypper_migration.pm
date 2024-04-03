@@ -5,7 +5,7 @@
 
 # Package: zypper, transactional-update
 # Summary: SLE online migration using zypper migration or transactional update
-# Maintainer: yutao <yuwang@suse.com>, <qa-c@suse.de>
+# Maintainer: QE YaST and Migration (QE Yam) <qe-yam at suse de>, <qa-c@suse.de>
 
 use base "installbasetest";
 use strict;
@@ -16,6 +16,7 @@ use utils;
 use power_action_utils 'power_action';
 use version_utils qw(is_desktop_installed is_sles4sap is_leap_migration is_sle_micro);
 use Utils::Backends 'is_pvm';
+use Utils::Logging 'upload_solvertestcase_logs';
 use transactional;
 
 sub check_migrated_version {
@@ -42,7 +43,7 @@ sub run {
     my $zypper_migration_bsc1196114 = qr/scriptlet failed, exit status 127/m;
     my $zypper_migration_license = qr/Do you agree with the terms of the license\? \[y/m;
     my $zypper_migration_urlerror = qr/URI::InvalidURIError/m;
-    my $zypper_migration_reterror = qr/^No migration available|Can't get available migrations/m;
+    my $zypper_migration_reterror = qr/^No migration available|Can't get available migrations|Can't determine the list of installed products/m;
 
     my $zypper_migration_signing_key = qr/^Do you want to reject the key, trust temporarily, or trust always?[\s\S,]* \[r/m;
     # start migration
@@ -72,7 +73,7 @@ sub run {
         if ($out =~ $zypper_migration_target) {
             my $target_version = get_var("TARGET_VERSION", get_required_var("VERSION"));
             $target_version =~ s/-/ /;
-            if ($out =~ /(\d+)\s+\|\s?SUSE Linux Enterprise.*?$target_version/m) {
+            if ($out =~ /(\d+)\s+\|\s?SUSE Linux.*?$target_version/m) {
                 send_key "$1";
             }
             else {
@@ -179,7 +180,7 @@ sub post_fail_hook {
     select_serial_terminal;
     script_run("pkill zypper");
     upload_logs '/var/log/zypper.log';
-    $self->upload_solvertestcase_logs();
+    upload_solvertestcase_logs();
     $self->SUPER::post_fail_hook;
 }
 

@@ -4,8 +4,6 @@ description:    >
     Virtualization guest installation tests including extended feature tests schedule
 schedule:
     - '{{install_and_bootup}}'
-    - virt_autotest/switch_to_ssh_and_install_hypervisor
-    - '{{reboot}}'
     - '{{install_guest}}'
     - virt_autotest/set_config_as_glue
     - '{{virtual_network_test}}'
@@ -17,25 +15,8 @@ conditional_schedule:
         DO_NOT_INSTALL_HOST:
             0:
                 - installation/ipxe_install
-                - installation/welcome
-                - installation/online_repos
-                - installation/installation_mode
-                - installation/system_role
-                - installation/partitioning
-                - installation/partitioning_firstdisk
-                - installation/partitioning_finish
-                - installation/installer_timezone
-                - installation/user_settings
-                - installation/resolve_dependency_issues
-                - installation/installation_overview
-                - installation/disable_grub_graphics
-                - installation/start_install
-                - installation/await_install
-                - installation/reboot_after_installation
-    reboot:
-        DO_NOT_INSTALL_HOST:
-            0:
-                - virt_autotest/reboot_and_wait_up_normal
+                - autoyast/installation
+                - virt_autotest/login_console
     install_guest:
         SKIP_GUEST_INSTALL:
             0:

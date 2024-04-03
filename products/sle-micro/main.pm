@@ -3,15 +3,15 @@ use warnings;
 use needle;
 use File::Basename;
 use scheduler 'load_yaml_schedule';
+use Carp;
 BEGIN {
     unshift @INC, dirname(__FILE__) . '/../../lib';
 }
 use utils;
 use testapi;
-use main_common;
-use main_containers qw(load_container_tests is_container_test);
-use version_utils qw(is_released);
-use Utils::Architectures qw(is_s390x);
+use main_common qw(init_main is_updates_test_repo unregister_needle_tags join_incidents_to_repo);
+use main_micro_alp;
+use DistributionProvider;
 
 init_main();
 
@@ -39,22 +39,6 @@ $needle::cleanuphandler = sub {
     unregister_needle_tags("ENV-FLAVOR-Server-DVD");
 };
 
-sub load_boot_from_disk_tests {
-    if (is_s390x()) {
-        loadtest 'installation/bootloader_start';
-        loadtest 'boot/boot_to_desktop';
-    } else {
-        if (check_var('FIRST_BOOT_CONFIG', 'wizard')) {
-            loadtest 'jeos/firstrun';
-        } else {
-            loadtest 'microos/disk_boot';
-        }
-    }
-    loadtest 'transactional/host_config';
-    loadtest 'console/suseconnect_scc' if check_var('SCC_REGISTER', 'installation');
-    loadtest 'transactional/enable_selinux' if get_var('ENABLE_SELINUX');
-    loadtest 'transactional/install_updates' if is_released;
-}
 
 # Handle updates from repos defined in OS_TEST_TEMPLATE combined with the list
 # of issues defined in OS_TEST_ISSUES.
@@ -66,23 +50,30 @@ sub load_boot_from_disk_tests {
 if (is_updates_test_repo && !get_var('MAINT_TEST_REPO')) {
     my %incidents;
     my %u_url;
-    $incidents{OS} = get_var('OS_TEST_ISSUES', '');
-    $u_url{OS} = get_var('OS_TEST_TEMPLATE', '');
+    $incidents{OS} = get_var('OS_TEST_REPOS', get_var('INCIDENT_REPO'));
 
-    my $repos = map_incidents_to_repo(\%incidents, \%u_url);
-    set_var('MAINT_TEST_REPO', $repos);
+    if (exists $incidents{OS} && !$incidents{OS}) {
+        carp '"OS_TEST_REPOS" or "INCIDENT_REPO" variable is empty!';
+    } else {
+        my $repos = join_incidents_to_repo(\%incidents);
+        set_var('MAINT_TEST_REPO', $repos);
+    }
 }
 
-return 1 if load_yaml_schedule;
+testapi::set_distribution(DistributionProvider->provide());
 
-if (is_container_test) {
-    load_boot_from_disk_tests();
-    load_container_tests();
-}
+# set failures
+#$testapi::distri->set_expected_serial_failures(create_list_of_serial_failures());
+#$testapi::distri->set_expected_autoinst_failures(create_list_of_autoinst_failures());
 
-if (is_kernel_test()) {
-    load_kernel_tests();
+if (load_yaml_schedule) {
+    if (YuiRestClient::is_libyui_rest_api) {
+        YuiRestClient::set_libyui_backend_vars;
+        YuiRestClient::init_logger;
+    }
     return 1;
 }
+
+main_micro_alp::load_tests();
 
 1;

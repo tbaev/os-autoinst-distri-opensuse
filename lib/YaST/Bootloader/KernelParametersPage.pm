@@ -5,7 +5,7 @@
 
 # Summary: The class introduces all accessing methods for Kernel Parameters tab
 # in Boot Loader Settings.
-# Maintainer: QE YaST <qa-sle-yast@suse.de>
+# Maintainer: QE YaST and Migration (QE Yam) <qe-yam at suse de>
 
 package YaST::Bootloader::KernelParametersPage;
 use parent 'Installation::Navigation::NavigationBase';
@@ -15,7 +15,7 @@ use warnings;
 sub init {
     my $self = shift;
     $self->SUPER::init();
-    $self->{txb_opt_kernel_param} = $self->{app}->textbox({id => "\"Bootloader::KernelAppendWidget\""});
+    $self->{txb_opt_kernel_param} = $self->{app}->textbox({id => qr/"Bootloader::.*KernelAppendWidget"/});
     return $self;
 }
 

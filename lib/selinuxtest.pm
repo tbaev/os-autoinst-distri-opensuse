@@ -1,6 +1,6 @@
 # SUSE's openQA tests
 #
-# Copyright 2020-2022 SUSE LLC
+# Copyright 2020-2024 SUSE LLC
 # SPDX-License-Identifier: FSFAP
 #
 # Summary: Base module for SELinux test cases
@@ -13,6 +13,7 @@ use warnings;
 use testapi;
 use serial_terminal 'select_serial_terminal';
 use utils;
+use version_utils qw(is_sle_micro);
 use Utils::Backends 'is_pvm';
 use bootloader_setup qw(add_grub_cmdline_settings replace_grub_cmdline_settings);
 use power_action_utils 'power_action';
@@ -26,10 +27,16 @@ our @EXPORT = qw(
   download_policy_pkgs
 );
 
-our $file_contexts_local = '/etc/selinux/minimum/contexts/files/file_contexts.local';
+our $file_contexts_local;
+# On SLE Micro we want to use the default selinux targeted policy and do not have minimum installed which this checks
+if (is_sle_micro('>=6.0')) {
+    $file_contexts_local = '/etc/selinux/targeted/contexts/files/file_contexts.local';
+} else {
+    $file_contexts_local = '/etc/selinux/minimum/contexts/files/file_contexts.local';
+}
 our $file_output = '/tmp/cmd_output';
 our $policypkg_repo = get_var('SELINUX_POLICY_PKGS');
-our $policyfile_tar = 'testing-master';
+our $policyfile_tar = 'testing-main';
 our $dir = '/tmp/';
 
 # download SELinux policy pkgs
@@ -52,18 +59,18 @@ sub create_test_file {
 sub fixfiles_restore {
     my ($self, $file_name, $fcontext_pre, $fcontext_post) = @_;
 
-    if (script_run("[ -z $file_name ]") == 0) {
+    if (script_run("[ -z \"$file_name\" ]") == 0) {
         record_info("WARNING", "no file need to be restored", result => "softfail");
     }
-    elsif (script_run("[ -f $file_name ]") == 0) {
-        validate_script_output("ls -Z $file_name", sub { m/$fcontext_pre/ });
-        assert_script_run("fixfiles restore $file_name");
-        validate_script_output("ls -Z $file_name", sub { m/$fcontext_post/ });
+    elsif (script_run("[ -f \"$file_name\" ]") == 0) {
+        validate_script_output("ls -Z \"$file_name\"", sub { m/$fcontext_pre/ });
+        assert_script_run("fixfiles restore \"$file_name\"");
+        validate_script_output("ls -Z \"$file_name\"", sub { m/$fcontext_post/ });
     }
-    elsif (script_run("[ -d $file_name ]") == 0) {
-        validate_script_output("ls -Zd $file_name", sub { m/$fcontext_pre/ });
-        assert_script_run("fixfiles restore $file_name");
-        validate_script_output("ls -Zd $file_name", sub { m/$fcontext_post/ });
+    elsif (script_run("[ -d \"$file_name\" ]") == 0) {
+        validate_script_output("ls -Zd \"$file_name\"", sub { m/$fcontext_pre/ });
+        assert_script_run("fixfiles restore \"$file_name\"");
+        validate_script_output("ls -Zd \"$file_name\"", sub { m/$fcontext_post/ });
     }
 }
 

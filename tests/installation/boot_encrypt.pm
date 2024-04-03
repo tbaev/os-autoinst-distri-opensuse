@@ -6,17 +6,15 @@
 
 # Summary: Unlock encrypted partitions during bootup after the bootloader
 #   passed, e.g. from plymouth
-# Maintainer: QA SLE YaST team <qa-sle-yast@suse.de>
+# Maintainer: QE YaST and Migration (QE Yam) <qe-yam at suse de>
 
 use strict;
 use warnings;
 use base "installbasetest";
 use utils;
-use testapi qw(get_var record_info);
 
 sub run {
-    unlock_if_encrypted(check_typed_password => 1);
+    unlock_if_encrypted(check_typed_password => 1) if need_unlock_after_bootloader;
 }
 
 1;
-

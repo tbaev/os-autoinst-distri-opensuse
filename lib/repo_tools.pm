@@ -4,7 +4,7 @@
 # SPDX-License-Identifier: FSFAP
 
 # Summary: common parts on SMT and RMT, and other tools related to repositories.
-# Maintainer: Lemon Li <leli@suse.com>
+# Maintainer: QE YaST and Migration (QE Yam) <qe-yam at suse de>
 
 =head1 repo_tools
 
@@ -263,8 +263,9 @@ sub rmt_wizard {
         record_soft_failure 'bsc#1195759';
         zypper_call 'in rmt-server';
     }
-    zypper_call 'in mariadb';
 
+    my $count = 1;
+  WORKAROUND:
     enter_cmd "yast2 rmt;echo yast2-rmt-wizard-\$? > /dev/$serialdev";
     assert_screen 'yast2_rmt_registration';
     send_key 'alt-u';
@@ -276,8 +277,16 @@ sub rmt_wizard {
     type_string(get_required_var('SMT_ORG_PASSWORD'));
     wait_still_screen(2, 5);
     send_key 'alt-n';
-    assert_screen 'yast2_rmt_config_written_successfully', 200;
-    send_key 'alt-o';
+    assert_screen [qw(yast2_rmt_config_written_successfully yast2_rmt_timeout)], 200;
+    if (match_has_tag 'yast2_rmt_timeout') {
+        die 'Credentials timed out 10 times' if $count == 10;
+        # soft_fail is on needle
+        send_key 'ret';
+        wait_still_screen(1, 2);
+        record_info 'Retry', "Retry No. " . $count++;
+        goto WORKAROUND;
+    }
+    send_key 'alt-o' if match_has_tag 'yast2_rmt_config_written_successfully';
     assert_screen 'yast2_rmt_db_password';
     send_key 'alt-p';
     type_string "rmt";

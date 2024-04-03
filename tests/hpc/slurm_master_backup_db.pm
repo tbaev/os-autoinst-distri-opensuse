@@ -13,15 +13,18 @@ use testapi;
 use serial_terminal 'select_serial_terminal';
 use lockapi;
 use utils;
+use hpc::utils 'get_slurm_version';
 
 sub run ($self) {
     select_serial_terminal();
     my $nodes = get_required_var("CLUSTER_NODES");
+    my $slurm_pkg = get_slurm_version(get_var('SLURM_VERSION', ''));
 
     barrier_wait('CLUSTER_PROVISIONED');
 
     $self->prepare_user_and_group();
-    zypper_call('in slurm slurm-munge');
+    # $slurm_pkg-munge is installed explicitly since slurm_23_02
+    zypper_call("in $slurm_pkg $slurm_pkg-munge");
 
     # mount NFS shared directory specific
     # for this test /shared/slurm and provided by the
@@ -33,6 +36,11 @@ sub run ($self) {
     barrier_wait("SLURM_MASTER_SERVICE_ENABLED");
     record_info('slurm conf', script_output('cat /etc/slurm/slurm.conf'));
     $self->enable_and_start('munge');
+
+    # Install mrsh and mrsh-server to allow t10 basic
+    zypper_call('in mrsh mrsh-server');
+    $self->enable_and_start('mrlogind.socket mrshd.socket');
+
     $self->enable_and_start('slurmctld');
     systemctl 'status slurmctld';
     $self->enable_and_start('slurmd');

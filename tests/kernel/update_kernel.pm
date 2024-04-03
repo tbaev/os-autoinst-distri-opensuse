@@ -14,13 +14,16 @@ use base 'opensusebasetest';
 use testapi;
 use serial_terminal 'select_serial_terminal';
 use utils;
-use version_utils qw(is_sle package_version_cmp);
+use version_utils qw(is_sle is_sle_micro is_transactional package_version_cmp);
 use qam;
-use kernel 'remove_kernel_packages';
+use kernel;
 use klp;
 use power_action_utils 'power_action';
 use repo_tools 'add_qa_head_repo';
 use Utils::Backends;
+use LTP::utils;
+use transactional;
+use package_utils;
 
 sub check_kernel_package {
     my $kernel_name = shift;
@@ -82,7 +85,13 @@ sub update_kernel {
     my ($repo, $incident_id) = @_;
 
     fully_patch_system;
-    zypper_call('in kernel-devel') if is_sle('12+');
+
+    if (check_var('SLE_PRODUCT', 'slert')) {
+        install_package('kernel-devel-rt', skip_trup => 'There is no kernel-devel-rt available on transactional system.');
+    }
+    elsif (is_sle('12+')) {
+        zypper_call('in kernel-devel');
+    }
 
     my @repos = split(",", $repo);
     while (my ($i, $val) = each(@repos)) {
@@ -99,7 +108,14 @@ sub update_kernel {
     }
     else {
         # Use single patch or patch list
-        zypper_call("in -l -t patch $patches", exitcode => [0, 102, 103], log => 'zypper.log', timeout => 1400);
+        if (is_transactional) {
+            # Proceed with transactional-update patch
+            trup_call("patch");
+            # Reboot system after patch, to make sure that further checks are done on updated system
+            reboot_on_changes;
+        } else {
+            zypper_call("in -l -t patch $patches", exitcode => [0, 102, 103], log => 'zypper.log', timeout => 1400);
+        }
     }
 }
 
@@ -114,25 +130,12 @@ sub kgraft_state {
     upload_logs("/tmp/lsboot");
     script_run("cat /tmp/lsboot");
 
-    die "Invalid kernel version string" if script_output("uname -r") !~ m/(^[\d.-]+)-.+/;
-    my $kver = $1;
+    my $kver = script_output("uname -r");
     my $module;
 
-    # xen kernel exists only on SLE12 and SLE12SP1
-    if (is_sle('<=12-SP1')) {
-        script_run("lsinitrd /boot/initrd-$kver-xen | grep patch");
-        $module = script_output("lsinitrd /boot/initrd-$kver-xen | awk '/-patch-.*ko\$/ || /livepatch-.*ko\$/ {print \$NF}'");
-
-        if (check_var('REMOVE_KGRAFT', '1')) {
-            die 'Kgraft module exists when it should have been removed' if $module;
-        }
-        else {
-            mod_rpm_info($module);
-        }
-    }
-
-    script_run("lsinitrd /boot/initrd-$kver-default | grep patch");
-    $module = script_output("lsinitrd /boot/initrd-$kver-default | awk '/-patch-.*ko\$/ || /livepatch-.*ko\$/ {print \$NF}'");
+    chomp $kver;
+    script_run("lsinitrd /boot/initrd-$kver | grep patch");
+    $module = script_output("lsinitrd /boot/initrd-$kver | awk '/-patch-.*ko\$/ || /livepatch-.*ko\$/ {print \$NF}'");
 
     if (check_var('REMOVE_KGRAFT', '1')) {
         die 'Kgraft module exists when it should have been removed' if $module;
@@ -211,11 +214,18 @@ sub install_lock_kernel {
     my @lpackages = @packages;
     my %packver = (
         'kernel-devel' => $src_version,
+        'kernel-devel-rt' => $src_version,
         'kernel-macros' => $src_version,
-        'kernel-source' => $src_version
+        'kernel-source' => $src_version,
+        'kernel-source-rt' => $src_version
     );
 
-    push @packages, "kernel-devel";
+    if (check_var('SLE_PRODUCT', 'slert')) {
+        push @packages, "kernel-devel-rt";
+    }
+    else {
+        push @packages, "kernel-devel";
+    }
 
     # add explicit version to each package
     foreach my $package (@packages) {
@@ -247,7 +257,7 @@ sub prepare_kgraft {
 
         foreach my $pkg (@$pkgs) {
             my $cur_klp_pkg = is_klp_pkg($pkg);
-            if ($cur_klp_pkg && $$cur_klp_pkg{kflavor} eq 'default') {
+            if ($cur_klp_pkg) {
                 if ($incident_klp_pkg) {
                     die "Multiple kernel live patch packages found: \"$$incident_klp_pkg{name}-$$incident_klp_pkg{version}\" and \"$$cur_klp_pkg{name}-$$cur_klp_pkg{version}\"";
                 }
@@ -266,8 +276,14 @@ sub prepare_kgraft {
 
     fully_patch_system;
 
-    my $kernel_version = find_version('kernel-default', $$incident_klp_pkg{kver});
-    my $src_version = find_version('kernel-source', $$incident_klp_pkg{kver});
+    my $kernel_name = 'kernel-' . $$incident_klp_pkg{kflavor};
+    my $src_name = 'kernel-source';
+
+    $src_name .= '-' . $$incident_klp_pkg{kflavor}
+      unless $$incident_klp_pkg{kflavor} eq 'default';
+
+    my $kernel_version = find_version($kernel_name, $$incident_klp_pkg{kver});
+    my $src_version = find_version($src_name, $$incident_klp_pkg{kver});
     install_lock_kernel($kernel_version, $src_version);
 
     install_klp_product;
@@ -300,6 +316,19 @@ sub find_version {
     die "$packname-$version_arg not found in repositories.";
 }
 
+sub start_heavy_load {
+    my @pids;
+    my $root = get_ltproot;
+
+    script_run("grep -v 'module\\|add_key' $root/runtest/syscalls >$root/runtest/syscalls.klp");
+
+    for my $runfile (qw(syscalls.klp ltp-aiodio.part4)) {
+        push @pids, background_script_run("yes | $root/runltp -f $runfile &>/dev/null");
+    }
+
+    return \@pids;
+}
+
 sub update_kgraft {
     my ($incident_klp_pkg, $repo, $incident_id) = @_;
 
@@ -319,13 +348,7 @@ sub update_kgraft {
         script_run(qq{rpm -qa --qf "%{NAME}-%{VERSION}-%{RELEASE} (%{INSTALLTIME:date})\\n" | sort -t '-' > /tmp/rpmlist.before});
         upload_logs('/tmp/rpmlist.before');
 
-        # Download HEAVY LOAD script
-        assert_script_run("curl -f " . autoinst_url . "/data/qam/heavy_load.sh -o /tmp/heavy_load.sh");
-
-        # install screen command
-        zypper_call("in screen", exitcode => [0, 102, 103]);
-        #run HEAVY Load script
-        script_run("bash /tmp/heavy_load.sh");
+        my $pids = start_heavy_load;
 
         # warm up system
         sleep 15;
@@ -333,8 +356,7 @@ sub update_kgraft {
         zypper_call("in -l -t patch $patches", exitcode => [0, 102, 103], log => 'zypper.log', timeout => 2100);
 
         #kill HEAVY-LOAD scripts
-        script_run("screen -S LTP_syscalls -X quit");
-        script_run("screen -S LTP_aiodio_part4 -X quit");
+        script_run("kill -s INT -- " . join(' ', map { "-$_" } @$pids));
 
         script_run(qq{rpm -qa --qf "%{NAME}-%{VERSION}-%{RELEASE} (%{INSTALLTIME:date})\\n" | sort -t '-' > /tmp/rpmlist.after});
         upload_logs('/tmp/rpmlist.after');
@@ -359,7 +381,8 @@ sub install_kotd {
     fully_patch_system;
     remove_kernel_packages;
     zypper_ar($repo, name => 'KOTD', priority => 90, no_gpg_check => 1);
-    zypper_call("in -l kernel-default kernel-devel");
+    my $kernel_flavor = get_kernel_flavor;
+    zypper_call("in -l ${kernel_flavor} kernel-devel");
 }
 
 sub boot_to_console {
@@ -375,28 +398,33 @@ sub boot_to_console {
 sub run {
     my $self = shift;
 
-    if (is_ipmi && get_var('LTP_BAREMETAL')) {
+    if ((is_ipmi && get_var('LTP_BAREMETAL')) || is_transactional) {
         # System is already booted after installation, just switch terminal
         select_serial_terminal;
     } else {
         boot_to_console($self);
     }
 
-    # https://progress.opensuse.org/issues/90522
-    if (is_sle('=12-SP2')) {
-        my $arch = get_var('ARCH');
-        zypper_call("ar -G -f http://dist.suse.de/ibs/SUSE/Updates/SLE-SERVER/12-SP2-LTSS-ERICSSON/$arch/update/ 12-SP2-LTSS-ERICSSON");
+    # SLE Micro RT 5.1 image contains both kernel flavors, we need to remove kernel-default
+    if (is_sle_micro('=5.1') && check_var('SLE_PRODUCT', 'slert')) {
+        trup_call('pkg rm kernel-default');
+        # kernel-rt will be removed with kernel-default, we can't lock it before, we need to install it after
+        trup_call('-c pkg in kernel-rt');
+        reboot_on_changes;
     }
+
+    add_extra_customer_repositories;
 
     my $repo = get_var('KOTD_REPO');
     my $incident_id = undef;
-    my $kernel_package = 'kernel-default';
+    my $kernel_package = get_kernel_flavor;
 
     unless ($repo) {
         $repo = get_required_var('INCIDENT_REPO');
         $incident_id = get_required_var('INCIDENT_ID');
     }
 
+    $kernel_package = 'kernel-default-base' if is_sle('<12');
     $kernel_package = 'kernel-rt' if check_var('SLE_PRODUCT', 'slert');
 
     if (get_var('KGRAFT')) {
@@ -444,7 +472,9 @@ sub run {
 
     check_kernel_package($kernel_package);
 
-    if (!get_var('KGRAFT')) {
+    if (is_transactional) {
+        reboot_on_changes;
+    } elsif (!get_var('KGRAFT')) {
         power_action('reboot', textmode => 1);
         $self->wait_boot if get_var('LTP_BAREMETAL');
     }

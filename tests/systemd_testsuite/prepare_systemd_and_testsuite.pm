@@ -4,14 +4,21 @@
 # SPDX-License-Identifier: FSFAP
 
 # Summary: Prepare systemd and testsuite.
-# Maintainer: Sergio Lindo Mansilla <slindomansilla@suse.com>, Thomas Blume <tblume@suse.com>
+#
+# This module works as a 'loader' for the actual systemd-testsuite testcases.
+# - install package systemd-testsuite, that contains a patched version of https://github.com/systemd/systemd
+# - for each test in the upstream testsuite, filter out those mentioned in the variable SYSTEMD_EXCLUDE
+# - for all other, schedule a new openQA testmodule: i.e. loadtest(runner.pm) passing a different name every time
+# - when this module ends, the single tests of the systemd testsuite are being executed by openQA as independent test modules.
+#
+# Maintainer: qe-core@suse.com, Thomas Blume <tblume@suse.com>
 
 use Mojo::Base qw(systemd_testsuite_test);
 use testapi;
 use serial_terminal 'select_serial_terminal';
 use utils;
 use version_utils qw(is_sle);
-use registration qw(add_suseconnect_product);
+use registration qw(add_suseconnect_product get_addon_fullname);
 
 sub run {
     my $test_opts = {
@@ -19,7 +26,7 @@ sub run {
         TEST_PREFER_NSPAWN => get_var('SYSTEMD_NSPAWN', 1),
         UNIFIED_CGROUP_HIERARCHY => get_var('SYSTEMD_UNIFIED_CGROUP', 'yes')
     };
-    my $testdir = '/usr/lib/systemd/tests/test/';
+    my $testdir = '/usr/lib/systemd/tests/integration-tests/';
     my @pkgs = qw(
       lz4
       busybox
@@ -42,9 +49,11 @@ sub run {
     select_serial_terminal();
 
     if (is_sle) {
-        add_suseconnect_product('sle-module-legacy');
-        add_suseconnect_product('sle-module-desktop-applications');
-        add_suseconnect_product('sle-module-development-tools');
+        add_suseconnect_product(get_addon_fullname('legacy'));
+        add_suseconnect_product(get_addon_fullname('desktop'));
+        add_suseconnect_product(get_addon_fullname('sdk'));
+        add_suseconnect_product(get_addon_fullname('phub'));
+        add_suseconnect_product(get_addon_fullname('python3'));
         my $repo = sprintf('http://download.suse.de/download/ibs/SUSE:/SLE-%s:/GA/standard/',
             get_var('VERSION'));
         zypper_call("ar $repo systemd-tests");

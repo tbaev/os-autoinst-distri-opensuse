@@ -17,6 +17,7 @@ use version_utils 'is_sle';
 
 sub change_desktop {
     my ($self) = @_;
+    wait_still_screen;
     # ncurses offers a faster way
     if (check_var('VIDEOMODE', 'text')) {
         send_key 'alt-c';
@@ -69,7 +70,7 @@ sub change_desktop {
     }
     else {
         if (!check_var('DESKTOP', 'gnome')) {
-            send_key_until_needlematch 'gnome-selected', 'down';
+            send_key_until_needlematch 'gnome-selected', 'down', 25;
             send_key ' ';
         }
         if (check_var('DESKTOP', 'kde')) {

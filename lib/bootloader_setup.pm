@@ -15,11 +15,11 @@ use Time::HiRes 'sleep';
 use testapi;
 use Utils::Architectures;
 use utils;
-use version_utils qw(is_microos is_sle_micro is_jeos is_leap is_sle is_tumbleweed is_selfinstall is_alp is_transactional);
+use version_utils qw(is_opensuse is_microos is_sle_micro is_jeos is_leap is_sle is_selfinstall is_transactional);
 use mm_network;
 use Utils::Backends;
 
-use backend::svirt qw(SERIAL_TERMINAL_DEFAULT_DEVICE SERIAL_TERMINAL_DEFAULT_PORT SERIAL_CONSOLE_DEFAULT_DEVICE SERIAL_CONSOLE_DEFAULT_PORT);
+use backend::svirt qw(SERIAL_TERMINAL_DEFAULT_DEVICE SERIAL_TERMINAL_DEFAULT_PORT SERIAL_CONSOLE_DEFAULT_DEVICE SERIAL_CONSOLE_DEFAULT_PORT SERIAL_USER_TERMINAL_DEFAULT_DEVICE SERIAL_USER_TERMINAL_DEFAULT_PORT);
 
 our @EXPORT = qw(
   add_custom_grub_entries
@@ -56,6 +56,7 @@ our @EXPORT = qw(
   GRUB_CFG_FILE
   GRUB_DEFAULT_FILE
   add_grub_cmdline_settings
+  add_grub_xen_replace_cmdline_settings
   change_grub_config
   get_cmdline_var
   grep_grub_cmdline_settings
@@ -119,17 +120,17 @@ sub add_custom_grub_entries {
     if (check_var('VERSION', '12-SP4') && is_aarch64) {
         $distro = 'SLE-HPC' . ' \\?' . get_required_var('VERSION');
     }
+    elsif (is_sle_micro('<6.0')) {
+        $distro = "SLE Micro";
+    }
+    elsif (is_sle_micro()) {
+        $distro = "SL Micro";
+    }
     elsif (check_var('SLE_PRODUCT', 'slert')) {
         $distro = "SLE_RT" . ' \\?' . get_required_var('VERSION');
     }
     elsif (is_sle()) {
         $distro = "SLES" . ' \\?' . get_required_var('VERSION');
-    }
-    elsif (is_alp()) {
-        $distro = "Adaptable Linux Platform";
-    }
-    elsif (is_sle_micro()) {
-        $distro = "SLE Micro" . ' \\?' . get_required_var('VERSION');
     }
 
     bmwqemu::diag("Trying to trigger purging old kernels before changing grub menu");
@@ -150,7 +151,7 @@ sub add_custom_grub_entries {
         my $script_new_esc = $script_new =~ s~/~\\/~rg;
         assert_script_run("cp -v $script_old $script_new");
 
-        my $cmd = "sed -i -e 's/\\(args=.\\)\\(\\\$4\\)/\\1$grub_param \\2/'";
+        my $cmd = "sed -i -e 's/\\(args=.\\)\\(\\\$4[^\"]*\\)/\\1\\2 $grub_param/'";
         $cmd .= " -e 's/\\(Advanced options for %s\\)/\\1 ($grub_param)/'";
         $cmd .= " -e 's/\\(menuentry .\\\$(echo .\\\$title\\)/\\1 ($grub_param)/'";
         $cmd .= " -e 's/\\(menuentry .\\\$(echo .\\\$os\\)/\\1 ($grub_param)/' $script_new";
@@ -164,7 +165,7 @@ sub add_custom_grub_entries {
         die("Unexpected number of grub entries: $cnt_new, expected: $cnt_old") if ($cnt_old != $cnt_new);
         $cnt_new = script_output("$run_cmd grep -c 'menuentry .$distro.*($grub_param)' " . GRUB_CFG_FILE);
         die("Unexpected number of new grub entries: $cnt_new, expected: " . ($cnt_old)) if ($cnt_old != $cnt_new);
-        $cnt_new = script_output("$run_cmd grep -c -E 'linux.*(/boot|/vmlinu[xz]-).* $grub_param ' " . GRUB_CFG_FILE);
+        $cnt_new = script_output("$run_cmd grep -c -E 'linux.*(/boot|/vmlinu[xz]-).* $grub_param' " . GRUB_CFG_FILE);
         die("Unexpected number of new grub entries with '$grub_param': $cnt_new, expected: " . ($cnt_old)) if ($cnt_old != $cnt_new);
     }
 }
@@ -269,7 +270,14 @@ sub boot_local_disk {
         }
         my @tags = qw(inst-slof grub2);
         push @tags, 'encrypted-disk-password-prompt' if (get_var('ENCRYPT'));
-        assert_screen(\@tags);
+
+        # Workaround for poo#118336
+        if (is_ppc64le && is_qemu) {
+            push @tags, 'linux-login' if check_var('DESKTOP', 'textmode');
+            push @tags, 'displaymanager' if check_var('DESKTOP', 'gnome');
+        }
+
+        assert_screen(\@tags, 120);
         if (match_has_tag 'grub2') {
             diag 'already in grub2, returning from boot_local_disk';
             stop_grub_timeout;
@@ -285,6 +293,9 @@ sub boot_local_disk {
         if (match_has_tag 'encrypted-disk-password-prompt') {
             # It is possible to show encrypted prompt directly by pressing 'local' boot-menu
             # Simply return and do enter passphrase operation in checking block of sub wait_boot
+            return;
+        }
+        if (match_has_tag('linux-login') or match_has_tag('displaymanager')) {
             return;
         }
     }
@@ -368,13 +379,94 @@ sub get_bootmenu_console_params {
 sub uefi_bootmenu_params {
     # assume bios+grub+anim already waited in start.sh
     # in grub2 it's tricky to set the screen resolution
-    #send_key_until_needlematch('grub2-enter-edit-mode', 'e', 6, 0.5);
-    (is_jeos)
-      ? send_key_until_needlematch('grub2-enter-edit-mode', 'e', 6, 0.5)
-      : send_key 'e';
+    send_key 'e';
+    assert_screen("grub2-enter-edit-mode", 30) if (is_jeos || is_usb_boot);
+
+    # Workaround for sle micro 6 baremetal installation with SelfInstall ISO on USB.
+    # See details in https://bugzilla.suse.com/show_bug.cgi?id=1218095#c69.
+    # - remove from kernel command line `console=tty0`, to let installation shown in sol
+    # - add in kernel command line `rd.kiwi.term=linux`, to let installation dialog
+    #   have proper background color
+    # - set serial console in kernel command line
+    if (is_ipmi && is_selfinstall && is_usb_boot) {
+        my $counter = 0;
+        my $max_tries = 5;
+        while (!check_screen('no-tty0-but-term-linux', 2) && $counter++ < $max_tries) {
+            # Re-enter grub edit by discarding changes for 2+ round
+            if ($counter > 1) {
+                send_key_until_needlematch('bootloader-grub2', 'esc', 3, 2);
+                send_key_until_needlematch('grub2-enter-edit-mode', 'e', 3, 2);
+            }
+            record_info("Doing round $counter of grub editing...");
+
+            # Go to linux line
+            # For efficiency, use send_key with wait_screen_change
+            send_key('down', wait_screen_change => 1) for (1 .. 3);
+            # To mitigate sol unstability, use below while loop.
+            # Can't use send_key_until_needlematch because it will die.
+            my $_counter = 0;
+            my $_max = 5;
+            while (!check_screen('grub2-edit-linux-line', 2) && $_counter++ < $_max) {
+                send_key('down', wait_screen_change => 1);
+            }
+            next if (!check_screen('grub2-edit-linux-line', 2));
+
+            # Move cursor to `console=ttyS0`
+            send_key('right', wait_screen_change => 1) for (1 .. 60);
+            $_counter = 0;
+            $_max = 10;
+            while (!check_screen('on-linux-console-ttyS0', 2) && $_counter++ < $_max) {
+                send_key('right', wait_screen_change => 1);
+            }
+            next if (!check_screen('on-linux-console-ttyS0', 2));
+
+            # Delete `ttyS0`
+            send_key('delete', wait_screen_change => 1) for (1 .. 5);
+            $_counter = 0;
+            $_max = 3;
+            while (!check_screen('deleted-ttyS0', 2) && $_counter++ < $_max) {
+                send_key('delete', wait_screen_change => 1);
+            }
+            next if (!check_screen('deleted-ttyS0', 2));
+
+            # Add serial console
+            type_string_very_slow(get_required_var('SERIALCONSOLE'));
+            next if (!check_screen("serial-console-exists", 2));
+
+            # Move cursor to `console=tty0`
+            send_key('right', wait_screen_change => 1) for (1 .. 7);
+            $_counter = 0;
+            $_max = 5;
+            while (!check_screen('on-linux-console=tty0', 2) && $_counter++ < $_max) {
+                send_key('right', wait_screen_change => 1);
+            }
+            next if (!check_screen('on-linux-console=tty0', 2));
+
+            # Delete `console=tty0`
+            send_key('delete', wait_screen_change => 1) for (1 .. 12);
+            $_counter = 0;
+            $_max = 5;
+            while (!check_screen('deleted-console=tty0', 2) && $_counter++ < $_max) {
+                send_key('delete', wait_screen_change => 1);
+            }
+            next if (!check_screen('deleted-console=tty0', 2));
+
+            # Add term setting
+            type_string_very_slow(" rd.kiwi.term=linux ");
+            if (!check_screen("no-tty0-but-term-linux", 2)) {
+                next;
+            } else {
+                record_info('Successfully finished grub2 editing.');
+                return;
+            }
+        }
+        die "Failed to edit grub2 after $max_tries tries.";
+    }
+
     # Kiwi in TW uses grub2-mkconfig instead of the custom kiwi config
     # Locate gfxpayload parameter and update it
-    if (is_jeos && (is_tumbleweed || is_sle('>=15-sp1') || is_leap('>=15.1'))) {
+    if (is_jeos && (!is_sle('=12-SP5') || is_opensuse)) {
+
         for (1 .. 3) { send_key "down"; }
         send_key "end";
         # delete "keep" word
@@ -493,6 +585,10 @@ sub bootmenu_default_params {
             push @params, $video;
         }
 
+    }
+    if (get_var('AGAMA_AUTO')) {
+        my $path = data_url(get_var('AGAMA_AUTO'));
+        set_var('EXTRABOOTPARAMS', "agama.auto=\"$path\"");
     }
 
     if (!get_var("NICEVIDEO")) {
@@ -774,7 +870,12 @@ sub specific_bootmenu_params {
             elsif ($dud =~ /^ASSET_\d+$/) {
                 # In case dud is uploaded as an ASSET we need just filename
                 $dud = basename(get_required_var($dud));
-                push @params, 'dud=' . autoinst_url("/assets/other/$dud");
+                if (check_var('DUD_NO_SHORTEN_URL', '1')) {
+                    push @params, 'dud=' . autoinst_url("/assets/other/$dud");
+                }
+                else {
+                    push @params, 'dud=' . shorten_url(autoinst_url("/assets/other/$dud"));
+                }
             }
             else {
                 push @params, 'dud=' . data_url($dud);
@@ -947,6 +1048,7 @@ sub tianocore_disable_secureboot {
     my $neelle_sb_conf_attempt = $revert ? 'tianocore-devicemanager-sb-conf-disabled' : 'tianocore-devicemanager-sb-conf-attempt-sb';
     my $neelle_sb_change_state = $revert ? 'tianocore-devicemanager-sb-conf-enabled' : 'tianocore-devicemanager-sb-conf-attempt-sb';
     my $neelle_sb_config_state = $revert ? 'tianocore-secureboot-enabled' : 'tianocore-secureboot-not-enabled';
+    my $timeout = is_aarch64 ? '30' : '20';
 
     assert_screen 'grub2';
     send_key 'c';
@@ -969,7 +1071,7 @@ sub tianocore_disable_secureboot {
     send_key_until_needlematch 'tianocore-devicemanager', 'esc';
     send_key_until_needlematch 'tianocore-mainmenu-reset', 'down';
     send_key 'ret';
-    send_key 'ret' if check_screen($neelle_sb_config_state, 20);
+    send_key 'ret' if (!is_aarch64() && check_screen($neelle_sb_config_state, $timeout));
     $basetest->wait_grub;
 }
 
@@ -1120,13 +1222,22 @@ sub zkvm_add_pty {
             target_port => SERIAL_CONSOLE_DEFAULT_PORT
         });
 
-    # sut-serial (serial terminal: emulation of QEMU's virtio console for svirt)
+    # ssh-virtsh-serial for root (serial terminal: emulation of QEMU's virtio console for svirt)
     $svirt->add_pty(
         {
             pty_dev => SERIAL_TERMINAL_DEFAULT_DEVICE,
             pty_dev_type => 'pty',
             target_type => 'virtio',
             target_port => SERIAL_TERMINAL_DEFAULT_PORT
+        });
+
+    # ssh-virtsh-serial for user (serial terminal: emulation of QEMU's virtio console for svirt)
+    $svirt->add_pty(
+        {
+            pty_dev => SERIAL_USER_TERMINAL_DEFAULT_DEVICE,
+            pty_dev_type => 'pty',
+            target_type => 'virtio',
+            target_port => SERIAL_USER_TERMINAL_DEFAULT_PORT
         });
 }
 
@@ -1270,6 +1381,19 @@ C<$update_grub> if set, regenerate /boot/grub2/grub.cfg with grub2-mkconfig and 
 sub add_grub_xen_cmdline_settings {
     my ($add, $update_grub) = @_;
     add_grub_cmdline_settings($add, $update_grub, "GRUB_CMDLINE_XEN_DEFAULT");
+}
+
+=head2 add_grub_xen_replace_cmdline_settings
+
+    add_grub_xen_replace_cmdline_settings($add [, $update_grub ]);
+
+Add C<$add> into /etc/default/grub, using sed.
+C<$update_grub> if set, regenerate /boot/grub2/grub.cfg with grub2-mkconfig and upload configuration.
+=cut
+
+sub add_grub_xen_replace_cmdline_settings {
+    my ($add, $update_grub) = @_;
+    add_grub_cmdline_settings($add, update_grub => $update_grub, search => "GRUB_CMDLINE_LINUX_XEN_REPLACE_DEFAULT");
 }
 
 =head2 replace_grub_cmdline_settings

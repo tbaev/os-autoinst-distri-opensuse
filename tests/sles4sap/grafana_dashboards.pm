@@ -46,14 +46,26 @@ sub run {
     send_key 'tab';
     type_string "admin";
     send_key 'tab';
+    send_key 'tab';
     send_key 'ret';
     assert_screen "new-password", $timeout;
     type_password;
     send_key 'tab';
+    send_key 'tab';
     type_password;
+    send_key 'tab';
     send_key 'tab';
     send_key 'ret';
     assert_and_click "grafana-home", timeout => $timeout;
+
+    # dashboards don't show in home webpage in new version
+    # of grafana, but in the left sidebar of grafana
+    wait_still_screen;
+    if (!check_screen('select_suse-dashboard')) {
+        assert_and_click "select_grafana_left_sidebar", timeout => $timeout;
+        assert_and_click "select_dashboard_in_left_sidebar", timeout => $timeout;
+    }
+
     assert_and_click "select_suse-dashboard", timeout => $timeout;
     assert_screen "check_suse-dashboard", $timeout;
 

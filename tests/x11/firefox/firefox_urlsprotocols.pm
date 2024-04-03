@@ -10,7 +10,6 @@
 # firefox
 # - On firefox, access a http url
 # - On firefox, access a https url
-# - On firefox, access a ftp url
 # - On firefox, access a local url
 # - Close firefox
 # Maintainer: wnereiz <wnereiz@github>
@@ -32,11 +31,8 @@ sub run {
         local => "file:///usr/share/w3m/w3mhelp.html"
     );
 
-    # smb not supported
-    record_soft_failure 'bsc#1004573';
     for my $proto (sort keys %sites_url) {
-        $self->firefox_open_url($sites_url{$proto});
-        assert_screen('firefox-urls_protocols-' . $proto);
+        $self->firefox_open_url($sites_url{$proto}, assert_loaded_url => 'firefox-urls_protocols-' . $proto);
     }
 
     $self->exit_firefox;

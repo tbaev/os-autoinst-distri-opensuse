@@ -18,24 +18,36 @@ use strict;
 use warnings;
 use testapi;
 use utils;
-use version_utils qw(is_sle is_public_cloud);
+use version_utils qw(is_sle is_public_cloud get_version_id is_transactional is_openstack);
+use transactional qw(check_reboot_changes trup_call process_reboot);
 use registration;
+use maintenance_smelt qw(is_embargo_update);
+
+# Indicating if the openQA port has been already allowed via SELinux policies
+my $openqa_port_allowed = 0;
 
 our @EXPORT = qw(
   deregister_addon
   define_secret_variable
   get_credentials
+  validate_repo
   is_byos
   is_ondemand
   is_ec2
   is_azure
   is_gce
   is_container_host
+  is_hardened
   registercloudguest
   register_addon
   register_openstack
   register_addons_in_pc
   gcloud_install
+  get_ssh_private_key_path
+  prepare_ssh_tunnel
+  kill_packagekit
+  allow_openqa_port_selinux
+  ssh_update_transactional_system
 );
 
 # Get the current UTC timestamp as YYYY/mm/dd HH:MM:SS
@@ -62,7 +74,12 @@ sub register_addon {
     } elsif (is_sle('<15') && $addon =~ /sdk|we/) {
         ssh_add_suseconnect_product($remote, get_addon_fullname($addon), '${VERSION_ID}', $arch, '', $timeout, $retries, $delay);
     } else {
-        ssh_add_suseconnect_product($remote, get_addon_fullname($addon), undef, $arch, '', $timeout, $retries, $delay);
+        if ($addon =~ /nvidia/i) {
+            (my $version = get_version_id(dst_machine => $remote)) =~ s/^(\d+).*/$1/m;
+            ssh_add_suseconnect_product($remote, get_addon_fullname($addon), $version, $arch, '', $timeout, $retries, $delay);
+        } else {
+            ssh_add_suseconnect_product($remote, get_addon_fullname($addon), undef, $arch, '', $timeout, $retries, $delay);
+        }
     }
     record_info('SUSEConnect time', 'The command SUSEConnect -r ' . get_addon_fullname($addon) . ' took ' . (time() - $cmd_time) . ' seconds.');
 }
@@ -91,41 +108,20 @@ sub deregister_addon {
 sub registercloudguest {
     my ($instance) = @_;
     my $regcode = get_required_var('SCC_REGCODE');
-    my $remote = $instance->username . '@' . $instance->public_ip;
-    # not all images currently have registercloudguest pre-installed .
-    # in such a case,we need to regsiter against SCC and install registercloudguest with all needed dependencies and then
-    # unregister and re-register with registercloudguest
-    if ($instance->ssh_script_output(cmd => "sudo which registercloudguest > /dev/null; echo \"registercloudguest\$?\" ", proceed_on_failure => 1) =~ m/registercloudguest1/) {
-        $instance->ssh_script_retry(cmd => "sudo SUSEConnect -r $regcode", timeout => 420, retry => 3, delay => 120);
-        register_addon($remote, 'pcm');
-        my $install_packages = 'cloud-regionsrv-client';    # contains registercloudguest binary
-        if (is_azure()) {
-            $install_packages .= ' cloud-regionsrv-client-plugin-azure regionServiceClientConfigAzure regionServiceCertsAzure';
-        }
-        elsif (is_ec2()) {
-            $install_packages .= ' cloud-regionsrv-client-plugin-ec2 regionServiceClientConfigEC2 regionServiceCertsEC2';
-        }
-        elsif (is_gce()) {
-            $install_packages .= ' cloud-regionsrv-client-plugin-gce regionServiceClientConfigGCE regionServiceCertsGCE';
-        }
-        else {
-            die 'Unexpected provider ' . get_var('PUBLIC_CLOUD_PROVIDER');
-        }
-        $instance->ssh_assert_script_run(cmd => "sudo zypper -q -n in $install_packages", timeout => 420);
-        $instance->ssh_assert_script_run(cmd => "sudo registercloudguest --clean");
-    }
-    # Check what version of registercloudguest binary we use
-    $instance->ssh_script_run(cmd => "sudo rpm -qa cloud-regionsrv-client");
-    # Register the system
+    my $path = is_sle('>15') && is_sle('<15-SP3') ? '/usr/sbin/' : '';
+    my $suseconnect = $path . get_var("PUBLIC_CLOUD_SCC_ENDPOINT", (is_transactional) ? "transactional-update register" : "registercloudguest");
     my $cmd_time = time();
-    $instance->ssh_script_retry(cmd => "sudo registercloudguest -r $regcode", timeout => 420, retry => 3, delay => 120);
-    record_info('registercloudguest time', 'The command registercloudguest took ' . (time() - $cmd_time) . ' seconds.');
+    # Check what version of registercloudguest binary we use
+    $instance->ssh_script_run(cmd => "rpm -qa cloud-regionsrv-client");
+    $instance->ssh_script_retry(cmd => "sudo $suseconnect -r $regcode", timeout => 420, retry => 3, delay => 120);
+    record_info('registeration time', 'The registration took ' . (time() - $cmd_time) . ' seconds.');
 }
 
 sub register_addons_in_pc {
     my ($instance) = @_;
     my @addons = split(/,/, get_var('SCC_ADDONS', ''));
     my $remote = $instance->username . '@' . $instance->public_ip;
+    $instance->ssh_script_retry(cmd => "sudo zypper -n --gpg-auto-import-keys ref", timeout => 300, retry => 3, delay => 120);
     for my $addon (@addons) {
         next if ($addon =~ /^\s+$/);
         register_addon($remote, $addon);
@@ -143,6 +139,22 @@ sub register_openstack {
     my $cmd = "sudo SUSEConnect -r $regcode";
     $cmd .= " --url $fake_scc" if $fake_scc;
     $instance->ssh_assert_script_run(cmd => $cmd, timeout => 700, retry => 5);
+}
+
+# Validation for update repos
+sub validate_repo {
+    my ($maintrepo) = @_;
+    if ($maintrepo =~ /\/(PTF|Maintenance):\/(\d+)/g) {
+        my ($incident, $type) = ($2, $1);
+        die "We did not detect incident number for URL \"$maintrepo\". We detected \"$incident\"" unless $incident =~ /\d+/;
+        if (is_embargo_update($incident, $type)) {
+            record_info("EMBARGOED", "The repository \"$maintrepo\" belongs to embargoed incident number \"$incident\"");
+            script_run("echo 'The repository \"$maintrepo\" belongs to embargoed incident number \"$incident\"'");
+            return 0;
+        }
+        return 1;
+    }
+    die "Unexpected URL \"$maintrepo\"";
 }
 
 # Check if we are a BYOS test run
@@ -176,12 +188,8 @@ sub is_container_host() {
     return is_public_cloud && get_var('FLAVOR') =~ 'CHOST';
 }
 
-sub define_secret_variable {
-    my ($var_name, $var_value) = @_;
-    script_run("set -a");
-    script_run("read -sp \"enter value: \" $var_name", 0);
-    type_password($var_value . "\n");
-    script_run("set +a");
+sub is_hardened() {
+    return is_public_cloud && get_var('FLAVOR') =~ 'Hardened';
 }
 
 # Get credentials from the Public Cloud micro service, which requires user
@@ -211,7 +219,7 @@ sub get_credentials {
 =head2 gcloud_install
     gcloud_install($url, $dir, $timeout)
 
-This function is used to install the gcloud CLI 
+This function is used to install the gcloud CLI
 for the GKE Google Cloud.
 
 From $url we get the full package and install it
@@ -227,8 +235,17 @@ sub gcloud_install {
     my $dir = $args{dir} || 'google-cloud-sdk';
     my $timeout = $args{timeout} || 700;
 
-    zypper_call("in curl tar gzip", $timeout);
+    # WARNING:  Python 3.6.x is no longer officially supported by the Google Cloud CLI
+    # and may not function correctly. Please use Python version 3.8 and up.
+    my @pkgs = qw(curl tar gzip);
+    my $py_version = get_var('PYTHON_VERSION', '3.11');
+    my $py_pkg_version = $py_version =~ s/\.//gr;
+    push @pkgs, 'python' . $py_pkg_version;
+    add_suseconnect_product(get_addon_fullname('python3')) if is_sle('15-SP6+');
 
+    zypper_call("in @pkgs", $timeout);
+
+    assert_script_run("export CLOUDSDK_PYTHON=/usr/bin/python$py_version");
     assert_script_run("export CLOUDSDK_CORE_DISABLE_PROMPTS=1");
     assert_script_run("curl $url | bash", $timeout);
     assert_script_run("echo . /root/$dir/completion.bash.inc >> ~/.bashrc");
@@ -236,6 +253,114 @@ sub gcloud_install {
     assert_script_run("source ~/.bashrc");
 
     record_info('GCE', script_output('gcloud version'));
+}
+
+sub get_ssh_private_key_path {
+    # Paramiko needs to be updated for ed25519 https://stackoverflow.com/a/60791079
+    return (is_azure() || is_openstack() || get_var('PUBLIC_CLOUD_LTP')) ? "~/.ssh/id_rsa" : '~/.ssh/id_ed25519';
+}
+
+sub prepare_ssh_tunnel {
+    my ($instance) = @_;
+
+    # configure ssh client
+    my $ssh_config_url = data_url('publiccloud/ssh_config');
+    assert_script_run("curl $ssh_config_url -o ~/.ssh/config");
+    file_content_replace("~/.ssh/config", "%SSH_KEY%" => get_ssh_private_key_path());
+
+    # Create the ssh alias
+    assert_script_run(sprintf(q(echo -e 'Host sut\n  Hostname %s' >> ~/.ssh/config), $instance->public_ip));
+
+    # Copy SSH settings also for normal user
+    assert_script_run("install -o $testapi::username -g users -m 0700 -dD /home/$testapi::username/.ssh");
+    assert_script_run("install -o $testapi::username -g users -m 0600 ~/.ssh/* /home/$testapi::username/.ssh/");
+
+    # Skip setting root password for img_proof, because it expects the root password to NOT be set
+    $instance->ssh_assert_script_run(qq(echo -e "$testapi::password\\n$testapi::password" | sudo passwd root));
+
+    # Permit root passwordless login over SSH
+    $instance->ssh_assert_script_run('sudo cat /etc/ssh/sshd_config');
+    $instance->ssh_assert_script_run('sudo sed -i "s/PermitRootLogin no/PermitRootLogin prohibit-password/g" /etc/ssh/sshd_config');
+    $instance->ssh_assert_script_run('sudo sed -i "/^AllowTcpForwarding/c\AllowTcpForwarding yes" /etc/ssh/sshd_config') if (is_hardened());
+    $instance->ssh_assert_script_run('sudo systemctl reload sshd');
+
+    # Copy SSH settings for remote root
+    $instance->ssh_assert_script_run('sudo install -o root -g root -m 0700 -dD /root/.ssh');
+    $instance->ssh_assert_script_run(sprintf("sudo install -o root -g root -m 0644 /home/%s/.ssh/authorized_keys /root/.ssh/", $instance->{username}));
+
+    # Create remote user and set him a password
+    my $path = (is_sle('>15') && is_sle('<15-SP3')) ? '/usr/sbin/' : '';
+    $instance->ssh_assert_script_run("test -d /home/$testapi::username || sudo ${path}useradd -m $testapi::username");
+    $instance->ssh_assert_script_run(qq(echo -e "$testapi::password\\n$testapi::password" | sudo passwd $testapi::username));
+
+    # Copy SSH settings for remote user
+    $instance->ssh_assert_script_run("sudo install -o $testapi::username -g users -m 0700 -dD /home/$testapi::username/.ssh");
+    $instance->ssh_assert_script_run("sudo install -o $testapi::username -g users -m 0644 ~/.ssh/authorized_keys /home/$testapi::username/.ssh/");
+
+    # Create log file for ssh tunnel
+    my $ssh_sut = '/var/tmp/ssh_sut.log';
+    assert_script_run "touch $ssh_sut; chmod 777 $ssh_sut";
+}
+
+sub kill_packagekit {
+    my ($instance) = @_;
+    my $ret = $instance->ssh_script_run(cmd => "sudo pkcon quit", timeout => 120);
+    if ($ret) {
+        # Older versions of systemd don't support "disable --now"
+        $instance->ssh_script_run(cmd => "sudo systemctl stop packagekitd");
+        $instance->ssh_script_run(cmd => "sudo systemctl disable packagekitd");
+        $instance->ssh_script_run(cmd => "sudo systemctl mask packagekitd");
+    }
+}
+
+
+sub allow_openqa_port_selinux {
+    # not needed to perform multiple times, also semanage would fail.
+    return if ($openqa_port_allowed);
+
+    # Additional packages required for semanage
+    my $pkgs = 'policycoreutils-python-utils';
+    if (is_transactional) {
+        trup_call("pkg install $pkgs");
+        check_reboot_changes;
+    } else {
+        zypper_call("in $pkgs");
+    }
+    # allow ssh tunnel port (to openQA)
+    my $upload_port = get_required_var('QEMUPORT') + 1;
+    assert_script_run("semanage port -a -t ssh_port_t -p tcp $upload_port");
+    process_reboot(trigger => 1) if (is_transactional);
+    $openqa_port_allowed = 1;
+}
+
+
+=head2 ssh_update_transactional_system
+
+ssh_update_transactional_system($host);
+
+Connect to the remote host C<$instance> using ssh and update the system by
+running C<zypper update> twice, in transactional mode. The first run will update the package manager,
+the second run will update the system.
+Transactional systems like SLE micro used C<transactional_update up> and reboot. 
+
+=cut
+
+sub ssh_update_transactional_system {
+    my ($instance) = @_;
+    my $cmd_time = time();
+    my $cmd = "sudo transactional-update -n up";
+    my $cmd_name = "transactional update";
+    # first run, possible update of packager
+    my $ret = $instance->ssh_script_run(cmd => $cmd, timeout => 1500);
+    $instance->softreboot(timeout => get_var('PUBLIC_CLOUD_REBOOT_TIMEOUT', 600));
+    record_info($cmd_name, 'The command ' . $cmd_name . ' took ' . (time() - $cmd_time) . ' seconds.');
+    die "$cmd_name failed with $ret" if ($ret != 0 && $ret != 102 && $ret != 103);
+    # second run, full system update
+    $cmd_time = time();
+    $ret = $instance->ssh_script_run(cmd => $cmd, timeout => 6000);
+    $instance->softreboot(timeout => get_var('PUBLIC_CLOUD_REBOOT_TIMEOUT', 600));
+    record_info($cmd_name, 'The second command ' . $cmd_name . ' took ' . (time() - $cmd_time) . ' seconds.');
+    die "$cmd_name failed with $ret" if ($ret != 0 && $ret != 102);
 }
 
 1;

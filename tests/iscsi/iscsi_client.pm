@@ -24,15 +24,18 @@ use testapi;
 use lockapi qw(mutex_create mutex_wait);
 use version_utils qw(is_sle is_leap);
 use yast2_widget_utils 'change_service_configuration';
-use utils qw(systemctl type_string_slow_extended);
+use utils qw(systemctl type_string_slow_extended zypper_call);
 use scheduler 'get_test_suite_data';
 use y2_mm_common 'prepare_xterm_and_setup_static_network';
+use YaST::workarounds;
+use Utils::Logging 'save_and_upload_log';
 
 # load expected test data from yaml
 # common for both iscsi MM modules
 my $test_data = get_test_suite_data();
 
 sub initiator_service_tab {
+    apply_workaround_poo124652('iscsi-client-service') if (is_sle('>=15-SP4'));
     unless (is_sle('<15') || is_leap('<15.1')) {
         if (is_sle('=15')) {
             change_service_configuration(
@@ -57,21 +60,19 @@ sub initiator_discovered_targets_tab {
     assert_screen 'iscsi-discovered-targets', 120;
     # press discovery button
     send_key "alt-d";
+    wait_still_screen(2);
     assert_screen 'iscsi-discovery';
     # go to IP address field
     send_key "alt-i";
     my $target_ip_only = (split('/', $test_data->{target_conf}->{ip}))[0];
     type_string_slow_extended $target_ip_only;
-    if (is_sle('=15-SP4')) {
-        record_soft_failure('bsc#1204176 - Resizing window as workaround for YaST content not loading');
-        send_key_until_needlematch('iscsi-initiator-discovered-IP-adress', 'alt-f10', 10, 2);
-    }
-    else {
-        assert_screen 'iscsi-initiator-discovered-IP-adress';
-    }
+    apply_workaround_poo124652('iscsi-initiator-discovered-IP-adress') if (is_sle('>=15-SP4'));
+    assert_screen 'iscsi-initiator-discovered-IP-adress';
     # next and press connect button
     send_key "alt-n";
     assert_and_click 'iscsi-initiator-connect-button';
+    wait_still_screen(2);
+    apply_workaround_poo124652('iscsi-initiator-discovery-startup') if (is_sle('>=15-SP4'));
     send_key_until_needlematch 'iscsi-initiator-connect-automatic', 'down';
     send_key 'alt-o';
     assert_screen 'iscsi-initiator-discovery-enable-login-auth';
@@ -92,13 +93,9 @@ sub initiator_discovered_targets_tab {
 sub initiator_connected_targets_tab {
     # go to discovered targets tab
     send_key "alt-d";
-    if (is_sle('=15-SP4')) {
-        record_soft_failure('bsc#1204176 - Resizing window as workaround for YaST content not loading');
-        send_key_until_needlematch('iscsi-initiator-discovered-targets', 'alt-f10', 10, 2);
-    }
-    else {
-        assert_screen 'iscsi-initiator-discovered-targets';
-    }
+    wait_still_screen(2);
+    apply_workaround_poo124652('iscsi-initiator-discovered-targets') if (is_sle('>=15-SP4'));
+    assert_screen 'iscsi-initiator-discovered-targets';
     # go to connected targets tab
     send_key "alt-n";
     assert_screen 'iscsi-initiator-connected-targets';
@@ -111,8 +108,10 @@ sub initiator_connected_targets_tab {
 
 sub run {
     prepare_xterm_and_setup_static_network(ip => $test_data->{initiator_conf}->{ip}, message => 'Configure MM network - client');
+    zypper_call("in open-iscsi yast2-iscsi-client");
     mutex_wait('iscsi_target_ready', undef, 'Target configuration in progress!');
     record_info 'Target Ready!', 'iSCSI target is configured, start initiator configuration';
+    apply_workaround_bsc1206132() if (is_sle('=15-SP3'));
     my $module_name = y2_module_guitest::launch_yast2_module_x11('iscsi-client', target_match => 'iscsi-client');
     initiator_service_tab;
     initiator_discovered_targets_tab;
@@ -145,7 +144,7 @@ sub run {
         $iscsi_drive .= '1';
     }
     sleep 3;
-    assert_script_run "mkfs.ext4 $iscsi_drive";
+    assert_script_run "mkfs.ext4 $iscsi_drive", 180;
     sleep 2;
     # try mount remote partition to /mnt
     assert_script_run "mount $iscsi_drive /mnt";
@@ -156,16 +155,16 @@ sub run {
     mutex_create('iscsi_initiator_ready');
     mutex_wait('iscsi_display_sessions', undef, 'Verifying sessions on target');
     record_info 'Logout iSCSI', 'Logout iSCSI sessions & unmount LUN';
-    assert_script_run 'iscsiadm --mode node --logoutall=all';
     assert_script_run 'umount /mnt';
+    assert_script_run 'iscsiadm --mode node --logoutall=all';
     enter_cmd "killall xterm";
 }
 
 sub post_fail_hook {
     my $self = shift;
     $self->SUPER::post_fail_hook;
-    $self->save_and_upload_log("iscsiadm --mode session -P 3", "/tmp/iscsi_init_session_data.log");
-    $self->save_and_upload_log("tar czvf /tmp/iscsi_initconf.tar.gz /etc/iscsi/*", "/tmp/iscsi_initconf.tar.gz");
+    save_and_upload_log("iscsiadm --mode session -P 3", "/tmp/iscsi_init_session_data.log");
+    save_and_upload_log("tar czvf /tmp/iscsi_initconf.tar.gz /var/lib/iscsi/*", "/tmp/iscsi_initconf.tar.gz");
 }
 
 1;

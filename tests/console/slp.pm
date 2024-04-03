@@ -20,6 +20,8 @@ use strict;
 use warnings;
 use utils qw(zypper_call systemctl script_retry);
 use Utils::Systemd 'disable_and_stop_service';
+use Utils::Logging 'save_and_upload_log';
+use version_utils qw(is_tumbleweed);
 
 sub run {
     my ($self) = @_;
@@ -38,24 +40,27 @@ sub run {
     # Show the version
     assert_script_run 'slptool -v';
     assert_script_run 'slptool findsrvs service:service-agent | grep service-agent';
-    assert_script_run 'slptool findsrvs service:ssh | grep "ssh://\|:22,"';
 
-    # List all available services
-    assert_script_run 'slptool findsrvtypes | grep -A99 -B99 "service:ssh"';
-    assert_script_run 'slptool -s DEFAULT findsrvtypes | grep -A99 -B99 "service:ssh"';
+    unless (is_tumbleweed) {
+        assert_script_run 'slptool findsrvs service:ssh | grep "ssh://\|:22,"';
 
-    # Find all visible SSH services
-    assert_script_run 'slptool findsrvs ssh | grep -A99 -B99 "ssh://\|:22,"';
-    assert_script_run 'slptool -p findsrvs ssh | grep -A99 -B99 "ssh://\|:22,"';
-    assert_script_run 'slptool findsrvs service:ssh | grep -A99 -B99 "ssh://\|:22,"';
+        # List all available services
+        assert_script_run 'slptool findsrvtypes | grep -A99 -B99 "service:ssh"';
+        assert_script_run 'slptool -s DEFAULT findsrvtypes | grep -A99 -B99 "service:ssh"';
 
-    # Register sshd with custom attribute
-    assert_script_run 'slptool register service:ssh://localhost "(test=really_a_test)"';
-    # Display attributes of the SSH service
-    assert_script_run 'slptool findattrs service:ssh://localhost | grep "(test=really_a_test)"';
-    assert_script_run 'slptool findattrs service:ssh | grep "(description=Secure Shell Daemon)"';
-    # Deregister ssh
-    assert_script_run 'slptool deregister service:ssh://localhost';
+        # Find all visible SSH services
+        assert_script_run 'slptool findsrvs ssh | grep -A99 -B99 "ssh://\|:22,"';
+        assert_script_run 'slptool -p findsrvs ssh | grep -A99 -B99 "ssh://\|:22,"';
+        assert_script_run 'slptool findsrvs service:ssh | grep -A99 -B99 "ssh://\|:22,"';
+
+        # Register sshd with custom attribute
+        assert_script_run 'slptool register service:ssh://localhost "(test=really_a_test)"';
+        # Display attributes of the SSH service
+        assert_script_run 'slptool findattrs service:ssh://localhost | grep "(test=really_a_test)"';
+        assert_script_run 'slptool findattrs service:ssh | grep "(description=Secure Shell Daemon)"';
+        # Deregister ssh
+        assert_script_run 'slptool deregister service:ssh://localhost';
+    }
 
     # Register and find two NTP services
     assert_script_run 'slptool register ntp://tik.cesnet.cz:123,en,65535';
@@ -78,11 +83,10 @@ sub post_fail_hook {
     assert_script_run 'slptool findsrvs ntp';
     upload_logs '/var/log/slpd.log';
     upload_logs '/var/log/zypper.log';
-    $self->save_and_upload_log('journalctl --no-pager -o short-precise', '/tmp/journal.log', {screenshot => 1});
-    $self->save_and_upload_log('rpm -ql openslp-server', '/tmp/openslp-server.content', {screenshot => 1});
-    $self->save_and_upload_log('rpm -ql openslp', '/tmp/openslp.content', {screenshot => 1});
-    $self->save_and_upload_log('lsmod', '/tmp/loaded_modules.txt', {screenshot => 1});
+    save_and_upload_log('journalctl --no-pager -o short-precise', '/tmp/journal.log', {screenshot => 1});
+    save_and_upload_log('rpm -ql openslp-server', '/tmp/openslp-server.content', {screenshot => 1});
+    save_and_upload_log('rpm -ql openslp', '/tmp/openslp.content', {screenshot => 1});
+    save_and_upload_log('lsmod', '/tmp/loaded_modules.txt', {screenshot => 1});
 }
 
 1;
-

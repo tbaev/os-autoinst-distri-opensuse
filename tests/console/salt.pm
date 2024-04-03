@@ -24,7 +24,7 @@ use warnings;
 use testapi;
 use serial_terminal 'select_serial_terminal';
 use utils qw(zypper_call quit_packagekit systemctl);
-use version_utils qw(is_jeos is_opensuse);
+use version_utils qw(is_jeos is_opensuse is_sle is_leap is_community_jeos);
 use registration 'add_suseconnect_product';
 
 sub run {
@@ -41,7 +41,10 @@ sub run {
     }
 
     quit_packagekit;
-    zypper_call('in salt-master salt-minion');
+    my @packages = qw(salt-master);
+    # On SLE/Leap based Minimal-VM/Minimal-Image, salt-minion has to be preinstalled
+    push @packages, 'salt-minion' unless is_jeos && (is_sle || is_leap) && !is_community_jeos;
+    zypper_call("in @packages");
     my $cmd = <<'EOF';
 systemctl start salt-master
 systemctl status --no-pager salt-master

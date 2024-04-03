@@ -11,13 +11,13 @@
 #  issue with the live installer has been found and is worked around while
 #  recording a reference to the bug.
 #
-# Maintainer: QA SLE YaST team <qa-sle-yast@suse.de>
+# Maintainer: QE YaST and Migration (QE Yam) <qe-yam at suse de>
 
 use base "installbasetest";
 use warnings;
 use testapi;
 use utils;
-use version_utils "is_upgrade";
+use version_utils qw(is_plasma6 is_upgrade);
 use strict;
 use warnings;
 use x11utils 'turn_off_kde_screensaver';
@@ -31,6 +31,11 @@ sub send_key_and_wait {
 }
 
 sub run {
+    # Adjust the installation consoles, they can differ from what the instsys uses
+    # (install-shell -> tty2, installation -> tty7).
+    console('install-shell')->set_tty(get_root_console_tty());
+    console('installation')->set_tty(get_x11_console_tty());
+
     if (get_netboot_mirror) {
         select_console 'install-shell';
         # Force use of the matching repo
@@ -48,7 +53,7 @@ sub run {
             x11_start_program('xdg-su -c "/usr/sbin/start-install.sh upgrade"', target_match => 'maximize');
         }
         else {
-            assert_and_click 'live-upgrade';
+            assert_and_click 'live-upgrade', dclick => is_plasma6;
         }
     }
     else {
@@ -58,7 +63,7 @@ sub run {
             x11_start_program('xdg-su -c "/usr/sbin/start-install.sh"', target_match => 'maximize');
         }
         else {
-            assert_and_click 'live-installation';
+            assert_and_click 'live-installation', dclick => is_plasma6;
         }
     }
     assert_and_click 'maximize';

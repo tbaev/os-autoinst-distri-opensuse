@@ -16,6 +16,7 @@ use audit_test;
 use atsec_test;
 use Utils::Architectures;
 use lockapi;
+use network_utils 'iface';
 
 sub run {
     my ($self) = @_;
@@ -23,12 +24,11 @@ sub run {
 
     # We don't run setup_multimachine in s390x, but we need to know the server and client's
     # ip address, so we add a known ip to NETDEV.
-    my $netdev = get_var('NETDEV', 'eth0');
+    my $netdev = iface;
     assert_script_run("ip addr add $atsec_test::client_ip/24 dev $netdev") if (is_s390x);
 
-    mutex_wait('IPSEC_SERVER_READY');
-
     assert_script_run("cd $audit_test::test_dir/ipsec_configuration/toe");
+    mutex_wait('IPSEC_SERVER_READY');
 
     # Setup the ipip tunnel to the IPSec gateway and test it
     # 192.168.100.1 is configured in the server by ipsec_setup_tunnel_server.sh
@@ -42,8 +42,14 @@ sub run {
     # Test the IPSec connection
     assert_script_run('ipsec start');
     assert_script_run('stime=$(date +\'%H:%M:%S\')');
-    record_soft_failure("poo#117208 - The addition of the sleep command is a temporary workaround");
-    sleep 60;
+
+    # ipsec start can take some time to start charon daemon,
+    # so we wait until we get some status output
+    my $inc = 0;
+    while (scalar(split(/\n/, script_output('ipsec statusall', proceed_on_failure => 1)) <= 5) && $inc < 10) {
+        sleep(++$inc);
+    }
+
     assert_script_run('ipsec up ikev2suse');
 
     # Test the IPSec connection
@@ -53,7 +59,9 @@ sub run {
     assert_script_run('ausearch -ts $stime | grep --color -e \'MAC_IPSEC_EVENT\' -e \'SPD-add\' -e \'SAD-add\'');
 
     assert_script_run('stime=$(date +\'%H:%M:%S\')');
-    assert_script_run('ipsec down ikev2suse');
+
+    my $timeout = is_s390x() ? 180 : 90;
+    assert_script_run('ipsec down ikev2suse', $timeout);
 
     # Search for AUDIT SPD/SAD delete records
     assert_script_run('ausearch -ts $stime | grep --color -e \'MAC_IPSEC_EVENT\' -e \'SPD-delete\' -e \'SAD-delete\'');

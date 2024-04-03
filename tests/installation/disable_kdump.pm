@@ -29,7 +29,8 @@ sub run {
     }
     else {
         # Select section kdump on Installation Settings overview (video mode)
-        send_key_until_needlematch 'kdump-section-selected', 'tab';
+        send_key_until_needlematch 'kdump-section-selected', 'tab', 30;
+
         send_key 'ret';
     }
 
@@ -40,6 +41,9 @@ sub run {
 
     save_screenshot;
     send_key $cmd{ok};
+
+    # avoid matching "installation-settings-overview-loaded" tag in advance
+    wait_still_screen(3);
 
     # Adapting system setting needs longer time in case of installing/upgrading with multi-addons
     assert_screen 'installation-settings-overview-loaded', 220;

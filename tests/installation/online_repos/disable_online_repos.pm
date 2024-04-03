@@ -6,14 +6,14 @@
 # Summary: This test module answers the popup for configuring
 #          online repos with no.
 
-# Maintainer: QE YaST <qa-sle-yast@suse.de>
+# Maintainer: QE YaST and Migration (QE Yam) <qe-yam at suse de>
 
 use strict;
 use warnings;
 use base 'y2_installbase';
 
 sub run {
-    my $online_repos_popup = $testapi::distri->get_yes_no_popup_controller();
+    my $online_repos_popup = $testapi::distri->get_yes_no_popup();
     $online_repos_popup->decline();
 }
 

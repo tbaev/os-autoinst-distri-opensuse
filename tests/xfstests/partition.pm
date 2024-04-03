@@ -19,11 +19,23 @@ use utils;
 use testapi;
 use serial_terminal 'select_serial_terminal';
 use filesystem_utils qw(str_to_mb parted_print partition_num_by_type mountpoint_to_partition
-  partition_table create_partition remove_partition format_partition);
+  partition_table create_partition remove_partition format_partition get_partition_size);
 use File::Basename;
+use lockapi;
+use mmapi;
+use mm_network;
+use nfs_common;
+use Utils::Systemd 'disable_and_stop_service';
+use registration;
+use version_utils qw(is_transactional);
+use transactional;
 
 my $INST_DIR = '/opt/xfstests';
 my $CONFIG_FILE = "$INST_DIR/local.config";
+my $NFS_VERSION = get_var('XFSTESTS_NFS_VERSION', '4.1');
+my $NFS_SERVER_IP;
+my $TEST_FOLDER = '/opt/test';
+my $SCRATCH_FOLDER = '/opt/scratch';
 
 # Number of SCRATCH disk in SCRATCH_DEV_POOL, other than btrfs has only 1 SCRATCH_DEV, xfstests specific
 sub partition_amount_by_homesize {
@@ -119,12 +131,12 @@ sub do_partition_for_xfstests {
     }
     parted_print(dev => $para{dev});
     # Create mount points
-    script_run('mkdir /mnt/test /mnt/scratch');
+    script_run("mkdir $TEST_FOLDER $SCRATCH_FOLDER");
     # Setup configure file xfstests/local.config
     script_run("echo 'export TEST_DEV=$test_dev' >> $CONFIG_FILE");
     set_var('XFSTESTS_TEST_DEV', $test_dev);
-    script_run("echo 'export TEST_DIR=/mnt/test' >> $CONFIG_FILE");
-    script_run("echo 'export SCRATCH_MNT=/mnt/scratch' >> $CONFIG_FILE");
+    script_run("echo 'export TEST_DIR=$TEST_FOLDER' >> $CONFIG_FILE");
+    script_run("echo 'export SCRATCH_MNT=$SCRATCH_FOLDER' >> $CONFIG_FILE");
     if ($para{amount} == 1) {
         script_run("echo 'export SCRATCH_DEV=$scratch_dev[0]' >> $CONFIG_FILE");
         set_var('XFSTESTS_SCRATCH_DEV', $scratch_dev[0]);
@@ -143,7 +155,7 @@ sub do_partition_for_xfstests {
     }
     # Sync
     script_run('sync');
-    return $para{size} . 'M';
+    return ($para{size} . 'M') x ($para{amount} + 1);
 }
 
 # Create loop device by giving inputs
@@ -155,36 +167,46 @@ sub create_loop_device_by_rootsize {
     my $ref = shift;
     my %para = %{$ref};
     my $amount = 1;
-    my ($size, $count, $bsize);
+    my ($size, @loop_dev_size, @filename);
     if ($para{fstype} =~ /btrfs/) {
         $amount = 5;
     }
     # Use 90% of free space, not use all space in /root
-    $size = int($para{size} * 0.9 / ($amount + 1));
-    $bsize = 4096;
-    $count = int($size * 1024 * 1024 / $bsize);
-    my $num = 0;
-    my $filename;
-    while ($amount >= $num) {
-        if ($num) {
-            $filename = "scratch_dev$num";
-        }
-        else {
-            $filename = "test_dev";
-        }
-        assert_script_run("fallocate -l \$(($bsize * $count)) $INST_DIR/$filename", 300);
-        assert_script_run("losetup -fP $INST_DIR/$filename", 300);
-        $num += 1;
+    $size = int($para{size} * 0.9);
+    # 15G each for test_dev and scratch_dev1, other devices share the rest
+    if ($para{size} >= 38912 && $amount == 5 && get_var('XFSTESTS_BIG_SPACE')) {
+        my $size1 = 15360;
+        my $size2 = int(($size - ($size1 * 2)) / ($amount - 1));
+        @loop_dev_size = (($size1 . 'M') x 2, ($size2 . 'M') x 4);
+    }
+    else {
+        $size > (20480 * ($amount + 1)) ? ($size = 20480) : ($size = int($size / ($amount + 1)));
+        foreach (0 .. $amount) { push(@loop_dev_size, $size . 'M'); }
+    }
+    @filename = ('test_dev');
+    foreach (1 .. $amount) { push(@filename, "scratch_dev$_"); }
+    my $i = 0;
+    foreach (@filename) {
+        assert_script_run("fallocate -l $loop_dev_size[$i++] $INST_DIR/$_", 300);
+        assert_script_run("losetup -fP $INST_DIR/$_", 300);
     }
     script_run("losetup -a");
-    format_with_options("$INST_DIR/test_dev", $para{fstype});
+    if ($para{fstype} =~ /overlay/) {
+        my $ovl_base_fs = get_var('XFSTESTS_OVERLAY_BASE_FS', 'xfs');
+        format_with_options("$INST_DIR/test_dev", $ovl_base_fs);
+        format_with_options("$INST_DIR/scratch_dev1", $ovl_base_fs);
+        script_run("echo 'export FSTYP=$ovl_base_fs' >> $CONFIG_FILE");
+    }
+    else {
+        format_with_options("$INST_DIR/test_dev", $para{fstype});
+    }
     # Create mount points
-    script_run('mkdir /mnt/test /mnt/scratch');
+    script_run("mkdir $TEST_FOLDER $SCRATCH_FOLDER");
     # Setup configure file xfstests/local.config
     script_run("echo 'export TEST_DEV=/dev/loop0' >> $CONFIG_FILE");
     set_var('XFSTESTS_TEST_DEV', '/dev/loop0');
-    script_run("echo 'export TEST_DIR=/mnt/test' >> $CONFIG_FILE");
-    script_run("echo 'export SCRATCH_MNT=/mnt/scratch' >> $CONFIG_FILE");
+    script_run("echo 'export TEST_DIR=$TEST_FOLDER' >> $CONFIG_FILE");
+    script_run("echo 'export SCRATCH_MNT=$SCRATCH_FOLDER' >> $CONFIG_FILE");
     if ($amount == 1) {
         script_run("echo 'export SCRATCH_DEV=/dev/loop1' >> $CONFIG_FILE");
         set_var('XFSTESTS_SCRATCH_DEV', '/dev/loop1');
@@ -206,7 +228,7 @@ sub create_loop_device_by_rootsize {
     }
     # Sync
     script_run('sync');
-    return $size . 'M';
+    return @loop_dev_size;
 }
 
 sub set_config {
@@ -214,26 +236,36 @@ sub set_config {
     if (get_var('XFSTESTS_XFS_REPAIR')) {
         script_run("echo export TEST_XFS_REPAIR_REBUILD=1 >> $CONFIG_FILE");
     }
+    if (check_var('XFSTESTS', 'nfs')) {
+        script_run("echo export TEST_DEV=$NFS_SERVER_IP:/opt/export/test >> $CONFIG_FILE");
+        script_run("echo export TEST_DIR=/opt/nfs/test >> $CONFIG_FILE");
+        script_run("echo export SCRATCH_DEV=$NFS_SERVER_IP:/opt/export/scratch >> $CONFIG_FILE");
+        script_run("echo export SCRATCH_MNT=/opt/nfs/scratch >> $CONFIG_FILE");
+        script_run("echo export NFS_MOUNT_OPTIONS='\"-o rw,relatime,vers=$NFS_VERSION\"' >> $CONFIG_FILE");
+    }
     record_info('Config file', script_output("cat $CONFIG_FILE"));
 }
 
 sub post_env_info {
-    my $size = shift;
+    my @size = @_;
     # record version info
     my $ver_log = get_var('VERSION_LOG', '/opt/version.log');
     record_info('Version', script_output("cat $ver_log"));
 
     # record partition size info
-    my $size_info = get_var('XFSTESTS_TEST_DEV') . "    $size\n";
+    my $size_info = get_var('XFSTESTS_TEST_DEV') . "    " . shift(@size) . "\n";
     if (my $scratch_dev = get_var("XFSTESTS_SCRATCH_DEV")) {
-        $size_info = $size_info . $scratch_dev . "    $size\n";
+        $size_info = $size_info . "$scratch_dev    " . shift(@size) . "\n";
     }
     else {
         my @scratch_dev_pool = split(/ /, get_var("XFSTESTS_SCRATCH_DEV_POOL"));
         foreach (@scratch_dev_pool) {
-            $size_info = $size_info . $_ . "    $size\n";
+            $size_info = $size_info . "$_    " . shift(@size) . "\n";
         }
     }
+    $size_info = $size_info . "PAGE_SIZE     " . script_output("getconf PAGE_SIZE") . "\n";
+    $size_info = $size_info . "QEMURAM       " . get_var("QEMURAM") . "\n";
+    $size_info = $size_info . "\n" . script_output("df -h");
     record_info('Size', $size_info);
 }
 
@@ -264,6 +296,10 @@ sub format_with_options {
         format_partition($part, 'xfs', options => '-f -m crc=1,reflink=0,rmapbt=0, -i sparse=0 -lsize=100m');
         script_run("echo 'export XFS_MKFS_OPTIONS=\"-m crc=1,reflink=0,rmapbt=0, -i sparse=0 -lsize=100m\"' >> $CONFIG_FILE");
     }
+    elsif ($filesystem eq 'xfs' && index(get_required_var('TEST'), 'bigtime') != -1) {
+        format_partition($part, 'xfs', options => '-f -m bigtime=1');
+        script_run("echo 'export XFS_MKFS_OPTIONS=\"-m bigtime=1\"' >> $CONFIG_FILE");
+    }
     # In case to test different mkfs.btrfs options
     # $XFSTEST_MKFS_OPTION: options for mkfs.btrfs
     # Example of 4k block size: -f -s 4k -n 16k
@@ -271,12 +307,91 @@ sub format_with_options {
         format_partition($part, 'btrfs', options => "$mkfs_option");
         script_run("echo 'export BTRFS_MKFS_OPTIONS=\"$mkfs_option\"' >> $CONFIG_FILE");
     }
+    elsif ($filesystem eq 'ocfs2') {
+        format_partition($part, 'ocfs2', options => '--fs-features=local --fs-feature-level=max-features');
+        script_run("echo 'export MKFS_OPTIONS=\"--fs-features=local --fs-feature-level=max-features\"' >> $CONFIG_FILE");
+    }
     else {
         format_partition($part, $filesystem);
     }
 }
 
+sub install_dependencies_ocfs2 {
+    my $scc_product = get_var('VERSION') =~ s/-SP/./r;
+    my $scc_arch = get_var('ARCH');
+    my $scc_regcode = get_var('SCC_REGCODE_HA');
+    add_suseconnect_product('sle-ha', $scc_product, $scc_arch, "-r $scc_regcode");
+    my @deps = qw(
+      ocfs2-tools
+    );
+    script_run('zypper --gpg-auto-import-keys ref');
+    if (is_transactional) {
+        trup_install(join(' ', @deps));
+        reboot_on_changes;
+    }
+    else {
+        zypper_call('in ' . join(' ', @deps));
+    }
+    script_run('modprobe ocfs2');
+}
+
+sub install_dependencies_nfs {
+    my @deps = qw(
+      nfs-kernel-server
+      nfs4-acl-tools
+    );
+    script_run('zypper --gpg-auto-import-keys ref');
+    if (is_transactional) {
+        trup_install(join(' ', @deps));
+        reboot_on_changes;
+    }
+    else {
+        zypper_call('in nfs-client ' . join(' ', @deps));
+    }
+}
+
+sub install_dependencies_overlayfs {
+    my @deps = qw(
+      overlayfs-tools
+      unionmount-testsuite
+      libcap-progs
+    );
+    script_run('zypper --gpg-auto-import-keys ref');
+    if (is_transactional) {
+        # Excluding libcap-progs since install issue
+        trup_install(join(' ', @deps[0 .. $#deps - 1]));
+        reboot_on_changes;
+    }
+    else {
+        zypper_call('in ' . join(' ', @deps));
+    }
+}
+
+sub setup_nfs_server {
+    my $nfsversion = shift;
+    assert_script_run('mkdir -p /opt/export/test /opt/export/scratch /opt/nfs/test /opt/nfs/scratch && chown nobody:nogroup /opt/export/test /opt/export/scratch && echo \'/opt/export/test *(rw,no_subtree_check,no_root_squash)\' >> /etc/exports && echo \'/opt/export/scratch *(rw,no_subtree_check,no_root_squash,fsid=1)\' >> /etc/exports');
+
+    my $nfsgrace = get_var('NFS_GRACE_TIME', 15);
+    assert_script_run("echo 'options lockd nlm_grace_period=$nfsgrace' >> /etc/modprobe.d/lockd.conf && echo 'options lockd nlm_timeout=5' >> /etc/modprobe.d/lockd.conf");
+
+    if ($nfsversion == '3') {
+        assert_script_run("echo 'MOUNT_NFS_V3=\"yes\"' >> /etc/sysconfig/nfs");
+        assert_script_run("echo 'MOUNT_NFS_DEFAULT_PROTOCOL=3' >> /etc/sysconfig/autofs && echo 'OPTIONS=\"-O vers=3\"' >> /etc/sysconfig/autofs");
+        assert_script_run("echo 'Defaultvers=3' >> /etc/nfsmount.conf && echo 'Nfsvers=3' >> /etc/nfsmount.conf");
+    }
+    else {
+        assert_script_run("sed -i 's/NFSV4LEASETIME=\"\"/NFSV4LEASETIME=\"$nfsgrace\"/' /etc/sysconfig/nfs");
+        assert_script_run("echo -e '[nfsd]\\ngrace-time=$nfsgrace\\nlease-time=$nfsgrace' > /etc/nfs.conf.local");
+    }
+    assert_script_run('exportfs -a && systemctl restart rpcbind && systemctl enable nfs-server.service && systemctl restart nfs-server');
+
+    # There's a graceful time we need to wait before using the NFS server
+    my $gracetime = script_output('cat /proc/fs/nfsd/nfsv4gracetime;');
+    sleep($gracetime * 2);
+}
+
 sub run {
+    my ($self) = @_;
     select_serial_terminal;
 
     # DO NOT set XFSTESTS_DEVICE if you don't know what's this mean
@@ -286,7 +401,37 @@ sub run {
 
     my $filesystem = get_required_var('XFSTESTS');
     my %para;
-    if ($device) {
+    if (check_var('XFSTESTS', 'ocfs2')) {
+        install_dependencies_ocfs2;
+    }
+    if (check_var('XFSTESTS', 'overlay')) {
+        install_dependencies_overlayfs;
+        script_run("echo export UNIONMOUNT_TESTSUITE=/opt/unionmount-testsuite >> $CONFIG_FILE");
+    }
+    if (check_var('XFSTESTS', 'nfs')) {
+        disable_and_stop_service('firewalld');
+        set_var('XFSTESTS_TEST_DEV', mountpoint_to_partition('/'));
+        post_env_info(join(' ', get_partition_size('/')));
+        if (get_var('XFSTESTS_NFS_SERVER')) {
+            server_configure_network($self);
+            install_dependencies_nfs;
+            setup_nfs_server("$NFS_VERSION");
+            mutex_create('xfstests_nfs_server_ready');
+            wait_for_children;
+        }
+        elsif (get_var('PARALLEL_WITH')) {
+            setup_static_mm_network('10.0.2.102/24');
+            install_dependencies_nfs;
+            assert_script_run('mkdir -p /opt/nfs/test /opt/nfs/scratch');
+            $NFS_SERVER_IP = '10.0.2.101';
+        }
+        else {
+            install_dependencies_nfs;
+            setup_nfs_server("$NFS_VERSION");
+            $NFS_SERVER_IP = 'localhost';
+        }
+    }
+    elsif ($device) {
         assert_script_run("parted $device --script -- mklabel gpt");
         $para{fstype} = $filesystem;
         $para{dev} = $device;
@@ -309,7 +454,9 @@ sub run {
             post_env_info(do_partition_for_xfstests(\%para));
         }
     }
-    set_config;
+    if (!get_var('XFSTESTS_NFS_SERVER')) {
+        set_config;
+    }
 }
 
 sub test_flags {

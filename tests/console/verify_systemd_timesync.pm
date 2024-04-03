@@ -7,7 +7,7 @@
 #          - Check if yast-timer configuration file exists and contains expected values.
 #          - Check configured time synchronization server address.
 #          - Check the message logs for "One time synchronization" occurrence.
-# Maintainer: QE YaST <qa-sle-yast@suse.de>
+# Maintainer: QE YaST and Migration (QE Yam) <qe-yam at suse de>
 
 use strict;
 use warnings;
@@ -29,7 +29,7 @@ sub run {
 
     record_info("Check server", "Check if the configured time synchronization server is the expected one.");
     my $expected_server = $test_data->{profile}->{'ntp-client'}->{ntp_servers}->{ntp_server}->{address};
-    my $chrony_conf = script_output("cat /etc/chrony.conf");
+    my $chrony_conf = script_output("cat /etc/chrony.d/pool.conf");
     $chrony_conf =~ /(\R|^)pool\s(?<server>\S+)/;
     assert_equals($expected_server, $+{server});
 

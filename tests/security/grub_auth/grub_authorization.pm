@@ -20,6 +20,7 @@ use warnings;
 use testapi;
 use base 'consoletest';
 use version_utils 'is_sle';
+use utils 'zypper_call';
 
 my $sup_user = 'admin';
 my $sup_passwd = 'pw_admin';
@@ -85,6 +86,9 @@ sub grub_auth_oper {
 
 sub run {
     select_console("root-console");
+
+    # Install runtime dependencies
+    zypper_call("in wget");
 
     # Check disk name, partition number and fs_type for root file system,
     # then create a new custom grub config file based on the users/passwords we definded
