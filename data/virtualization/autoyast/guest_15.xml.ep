@@ -369,9 +369,8 @@ chmod 600 /root/.ssh/authorized_key
 <script>
 <filename>PU0-cv-users.sh  % $testapi::password ($testapi::password) % </filename>
 <source>
-<%= $testapi::password %>
 <![CDATA[
-ip a | grep eth0 | grep -Po '(?<=inet )[\d.]+' > /root/$(hostname); logger "IP is written into file"; curl -k -u root: % {$testapi::password} % -T /root/$(hostname) sftp://{{SUT_IP}}/tmp/guests_ip/ --ftp-create-dirs; exit 0;
+ip a | grep eth0 | grep -Po '(?<=inet )[\d.]+' > /root/$(hostname); logger "IP is written into file"; curl -k -u root:<%= $testapi::password %> -T /root/$(hostname) sftp://{{SUT_IP}}/tmp/guests_ip/ --ftp-create-dirs; exit 0;
 ]]></source>
 </script>
 </init-scripts>
