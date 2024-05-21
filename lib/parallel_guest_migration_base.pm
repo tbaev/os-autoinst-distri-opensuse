@@ -752,6 +752,9 @@ sub save_guest_asset {
         record_info("Save $_guest asset");
         my $_temp = 1;
         $_temp = script_run("virsh $_uri dumpxml $_guest > $args{confdir}/$_guest.xml");
+        if (is_sle('>15-SP5')) {
+            $_temp = assert_script_run "sed -i '/<interface type/,/<\\/interface>/d' $args{confdir}/$_guest.xml");
+        }
         $_temp |= script_run("xmlstarlet ed --inplace --delete \"/domain/devices/interface/target\" $args{confdir}/$_guest.xml");
         $_temp |= script_run("xmlstarlet ed --inplace --delete \"/domain/devices/interface/alias\" $args{confdir}/$_guest.xml");
         $_temp |= script_run("xmlstarlet ed --inplace --delete \"/domain/devices/interface/source/\@portid\" $args{confdir}/$_guest.xml");
