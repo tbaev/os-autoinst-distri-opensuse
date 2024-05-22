@@ -90,7 +90,7 @@ sub run {
 
 
     # Ensure additional package is installed
-    zypper_call '-t in libvirt-client iputils nmap supportutils';
+    zypper_call '-t in libvirt-client iputils nmap supportutils libguestfs-winsupport';
     if (script_run("virsh net-list --all | grep default") != 0) {
         assert_script_run "curl " . data_url("virt_autotest/default_network.xml") . " -o ~/default_network.xml";
         assert_script_run "virsh net-define --file ~/default_network.xml";
