@@ -27,13 +27,20 @@ sub remove_guest {
 sub run {
     my $self = shift;
     my $username = 'Administrator';
+    my $win2k19_mac = $virt_autotest::common::imports{win2k19}->{macaddress};
 
     # Remove already existing guests to ensure a fresh start (needed for restarting jobs)
     remove_guest $_ foreach (keys %virt_autotest::common::imports);
     #    shutdown_guests();    # Shutdown SLES guests as they are not needed here
 
     import_guest $_, 'virt-install' foreach (values %virt_autotest::common::imports);
-    add_guest_to_hosts $_, $virt_autotest::common::imports{$_}->{ip} foreach (keys %virt_autotest::common::imports);
+
+    # Wait for win2k19 boot and dhcp request, and get the IP address using nmap
+    sleep 60;
+    script_output_retry $_, "nmap -sn 192.168.122.0/24 | grep $_->{macaddress} -B2 | head -1 | grep -oE '[0-9]+.[0-9]+.[0-9]+.[0-9]+'", delay => 10, retry => 10 foreach (values %virt_autotest::common::imports);
+
+    # Add the guest to hosts
+    add_guest_to_hosts $_, $win2k19_ip foreach (keys %virt_autotest::common::imports);
 
     # Check if SSH is open because of that means that the guest is installed
     ensure_online $_, skip_ssh => 1 foreach (keys %virt_autotest::common::imports);
