@@ -233,6 +233,7 @@
       <package>guestfs-tools</package>
       % if ($get_var->('VERSION') gt '15-SP5') {
       <package>libvirt-daemon-proxy</package>
+      <package>libguestfs-winsupport</package>
       % }
     </packages>
     <products config:type="list">
