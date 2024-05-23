@@ -27,7 +27,7 @@ sub remove_guest {
 sub run {
     my $self = shift;
     my $username = 'Administrator';
-    my $win2k19_mac = $virt_autotest::common::imports{win2k19}->{macaddress};
+    #my $win2k19_mac = $virt_autotest::common::imports{win2k19}->{macaddress};
 
     # Remove already existing guests to ensure a fresh start (needed for restarting jobs)
     remove_guest $_ foreach (keys %virt_autotest::common::imports);
