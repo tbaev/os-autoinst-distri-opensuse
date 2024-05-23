@@ -40,7 +40,7 @@ sub run {
     foreach (values %virt_autotest::common::imports) {
     my $cmd = "nmap -sn 192.168.122.0/24 | grep $_->{macaddress} -B2 | head -1 | grep -oE '[0-9]+.[0-9]+.[0-9]+.[0-9]+'";
     my $ip_adress = script_output_retry $cmd , delay => 10, retry => 10;
-    add_guest_to_hosts $_, $ip_adress;
+    add_guest_to_hosts $_->{name}, $ip_adress;
     }
     # Add the guest to hosts
     # add_guest_to_hosts $_, $win2k19_ip foreach (keys %virt_autotest::common::imports);
