@@ -490,7 +490,6 @@ sub create_guest {
     my $vcpus = $guest->{vcpus} // "2";
     my $maxvcpus = $guest->{maxvcpus} // $vcpus + 1;    # same as for memory, test functionality but don't waste resources
     my $extra_args = get_var("VIRTINSTALL_EXTRA_ARGS", "") . " " . get_var("VIRTINSTALL_EXTRA_ARGS_" . uc($name), "");
-    my $linuxrc = $guest->{linuxrc};
     $extra_args = trim($extra_args);
 
     if ($method eq 'virt-install') {
@@ -500,11 +499,11 @@ sub create_guest {
         my ($autoyastURL, $diskformat, $virtinstall);
         $autoyastURL = $autoyast;
         $diskformat = get_var("VIRT_QEMU_DISK_FORMAT") // "qcow2";
-        $extra_args = "$linuxrc autoyast=$autoyastURL $extra_args";
+        $extra_args = "autoyast=$autoyastURL $extra_args";
         $extra_args = trim($extra_args);
         $virtinstall = "virt-install $v_type $guest->{osinfo} --name $name --vcpus=$vcpus,maxvcpus=$maxvcpus --memory=$memory,maxmemory=$maxmemory --vnc";
         $virtinstall .= " --disk path=/var/lib/libvirt/images/$name.$diskformat,size=20,format=$diskformat --noautoconsole";
-        $virtinstall .= " --network network=default,mac=$macaddress --autostart --location=$location --wait -1";
+        $virtinstall .= " --network bridge=br0,mac=$macaddress --autostart --location=$location --wait -1";
         $virtinstall .= " --events on_reboot=$on_reboot" unless ($on_reboot eq '');
         $virtinstall .= " --extra-args '$extra_args'" unless ($extra_args eq '');
         record_info("$name", "Creating $name guests:\n$virtinstall");
