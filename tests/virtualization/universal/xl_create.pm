@@ -17,9 +17,9 @@ sub run {
     record_info "XML", "Export the XML from virsh and convert it into Xen config file";
     assert_script_run "virsh dumpxml $_ > $_.xml" foreach (keys %virt_autotest::common::guests);
     # SLES version is greater than 15-SP5, remove network from dumpxml file more information bsc#1222584
-    if (is_sle('>15-SP5')) {
-        assert_script_run "sed -i '/<interface type/,/<\\/interface>/d' $_.xml" foreach (keys %virt_autotest::common::guests);
-    }
+    # if (is_sle('>15-SP5')) {
+    #     assert_script_run "sed -i '/<interface type/,/<\\/interface>/d' $_.xml" foreach (keys %virt_autotest::common::guests);
+    # }
     assert_script_run "virsh domxml-to-native xen-xl $_.xml > $_.xml.cfg" foreach (keys %virt_autotest::common::guests);
     # Add network configuration to xen-xl cfg files
     if (is_sle('>15-SP5')) {
