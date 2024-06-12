@@ -32,10 +32,7 @@ sub run {
     my $self = shift;
     select_console('root-console');
     my @guests = keys %virt_autotest::common::guests;
-    # Fill the current pairs of hostname & address into /etc/hosts file
     assert_script_run 'virsh list --all';
-    add_guest_to_hosts $_, $virt_autotest::common::guests{$_}->{ip} foreach (@guests);
-    assert_script_run "cat /etc/hosts";
 
     # Wait for guests to announce that installation is complete
     my $retry = 35;
@@ -56,6 +53,13 @@ sub run {
             die;
         }
     }
+
+    # Fill the current pairs of hostname & address into /etc/hosts file
+    foreach my $guest (@guests) {
+        assert_script_run "sed 's/\$/ $guest # virtualization/' /tmp/guests_ip/$guest >> /etc/hosts";
+    }
+    assert_script_run "cat /etc/hosts";
+
     record_info("All guests installed", "Guest installation completed");
     if (is_sle('>15') && get_var("KVM")) {
         # Adding the PCI bridges requires the guests to be shutdown
