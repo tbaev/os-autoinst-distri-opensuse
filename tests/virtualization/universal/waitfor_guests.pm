@@ -61,8 +61,13 @@ sub run {
         $virt_autotest::common::guests{$guest}{ip} = "$guest_ip";
         # Fill the current pairs of hostname & address to the /etc/hosts file
         add_guest_to_hosts($guest, $guest_ip);
+        # Add mac address to guest hash
+        my $guest_mac = script_output("virsh domiflist $guest | awk 'NR>2 {print $5}'");
+        $virt_autotest::common::guests{$guest}{macaddress} = "$guest_mac";
+        script_retry("ssh root\@$guest ip l | grep " . $virt_autotest::common::guests{$guest}->{macaddress}, delay => 60, retry => 10, timeout => 60);
     }
 
+    # check mac address
     # Check address information in /etc/hosts file
     assert_script_run 'virsh list --all';
     assert_script_run "cat /etc/hosts";
