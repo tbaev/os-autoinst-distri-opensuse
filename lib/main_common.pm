@@ -2517,9 +2517,9 @@ sub load_hypervisor_tests {
         my $feature = $virt_features{$test};
         my $modules = $feature->{modules};
         my $hypervisor = $feature->{hypervisor};
-        if ($test eq 'ENABLE_SRIOV_NETWORK_CARD_PCI_PASSTHROUGH') {
-            next unless is_sle('>15');
-        }
+        #if ($test eq 'ENABLE_SRIOV_NETWORK_CARD_PCI_PASSTHROUGH') {
+        #    next unless is_sle('>15');
+        #}
         check_and_load_mu_virt_features($test, $modules, $hypervisor);
     }
     # Load ENABLE_SNAPSHOTS at the end
