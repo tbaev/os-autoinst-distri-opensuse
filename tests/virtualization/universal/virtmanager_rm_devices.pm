@@ -23,7 +23,7 @@ sub run_test {
     establish_connection();
 
     foreach my $guest (keys %virt_autotest::common::guests) {
-        unless (($guest =~ m/hvm/i) || ($guest =~ m/PV/i)) {
+        unless ($guest =~ m/PV/i) {
             record_info "$guest", "VM $guest will loose it's aditional HV";
 
             select_guest($guest);
