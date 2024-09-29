@@ -60,7 +60,7 @@
       <release_type/>
     </addon>
     % }
-    % if ($ltss_extended_security_code) {
+    % if ($ltss_es_code) {
     <addon>
       <name>SLES-LTSS-Extended-Security</name>
       <version>{{VERSION}}</version>
