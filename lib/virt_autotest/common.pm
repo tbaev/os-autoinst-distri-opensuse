@@ -72,6 +72,20 @@ if (get_var("REGRESSION", '') =~ /xen/) {
             distro => 'SLE_12_SP5',
             location => 'http://mirror.suse.cz/install/SLP/SLE-12-SP5-Server-LATEST/x86_64/DVD1/',
         },
+        sles12sp5ltssesHVM => {
+            name => 'sles12sp5ltssesHVM',
+            autoyast => 'autoyast_xen/sles12sp5ltssesHVM_PRG.xml',
+            extra_params => '--connect xen:/// --virt-type xen --hvm --os-variant sles12sp4',    # old system compatibility
+            distro => 'SLE_12_SP5',
+            location => 'http://mirror.suse.cz/install/SLP/SLE-12-SP5-Server-LATEST/x86_64/DVD1/',
+        },
+        sles12sp5ltssesPV => {
+            name => 'sles12sp5ltssesPV',
+            autoyast => 'autoyast_xen/sles12sp5ltssesPV_PRG.xml',
+            extra_params => '--connect xen:/// --virt-type xen --paravirt --os-variant sles12sp4',    # old system compatibility
+            distro => 'SLE_12_SP5',
+            location => 'http://mirror.suse.cz/install/SLP/SLE-12-SP5-Server-LATEST/x86_64/DVD1/',
+        },
         sles15sp4PV => {
             name => 'sles15sp4PV',
             extra_params => '--os-variant sle15-unknown',    # problems after kernel upgrade
@@ -111,7 +125,7 @@ if (get_var("REGRESSION", '') =~ /xen/) {
     );
     # Filter out guests not allowed for the detected SLE version
     if (is_sle('=12-SP5')) {
-        my @allowed_guests = qw(sles12sp5HVM sles12sp5PV sles15sp5HVM sles15sp5PV sles15sp6HVM sles15sp6PV);
+        my @allowed_guests = qw(sles12sp5HVM sles12sp5PV sles12sp5ltssesHVM sles12sp5ltssesPV sles15sp5HVM sles15sp5PV sles15sp6HVM sles15sp6PV);
         foreach my $guest (keys %guests) {
             delete $guests{$guest} unless grep { $_ eq $guest } @allowed_guests;
         }
@@ -131,12 +145,12 @@ if (get_var("REGRESSION", '') =~ /xen/) {
             delete $guests{$guest} unless grep { $_ eq $guest } @allowed_guests;
         }
     } elsif (is_sle('=15-SP5')) {
-        my @allowed_guests = qw(sles12sp5HVM sles12sp5PV sles15sp5HVM sles15sp5PV sles15sp6HVM sles15sp6PV);
+        my @allowed_guests = qw(sles12sp5HVM sles12sp5PV sles12sp5ltssesHVM sles12sp5ltssesPV sles15sp5HVM sles15sp5PV sles15sp6HVM sles15sp6PV);
         foreach my $guest (keys %guests) {
             delete $guests{$guest} unless grep { $_ eq $guest } @allowed_guests;
         }
     } elsif (is_sle('=15-SP6')) {
-        my @allowed_guests = qw(sles12sp5HVM sles12sp5PV sles15sp6HVM sles15sp6PV);
+        my @allowed_guests = qw(sles12sp5HVM sles12sp5PV sles12sp5ltssesHVM sles12sp5ltssesPV sles15sp6HVM sles15sp6PV);
         foreach my $guest (keys %guests) {
             delete $guests{$guest} unless grep { $_ eq $guest } @allowed_guests;
         }
@@ -175,6 +189,13 @@ if (get_var("REGRESSION", '') =~ /xen/) {
             distro => 'SLE_12_SP5',
             location => 'http://mirror.suse.cz/install/SLP/SLE-12-SP5-Server-LATEST/x86_64/DVD1/',
         },
+        sles12sp5ltsses => {
+            name => 'sles12sp5ltsses',
+            autoyast => 'autoyast_kvm/sles12sp5ltsses_PRG.xml',
+            extra_params => '--os-variant sles12sp4',    # old system compatibility
+            distro => 'SLE_12_SP5',
+            location => 'http://mirror.suse.cz/install/SLP/SLE-12-SP5-Server-LATEST/x86_64/DVD1/',
+        },
         sles15sp4 => {
             name => 'sles15sp4',
             extra_params => '--os-variant sle15-unknown',    # problems after kernel upgrade
@@ -201,7 +222,7 @@ if (get_var("REGRESSION", '') =~ /xen/) {
             delete $guests{$guest} unless grep { $_ eq $guest } @allowed_guests;
         }
     } elsif (is_sle('=12-SP5')) {
-        my @allowed_guests = qw(sles12sp5 sles15sp5 sles15sp6);
+        my @allowed_guests = qw(sles12sp5 sles12sp5ltsses sles15sp5 sles15sp6);
         foreach my $guest (keys %guests) {
             delete $guests{$guest} unless grep { $_ eq $guest } @allowed_guests;
         }
@@ -221,12 +242,12 @@ if (get_var("REGRESSION", '') =~ /xen/) {
             delete $guests{$guest} unless grep { $_ eq $guest } @allowed_guests;
         }
     } elsif (is_sle('=15-SP5')) {
-        my @allowed_guests = qw(sles12sp5 sles15sp5 sles15sp6);
+        my @allowed_guests = qw(sles12sp5 sles12sp5ltsses sles15sp5 sles15sp6);
         foreach my $guest (keys %guests) {
             delete $guests{$guest} unless grep { $_ eq $guest } @allowed_guests;
         }
     } elsif (is_sle('=15-SP6')) {
-        my @allowed_guests = qw(sles12sp5 sles15sp6);
+        my @allowed_guests = qw(sles12sp5 sles12sp5ltsses sles15sp6);
         foreach my $guest (keys %guests) {
             delete $guests{$guest} unless grep { $_ eq $guest } @allowed_guests;
         }
@@ -242,6 +263,9 @@ if (get_var("REGRESSION", '') =~ /xen/) {
         },
         sles12sp5 => {
             name => 'sles12sp5',
+        },
+        sles12sp5ES => {
+            name => 'sles12sp5ES',
         },
         sles15sp2 => {
             name => 'sles15sp2',
@@ -262,7 +286,7 @@ if (get_var("REGRESSION", '') =~ /xen/) {
             name => 'sles15sp6',
         },
     );
-    %guests = get_var('TERADATA') ? %guests{"sles${guest_version}TD"} : %guests{"sles${guest_version}"};
+    %guests = get_var('TERADATA') ? %guests{"sles${guest_version}TD"} : get_var('EXTENDED_SECURITY') ? %guests{"sles${guest_version}ES"} : %guests{"sles${guest_version}"};
 
 } elsif (get_var("REGRESSION", '') =~ /hyperv/) {
     %guests = (
@@ -271,6 +295,9 @@ if (get_var("REGRESSION", '') =~ /xen/) {
         },
         sles12sp5 => {
             vm_name => 'sles-12.5_openQA-virtualization-maintenance',
+        },
+        sles12sp5ES => {
+            vm_name => 'sles-12.5_openQA-virtualization-maintenance-ES',
         },
         sles15sp2 => {
             vm_name => 'sles-15.2_openQA-virtualization-maintenance',
@@ -291,7 +318,7 @@ if (get_var("REGRESSION", '') =~ /xen/) {
             vm_name => 'sles-15.6_openQA-virtualization-maintenance',
         },
     );
-    %guests = get_var('TERADATA') ? %guests{"sles${guest_version}TD"} : %guests{"sles${guest_version}"};
+    %guests = get_var('TERADATA') ? %guests{"sles${guest_version}TD"} : get_var('EXTENDED_SECURITY') ? %guests{"sles${guest_version}ES"} : %guests{"sles${guest_version}"};
 }
 
 our %imports = ();    # imports are virtual machines that we don't install but just import. We test those separately.

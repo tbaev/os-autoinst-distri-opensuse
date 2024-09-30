@@ -845,6 +845,7 @@ sub get_addon_fullname {
         legacy => 'sle-module-legacy',
         lgm => 'sle-module-legacy',
         ltss => is_hpc('15+') ? 'SLE_HPC-LTSS' : 'SLES-LTSS',
+        ltss_es => 'SLES-LTSS-Extended-Security',
         pcm => 'sle-module-public-cloud',
         rt => 'SUSE-Linux-Enterprise-RT',
         sapapp => 'sle-module-sap-applications',

@@ -51,12 +51,21 @@
     <arch>{{ARCH}}</arch>
     <release_type/>
     </addon>
-    % if ($ltss_code) {
+    % if ($ltss_code && $vm_name !~ /ltsses/) {
     <addon>
       <name>SLES-LTSS</name>
       <version>{{VERSION}}</version>
       <arch>{{ARCH}}</arch>
       <reg_code><%= $ltss_code %></reg_code>
+      <release_type/>
+    </addon>
+    % }
+    % if ($ltss_es_code && $vm_name =~ /ltsses/) {
+    <addon>
+      <name>SLES-LTSS-Extended-Security</name>
+      <version>{{VERSION}}</version>
+      <arch>{{ARCH}}</arch>
+      <reg_code><%= $ltss_es_code %></reg_code>
       <release_type/>
     </addon>
     % }
