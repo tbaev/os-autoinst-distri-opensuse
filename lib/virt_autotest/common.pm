@@ -243,6 +243,9 @@ if (get_var("REGRESSION", '') =~ /xen/) {
         sles12sp5 => {
             name => 'sles12sp5',
         },
+        sles12sp5ES => {
+            name => 'sles12sp5ES',
+        },
         sles15sp2 => {
             name => 'sles15sp2',
         },
@@ -271,6 +274,9 @@ if (get_var("REGRESSION", '') =~ /xen/) {
         },
         sles12sp5 => {
             vm_name => 'sles-12.5_openQA-virtualization-maintenance',
+        },
+        sles12sp5ES => {
+            vm_name => 'sles-12.5_openQA-virtualization-maintenance-ES',
         },
         sles15sp2 => {
             vm_name => 'sles-15.2_openQA-virtualization-maintenance',
