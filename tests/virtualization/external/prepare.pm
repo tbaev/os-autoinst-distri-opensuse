@@ -21,6 +21,11 @@ sub run {
     assert_script_run "rm /etc/zypp/repos.d/TEST* || true";
     zypper_call '-t --gpg-auto-import-keys in nmap iputils bind-utils', exitcode => [0, 102, 103, 106];
     record_info("EXTENDED_SECURITY is set to " . get_var('EXTENDED_SECURITY', ''));
+    if (check_var('EXTENDED_SECURITY', '1')) {
+    record_info("EXTENDED_SECURITY check_var = 1");
+    } else {
+    record_info("EXTENDED_SECURITY check_var not eq to 1");
+    }
     # Fill the current pairs of hostname & address into /etc/hosts file
     if (get_var("REGRESSION", '') =~ /vmware/) {
         my $vmware_server = get_required_var('VMWARE_SERVER');
