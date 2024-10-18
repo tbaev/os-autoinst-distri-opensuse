@@ -41,6 +41,7 @@ sub run {
             record_info("EXTENDED_SECURITY check_var not eq to 1");
             }
             my $vm_name = $virt_autotest::common::guests{$guest}->{vm_name};
+            record_info("vm_name == $virt_autotest::common::guests{$guest}->{vm_name});
             my $ip = script_output(qq(ssh -o StrictHostKeyChecking=no Administrator\@$hyperv_server 'powershell "get-vm -Name $vm_name | select -ExpandProperty networkadapters | select ipaddresses"' | grep -oE '[0-9]+.[0-9]+.[0-9]+.[0-9]+'));
             record_info("$guest: $ip");
             if (check_var('EXTENDED_SECURITY', '1')) {
