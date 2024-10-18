@@ -298,6 +298,11 @@ if (get_var("REGRESSION", '') =~ /xen/) {
         },
     );
     #%guests = get_var('TERADATA') ? %guests{"sles${guest_version}TD"} : check_var('EXTENDED_SECURITY', '1') ? %guests{"sles12sp5ES"} : %guests{"sles${guest_version}"};
+        if (check_var('EXTENDED_SECURITY', '1')) {
+        %guests = sles12sp5ES;
+        } else {
+        %guests = sles12sp3;
+        }
 }
 
 our %imports = ();    # imports are virtual machines that we don't install but just import. We test those separately.
