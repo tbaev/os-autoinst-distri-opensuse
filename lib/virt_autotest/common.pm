@@ -301,7 +301,7 @@ if (get_var("REGRESSION", '') =~ /xen/) {
         if (get_var("EXTENDED_SECURITY")) {
         %guests = %guests{"sles12sp5ES"};
         } else {
-        %guests = %guests{get_var("EXTENDED_SECURITY")};
+        %guests = %guests{get_var("EXTENDED_SECURITY", '')};
         }
 }
 
