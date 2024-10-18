@@ -33,7 +33,7 @@ sub run {
         }
     } else {
         my $hyperv_server = get_required_var('HYPERV_SERVER');
-        set_var('EXTENDED_SECURITY', 10);
+        #set_var('EXTENDED_SECURITY', 10);
         foreach my $guest (keys %virt_autotest::common::guests) {
             record_info("EXTENDED_SECURITY for $guest set to " . get_var('EXTENDED_SECURITY', ''));
             if (check_var('EXTENDED_SECURITY', '1')) {
