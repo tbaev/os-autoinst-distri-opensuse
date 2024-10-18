@@ -298,7 +298,7 @@ if (get_var("REGRESSION", '') =~ /xen/) {
         },
     );
     #%guests = get_var('TERADATA') ? %guests{"sles${guest_version}TD"} : check_var('EXTENDED_SECURITY', '1') ? %guests{"sles12sp5ES"} : %guests{"sles${guest_version}"};
-        if (get_var("EXTENDED_SECURITY", '') =~ /1/) {
+        if (get_var("EXTENDED_SECURITY") {
         %guests = %guests{"sles12sp5ES"};
         } else {
         %guests = %guests{"sles12sp3"};
