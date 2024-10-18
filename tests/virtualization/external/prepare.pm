@@ -28,14 +28,17 @@ sub run {
             record_info("EXTENDED_SECURITY for $guest set to " . get_var('EXTENDED_SECURITY', ''));
             my $ip = script_output(qq(ssh -o StrictHostKeyChecking=no root\@$vmware_server "vim-cmd vmsvc/get.guest \\`vim-cmd vmsvc/getallvms | grep -w $guest|cut -d ' ' -f1\\`|grep -A 1 hostName|grep ipAddress|cut -d '\\"' -f2"));
             record_info("$guest: $ip");
+            record_info("EXTENDED_SECURITY for $guest set to " . get_var('EXTENDED_SECURITY', ''));
             assert_script_run(qq(echo "$ip $guest" >> /etc/hosts));
         }
     } else {
         my $hyperv_server = get_required_var('HYPERV_SERVER');
         foreach my $guest (keys %virt_autotest::common::guests) {
+            record_info("EXTENDED_SECURITY for $guest set to " . get_var('EXTENDED_SECURITY', ''));
             my $vm_name = $virt_autotest::common::guests{$guest}->{vm_name};
             my $ip = script_output(qq(ssh -o StrictHostKeyChecking=no Administrator\@$hyperv_server 'powershell "get-vm -Name $vm_name | select -ExpandProperty networkadapters | select ipaddresses"' | grep -oE '[0-9]+.[0-9]+.[0-9]+.[0-9]+'));
             record_info("$guest: $ip");
+            record_info("EXTENDED_SECURITY for $guest set to " . get_var('EXTENDED_SECURITY', ''));
             assert_script_run(qq(echo "$ip $guest" >> /etc/hosts));
         }
     }
