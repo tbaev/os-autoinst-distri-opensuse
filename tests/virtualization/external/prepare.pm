@@ -36,10 +36,10 @@ sub run {
         #set_var('EXTENDED_SECURITY', 10);
         foreach my $guest (keys %virt_autotest::common::guests) {
             record_info("EXTENDED_SECURITY for $guest set to " . get_var('EXTENDED_SECURITY', ''));
-            if (check_var('EXTENDED_SECURITY', '1')) {
-            record_info("EXTENDED_SECURITY check_var = 1");
+            if (get_var("EXTENDED_SECURITY") {
+            record_info("EXTENDED_SECURITY get_var = 1");
             } else {
-            record_info("EXTENDED_SECURITY check_var not eq to 1");
+            record_info("EXTENDED_SECURITY get_var not eq to 1");
             }
             my $vm_name = $virt_autotest::common::guests{$guest}->{vm_name};
             record_info("vm_name","vm_name == $virt_autotest::common::guests{$guest}->{vm_name}");
