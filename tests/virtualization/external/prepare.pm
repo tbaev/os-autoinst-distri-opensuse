@@ -21,11 +21,6 @@ sub run {
     assert_script_run "rm /etc/zypp/repos.d/TEST* || true";
     zypper_call '-t --gpg-auto-import-keys in nmap iputils bind-utils', exitcode => [0, 102, 103, 106];
     record_info("EXTENDED_SECURITY is set to " . get_var('EXTENDED_SECURITY', ''));
-    if (check_var('EXTENDED_SECURITY', '1')) {
-    record_info("EXTENDED_SECURITY check_var = 1");
-    } else {
-    record_info("EXTENDED_SECURITY check_var not eq to 1");
-    }
     # Fill the current pairs of hostname & address into /etc/hosts file
     if (get_var("REGRESSION", '') =~ /vmware/) {
         my $vmware_server = get_required_var('VMWARE_SERVER');
@@ -40,9 +35,19 @@ sub run {
         my $hyperv_server = get_required_var('HYPERV_SERVER');
         foreach my $guest (keys %virt_autotest::common::guests) {
             record_info("EXTENDED_SECURITY for $guest set to " . get_var('EXTENDED_SECURITY', ''));
+            if (check_var('EXTENDED_SECURITY', '1')) {
+            record_info("EXTENDED_SECURITY check_var = 1");
+            } else {
+            record_info("EXTENDED_SECURITY check_var not eq to 1");
+            }
             my $vm_name = $virt_autotest::common::guests{$guest}->{vm_name};
             my $ip = script_output(qq(ssh -o StrictHostKeyChecking=no Administrator\@$hyperv_server 'powershell "get-vm -Name $vm_name | select -ExpandProperty networkadapters | select ipaddresses"' | grep -oE '[0-9]+.[0-9]+.[0-9]+.[0-9]+'));
             record_info("$guest: $ip");
+            if (check_var('EXTENDED_SECURITY', '1')) {
+            record_info("EXTENDED_SECURITY check_var = 1");
+            } else {
+            record_info("EXTENDED_SECURITY check_var not eq to 1");
+            }
             record_info("EXTENDED_SECURITY for $guest set to " . get_var('EXTENDED_SECURITY', ''));
             assert_script_run(qq(echo "$ip $guest" >> /etc/hosts));
         }
