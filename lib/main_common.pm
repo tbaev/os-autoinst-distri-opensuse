@@ -2406,6 +2406,7 @@ sub set_mu_virt_vars {
     set_var('EXTENDED_SECURITY', (get_var('INCIDENT_REPO') =~ /LTSS-Extended-Security/) ? 1 : 0);
     # Set PATCH_WITH_ZYPPER
     set_var('PATCH_WITH_ZYPPER', 1) unless (check_var('PATCH_WITH_ZYPPER', 0));
+    bmwqemu::save_vars();
 }
 
 sub load_hypervisor_tests {
