@@ -301,7 +301,7 @@ if (get_var("REGRESSION", '') =~ /xen/) {
         if (get_var('INCIDENT_REPO') =~ /LTSS-Extended-Security/) {
         %guests = %guests{"sles12sp5ES"};
         } else {
-        %guests = %guests{"sles12sp3")};
+        %guests = %guests{"sles12sp3"};
         }
 }
 
