@@ -23,7 +23,7 @@ sub run_test {
     establish_connection();
 
     foreach my $guest (keys %virt_autotest::common::guests) {
-        unless ($guest =~ m/hvm/i) {
+#        unless ($guest =~ m/hvm/i) {
             record_info "$guest", "VM $guest will get some new devices";
             my $attachFail = 0;    # Indicating if we are having problems attaching devices
 
@@ -78,7 +78,7 @@ sub run_test {
 
             detect_login_screen() if (!check_screen('virt-manager_viewer_disconnected', 5));
             close_guest();
-        }
+#        }
     }
 
     wait_screen_change { send_key 'ctrl-q'; };
