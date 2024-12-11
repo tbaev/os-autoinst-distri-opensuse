@@ -85,6 +85,8 @@ sub verify_hypervisor {
 
 sub verify_norepos {
     my $ret = script_run "zypper lr";
+    script_run "sed -i 's/^GRUB_TIMEOUT=.*/GRUB_TIMEOUT=45/' /etc/default/grub";
+    script_run "transactional-update run grub2-mkconfig -o /boot/grub2/grub.cfg";
 
     # Check ZYPPER_EXIT_NO_REPOS
     die("Image should not contain any repos after first boot") if ($ret != 6);
