@@ -85,7 +85,7 @@ sub run {
     if (check_var('VIRSH_VMM_FAMILY', 'vmware')) {
 #        change_grub_config('=.*', '=800x600x32', 'GFXMODE=');
 #        change_grub_config('=.*', '=text', 'GFXPAYLOAD_LINUX=');
-        change_grub_config('=.*', '=20', 'GRUB_TIMEOUT=');
+        change_grub_config('=.*', '=30', 'GRUB_TIMEOUT=');
 #        grub_mkconfig;
     }
 
