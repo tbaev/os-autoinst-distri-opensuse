@@ -83,10 +83,10 @@ sub run {
 
     # bsc#997263 - VMware screen resolution defaults to 800x600 and longer GRUB_TIMEOUT for better needle detection
     if (check_var('VIRSH_VMM_FAMILY', 'vmware')) {
-        change_grub_config('=.*', '=800x600x32', 'GFXMODE=');
-        change_grub_config('=.*', '=text', 'GFXPAYLOAD_LINUX=');
-        change_grub_config('=.*', '=15', 'GRUB_TIMEOUT=');
-        grub_mkconfig;
+#        change_grub_config('=.*', '=800x600x32', 'GFXMODE=');
+#        change_grub_config('=.*', '=text', 'GFXPAYLOAD_LINUX=');
+#        change_grub_config('=.*', '=15', 'GRUB_TIMEOUT=');
+#        grub_mkconfig;
     }
 
     # Save output info to logfile
