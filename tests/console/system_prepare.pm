@@ -86,7 +86,7 @@ sub run {
 #        change_grub_config('=.*', '=800x600x32', 'GFXMODE=');
 #        change_grub_config('=.*', '=text', 'GFXPAYLOAD_LINUX=');
         change_grub_config('=.*', '=30', 'GRUB_TIMEOUT=');
-#        grub_mkconfig;
+        grub_mkconfig;
     }
 
     # Save output info to logfile
