@@ -27,6 +27,7 @@ use strict;
 use Utils::Architectures 'is_ppc64le';
 use warnings;
 use virt_autotest::hyperv_utils 'hyperv_cmd';
+use transactional qw(process_reboot);
 
 sub run {
     my ($self) = @_;
@@ -87,6 +88,7 @@ sub run {
         #change_grub_config('=.*', '=1024x768x32', 'GFXPAYLOAD_LINUX=');
         change_grub_config('=.*', '=30', 'GRUB_TIMEOUT=');
         grub_mkconfig;
+        process_reboot(trigger => 1);
     }
 
     # Save output info to logfile
