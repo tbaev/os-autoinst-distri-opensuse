@@ -17,7 +17,8 @@ conditional_schedule:
         RUN_TEST_ONLY:
             0:
                 - autoyast/prepare_profile
-                - installation/ipxe_install
+#                - installation/ipxe_install
+                - boot/boot_from_pxe
                 - autoyast/installation
                 - virt_autotest/login_console
     kubevirt_tests:
