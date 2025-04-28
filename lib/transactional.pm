@@ -105,22 +105,22 @@ sub process_reboot {
         record_kernel_audit_messages();
     } else {
         power_action('reboot', observe => !$args{trigger}, keepconsole => 1);
-#        if (is_s390x || is_pvm) {
-#            reconnect_mgmt_console(timeout => 500) unless $args{automated_rollback};
-#        }
-#        if (!is_s390x && $args{expected_grub}) {
-#            if (is_aarch64 && check_screen('tianocore-mainmenu', 30)) {
-#                # Use firmware boot manager of aarch64 to boot HDD, when needed
-#                opensusebasetest::handle_uefi_boot_disk_workaround();
-#            }
-#            if ($args{expected_passphrase}) {
-#                unlock_if_encrypted();
-#            }
-#            # Replace by wait_boot if possible
-#            select_console('sol', await_console => 0) if (is_ipmi);
-#            assert_screen 'grub2', 300;
-#            wait_screen_change { send_key 'ret' };
-#        }
+        if (is_s390x || is_pvm) {
+            reconnect_mgmt_console(timeout => 500) unless $args{automated_rollback};
+        }
+        if (!is_s390x && $args{expected_grub}) {
+            if (is_aarch64 && check_screen('tianocore-mainmenu', 30)) {
+                # Use firmware boot manager of aarch64 to boot HDD, when needed
+                opensusebasetest::handle_uefi_boot_disk_workaround();
+            }
+            if ($args{expected_passphrase}) {
+                unlock_if_encrypted();
+            }
+            # Replace by wait_boot if possible
+            select_console('sol', await_console => 0) if (is_ipmi);
+            # assert_screen 'grub2', 300;
+            # wait_screen_change { send_key 'ret' };
+        }
         assert_screen 'linux-login', 500;
 
         # Login & clear login needle
