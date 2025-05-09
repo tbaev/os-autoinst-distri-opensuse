@@ -11,7 +11,7 @@ schedule:
 conditional_schedule:
     pxe_boot:
         IPXE:
-            ~:
+            "":
                 - boot/boot_from_pxe
             1:
                 - installation/ipxe_install
