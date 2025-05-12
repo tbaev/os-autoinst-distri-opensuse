@@ -214,11 +214,10 @@ sub install_kubevirt_packages {
     # MU product test (SLE official MU channel+incidents)
     transactional::enter_trup_shell(global_options => '--drop-if-no-change') if (is_transactional);
 
-    # If MU incident, VIRT_TESTS_REPO and VIRT_MANIFESTS_REPO should be the same the same as INCIDENT_REPO
+    # If MU incident, VIRT_TESTS_REPO should be the same the same as INCIDENT_REPO
     if (get_var("INCIDENT_REPO")) {
         record_info('Adding MU INCIDENT_REPO');
         $virt_tests_repo = $virt_incident_repo;
-        $virt_manifests_repo = $virt_incident_repo;
     }
 
     zypper_call("lr -d");
