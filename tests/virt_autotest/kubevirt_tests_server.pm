@@ -205,6 +205,7 @@ sub install_kubevirt_packages {
     my $os_version = get_var('VERSION');
     my $virt_tests_repo = get_required_var('VIRT_TESTS_REPO');
     my $virt_manifests_repo = get_var('VIRT_MANIFESTS_REPO');
+    my $virt_incident_repo = get_var('INCIDENT_REPO');
 
     record_info('Install kubevirt packages', '');
     # Development Tools repo for OBS Module, e.g. http://download.suse.de/download/ibs/SUSE/Products/SLE-Module-Development-Tools-OBS/15-SP4/x86_64/product/
@@ -212,6 +213,18 @@ sub install_kubevirt_packages {
     # Devel test repo, e.g. http://download.suse.de/download/ibs/Devel:/Virt:/SLE-15-SP4/SUSE_SLE-15-SP4_Update_standard/
     # MU product test (SLE official MU channel+incidents)
     transactional::enter_trup_shell(global_options => '--drop-if-no-change') if (is_transactional);
+
+    # If MU incident, VIRT_TESTS_REPO and VIRT_MANIFESTS_REPO should be the same the same as INCIDENT_REPO
+    if (get_var("INCIDENT_REPO")) {
+        record_info('Incident repo exists');
+        record_info("Incident repo $virt_incident_repo");
+        record_info("Test repo $virt_tests_repo");
+        record_info("Manifest repo $virt_manifests_repo");
+        $virt_tests_repo = $virt_incident_repo;
+        $virt_manifests_repo = $virt_incident_repo;
+        record_info("New test repo $virt_tests_repo");
+        record_info("New manifest repo $virt_manifests_repo");
+    }
 
     zypper_call("lr -d");
     zypper_call("ar $virt_tests_repo Virt-Tests-Repo");
