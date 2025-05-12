@@ -216,14 +216,9 @@ sub install_kubevirt_packages {
 
     # If MU incident, VIRT_TESTS_REPO and VIRT_MANIFESTS_REPO should be the same the same as INCIDENT_REPO
     if (get_var("INCIDENT_REPO")) {
-        record_info('Incident repo exists');
-        record_info("Incident repo $virt_incident_repo");
-        record_info("Test repo $virt_tests_repo");
-        record_info("Manifest repo $virt_manifests_repo");
+        record_info('Adding MU INCIDENT_REPO');
         $virt_tests_repo = $virt_incident_repo;
         $virt_manifests_repo = $virt_incident_repo;
-        record_info("New test repo $virt_tests_repo");
-        record_info("New manifest repo $virt_manifests_repo");
     }
 
     zypper_call("lr -d");
