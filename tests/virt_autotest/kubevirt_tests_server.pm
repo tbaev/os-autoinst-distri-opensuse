@@ -214,12 +214,11 @@ sub install_kubevirt_packages {
     # MU product test (SLE official MU channel+incidents)
     transactional::enter_trup_shell(global_options => '--drop-if-no-change') if (is_transactional);
 
-    # If MU incident, VIRT_TESTS_REPO should be the same the same as INCIDENT_REPO
+    # If MU incident, kubevirt should be installed from INCIDENT_REPO
     if (get_var("INCIDENT_REPO")) {
-        record_info('Adding MU INCIDENT_REPO');
-        $virt_tests_repo = get_var('INCIDENT_REPO');
+        record_info('MU incident test');
+        zypper_call("in containerized-data-importer-manifests kubevirt-manifests kubevirt-virtctl kubevirt-tests")
     }
-
     zypper_call("lr -d");
     unless (get_var("INCIDENT_REPO")) {
         zypper_call("ar $virt_tests_repo Virt-Tests-Repo");
