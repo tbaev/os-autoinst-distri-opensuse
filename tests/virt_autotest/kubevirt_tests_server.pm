@@ -221,23 +221,25 @@ sub install_kubevirt_packages {
     }
 
     zypper_call("lr -d");
-    zypper_call("ar $virt_tests_repo Virt-Tests-Repo");
-    zypper_call("ar $virt_manifests_repo Virt-Manifests-Repo") if ($virt_manifests_repo);
-    zypper_call("--gpg-auto-import-keys ref");
+    unless (get_var("INCIDENT_REPO")) {
+        zypper_call("ar $virt_tests_repo Virt-Tests-Repo");
+        zypper_call("ar $virt_manifests_repo Virt-Manifests-Repo") if ($virt_manifests_repo);
+        zypper_call("--gpg-auto-import-keys ref");
 
-    my $virt_manifests = 'containerized-data-importer-manifests kubevirt-manifests kubevirt-virtctl';
-    my $search_manifests = $virt_manifests =~ s/\s+/\\\|/gr;
+        my $virt_manifests = 'containerized-data-importer-manifests kubevirt-manifests kubevirt-virtctl';
+        my $search_manifests = $virt_manifests =~ s/\s+/\\\|/gr;
 
-    if ($virt_manifests_repo) {
-        zypper_call("in -f -r Virt-Manifests-Repo $virt_manifests");
-    } elsif (script_run("rpmquery $virt_manifests")) {
-        if (is_transactional || script_run("zypper se -r SLE-Module-Containers${os_version}-Updates $virt_manifests | grep -w '$search_manifests'")) {
-            zypper_call("in -f $virt_manifests");
-        } else {
-            zypper_call("in -f -r SLE-Module-Containers${os_version}-Updates $virt_manifests");
+        if ($virt_manifests_repo) {
+            zypper_call("in -f -r Virt-Manifests-Repo $virt_manifests");
+        } elsif (script_run("rpmquery $virt_manifests")) {
+            if (is_transactional || script_run("zypper se -r SLE-Module-Containers${os_version}-Updates $virt_manifests | grep -w '$search_manifests'")) {
+                zypper_call("in -f $virt_manifests");
+            } else {
+                zypper_call("in -f -r SLE-Module-Containers${os_version}-Updates $virt_manifests");
+            }
         }
+        zypper_call("in -f -r Virt-Tests-Repo kubevirt-tests");
     }
-    zypper_call("in -f -r Virt-Tests-Repo kubevirt-tests");
 
     # Install Longhorn dependencies
     our $kubevirt_ver = script_output("rpm -q --qf \%{VERSION} kubevirt-manifests");
