@@ -237,8 +237,8 @@ sub install_kubevirt_packages {
                 zypper_call("in -f -r SLE-Module-Containers${os_version}-Updates $virt_manifests");
             }
         }
-        zypper_call("in -f -r Virt-Tests-Repo kubevirt-tests");
     }
+    zypper_call("in -f -r Virt-Tests-Repo kubevirt-tests");
 
     # Install Longhorn dependencies
     our $kubevirt_ver = script_output("rpm -q --qf \%{VERSION} kubevirt-manifests");
