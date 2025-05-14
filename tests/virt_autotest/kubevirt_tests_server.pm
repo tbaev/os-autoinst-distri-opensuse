@@ -217,7 +217,7 @@ sub install_kubevirt_packages {
     # If MU incident, kubevirt should be installed from INCIDENT_REPO
     if (get_var("INCIDENT_REPO")) {
         record_info('MU incident test');
-        zypper_call("in containerized-data-importer-manifests kubevirt-manifests kubevirt-virtctl kubevirt-tests")
+        zypper_call("in containerized-data-importer-manifests kubevirt-manifests kubevirt-virtctl")
     }
     zypper_call("lr -d");
     unless (get_var("INCIDENT_REPO")) {
