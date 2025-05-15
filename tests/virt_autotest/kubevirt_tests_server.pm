@@ -199,6 +199,21 @@ sub check_service_status {
     assert_script_run("! journalctl -u rke2-server | grep \'\"level\":\"error\"\'");
 }
 
+sub specify_package_version {
+    my ($ver, $pkgs) = @_;
+    my @inst_pkgs = ();
+    if ($ver) {
+        foreach (split(/ /, $pkgs)) {
+            if ($_ =~ /kubevirt/) {
+                push(@inst_pkgs, join('-', $_, $ver));
+            } else {
+                push(@inst_pkgs, $_);
+            }
+        }
+    }
+    return "@inst_pkgs";
+}
+
 sub install_kubevirt_packages {
     my $self = shift;
     # Install required kubevirt packages
@@ -219,10 +234,14 @@ sub install_kubevirt_packages {
     zypper_call("--gpg-auto-import-keys ref");
 
     my $virt_manifests = 'containerized-data-importer-manifests kubevirt-manifests kubevirt-virtctl';
+    my $virt_tests = 'kubevirt-tests';
+    my $container_tag = get_required_var("CONTAINER_TAG");
+    $virt_manifests = specify_package_version($container_tag, $virt_manifests);
+    $virt_tests = specify_package_version($container_tag, $virt_tests);
     my $search_manifests = $virt_manifests =~ s/\s+/\\\|/gr;
 
     if ($virt_manifests_repo) {
-        zypper_call("in -f -r Virt-Manifests-Repo $virt_manifests");
+        zypper_call("in -f -r Virt-Manifests-Repo $virt_tests");
     } elsif (script_run("rpmquery $virt_manifests")) {
         if (is_transactional || script_run("zypper se -r SLE-Module-Containers${os_version}-Updates $virt_manifests | grep -w '$search_manifests'")) {
             zypper_call("in -f $virt_manifests");
