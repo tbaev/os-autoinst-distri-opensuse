@@ -30,7 +30,7 @@ our @EXPORT = qw(
   revert_vm_timesync_setting
 );
 
-my $hypervisor = get_var('HYPERVISOR') // 'esxi7.qa.suse.cz';
+my $hypervisor = get_var('HYPERVISOR') // 'orion.oqa.prg2.suse.org';
 
 sub esxi_vm_get_vmid {
     my $vm_name = shift;
