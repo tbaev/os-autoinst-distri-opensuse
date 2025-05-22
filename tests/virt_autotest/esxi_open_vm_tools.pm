@@ -135,7 +135,7 @@ sub do_networking_tests {
     my $external_url = 'www.suse.com';
 
     if (is_sle('15+')) {
-        sleep 10;
+        sleep 30;
         assert_script_run($ssh_vm . "ping -I $vm_ip -4 -c3 " . $openqa_url);
         assert_script_run($ssh_vm . "ping -I $vm_ip -4 -c3 " . $external_url);
     }
