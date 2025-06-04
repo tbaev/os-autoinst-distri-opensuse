@@ -65,7 +65,6 @@ sub do_sanity_checks {
     my $vm_ip = shift;
 
     assert_script_run($ssh_vm . "rpmquery open-vm-tools || zypper -n in open-vm-tools");
-    assert_script_run($ssh_vm . "rpmquery nmap || zypper -n in nmap");
     assert_script_run($ssh_vm . "/usr/bin/vmware-checkvm | grep 'good'");
 
     assert_script_run($ssh_vm . 'systemctl status vmtoolsd');
@@ -136,7 +135,9 @@ sub do_networking_tests {
     my $external_url = 'www.suse.com';
 
     # Check if guest is booted and ssh service is started
+    if (check_var('DISTRI', 'sle')) {
     die "SSH is not reacheble" if (script_retry("nmap $vm_ip -PN -p ssh | grep open", delay => 10, retry => 12, timeout => 360) != 0);
+    }
     if (is_sle('15+')) {
         assert_script_run($ssh_vm . "ping -I $vm_ip -4 -c3 " . $openqa_url);
         assert_script_run($ssh_vm . "ping -I $vm_ip -4 -c3 " . $external_url);
