@@ -65,6 +65,7 @@ sub do_sanity_checks {
     my $vm_ip = shift;
 
     assert_script_run($ssh_vm . "rpmquery open-vm-tools || zypper -n in open-vm-tools");
+    assert_script_run($ssh_vm . "rpmquery open-vm-tools || zypper -n in nmap");
     assert_script_run($ssh_vm . "/usr/bin/vmware-checkvm | grep 'good'");
 
     assert_script_run($ssh_vm . 'systemctl status vmtoolsd');
