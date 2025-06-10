@@ -1,5 +1,5 @@
 # SUSE's openQA tests
-#
+###
 # Copyright 2021 SUSE LLC
 # SPDX-License-Identifier: FSFAP
 
