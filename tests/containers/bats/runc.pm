@@ -7,6 +7,8 @@
 # Summary: Upstream runc integration tests
 # Maintainer: QE-C team <qa-c@suse.de>
 
+use strict;
+use warnings;
 use Mojo::Base 'containers::basetest';
 use testapi;
 use serial_terminal qw(select_serial_terminal);
@@ -48,7 +50,6 @@ sub run {
     # Download runc sources
     my $runc_version = script_output "runc --version  | awk '{ print \$3 }'";
     bats_sources $runc_version;
-    bats_patches;
 
     # Compile helpers used by the tests
     my $cmds = script_output "find contrib/cmd tests/cmd -mindepth 1 -maxdepth 1 -type d -printf '%f ' || true";

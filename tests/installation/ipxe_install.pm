@@ -205,8 +205,9 @@ sub set_bootscript_agama_cmdline_extra {
     }
 
     # Support passing EXTRA_PXE_CMDLINE and EXTRABOOTPARAMS to bootscripts (inherited from set_bootscript_cmdline_extra)
-    $cmdline_extra .= get_var('EXTRA_PXE_CMDLINE', '');
-    $cmdline_extra .= get_var('EXTRABOOTPARAMS', '');
+    $cmdline_extra .= ' ' . get_var('EXTRA_PXE_CMDLINE', '');
+    $cmdline_extra .= ' ' . get_var('EXTRABOOTPARAMS', '');
+    $cmdline_extra .= ' ' . get_var('AGAMA_NETWORK_PARAMS', '');
 
     return $cmdline_extra;
 }
@@ -356,6 +357,7 @@ sub run {
         assert_screen([qw(load-linux-kernel load-initrd)], 240);
         record_info("Installing", "Please check the expected product is being installed");
         assert_screen('agama-installer-live-root', 400);
+        set_bootscript_hdd if get_var('IPXE_SET_HDD_BOOTSCRIPT');
         return;
     }
 

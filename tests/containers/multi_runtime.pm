@@ -8,6 +8,8 @@
 # - check if firewalld doesn't break either
 # Maintainer: QE-C team <qa-c@suse.de>
 
+use strict;
+use warnings;
 use Mojo::Base qw(containers::basetest);
 use testapi;
 use serial_terminal qw(select_serial_terminal select_user_serial_terminal);
@@ -95,6 +97,7 @@ sub run {
     systemctl "enable --now docker";
 
     record_info("docker root", script_output("docker info"));
+    record_info("docker version", script_output("docker version"));
     record_info("podman root", script_output("podman info"));
 
     # Needed to avoid:

@@ -22,12 +22,10 @@ use registration qw(add_suseconnect_product get_addon_fullname);
 use bootloader_setup 'add_grub_cmdline_settings';
 use power_action_utils 'power_action';
 use List::MoreUtils qw(uniq);
-use containers::common qw(install_packages);
 use YAML::PP;
 use File::Basename;
 
 our @EXPORT = qw(
-  bats_patches
   bats_post_hook
   bats_setup
   bats_sources
@@ -189,16 +187,23 @@ Options=bind
 EOF
 
     assert_script_run "mkdir -p /etc/systemd/system/tmp.mount.d/";
-    assert_script_run "echo '$override_conf' > /etc/systemd/system/tmp.mount.d/override.conf";
+    write_sut_file('/etc/systemd/system/tmp.mount.d/override.conf', $override_conf);
 }
 
 sub bats_setup {
     my ($self, @pkgs) = @_;
-    my $reboot_needed = 0;
 
     $package = get_required_var("BATS_PACKAGE");
 
     push @commands, "### RUN AS root";
+
+    foreach my $repo (split(/\s+/, get_var("BATS_TEST_REPOS", ""))) {
+        run_command "zypper addrepo $repo";
+    }
+
+    foreach my $pkg (split(/\s+/, get_var("BATS_TEST_PACKAGES", ""))) {
+        run_command "zypper --gpg-auto-import-keys --no-gpg-checks -n install $pkg";
+    }
 
     install_bats;
 
@@ -209,8 +214,7 @@ sub bats_setup {
     if ($oci_runtime && !grep { $_ eq $oci_runtime } @pkgs) {
         push @pkgs, $oci_runtime;
     }
-    push @commands, "zypper -n install @pkgs";
-    install_packages(@pkgs);
+    run_command "zypper --gpg-auto-import-keys -n install @pkgs";
 
     configure_oci_runtime $oci_runtime;
 
@@ -237,19 +241,16 @@ sub bats_setup {
     if (script_output("findmnt -no FSTYPE /tmp", proceed_on_failure => 1) =~ /tmpfs/) {
         # Bind mount /tmp to /var/tmp
         fix_tmp;
-        $reboot_needed = 1;
     }
 
     # Switch to cgroup v2 if not already active
     if (script_run("test -f /sys/fs/cgroup/cgroup.controllers") != 0) {
         add_grub_cmdline_settings("systemd.unified_cgroup_hierarchy=1", update_grub => 1);
-        $reboot_needed = 1;
     }
 
-    if ($reboot_needed) {
-        power_action('reboot', textmode => 1);
-        $self->wait_boot();
-    }
+    power_action('reboot', textmode => 1);
+    $self->wait_boot();
+    push @commands, "reboot";
 
     select_serial_terminal;
 
@@ -269,7 +270,7 @@ sub bats_post_hook {
     select_serial_terminal;
 
     my $log_dir = "/tmp/logs/";
-    assert_script_run "mkdir -p $log_dir";
+    assert_script_run "mkdir -p $log_dir || true";
     assert_script_run "cd $log_dir";
 
     script_run "rm -rf $test_dir";
@@ -277,6 +278,7 @@ sub bats_post_hook {
     script_run('df -h > df-h.txt');
     script_run('dmesg > dmesg.txt');
     script_run('findmnt > findmnt.txt');
+    script_run('lsmod > lsmod.txt');
     script_run('rpm -qa | sort > rpm-qa.txt');
     script_run('sysctl -a > sysctl.txt');
     script_run('systemctl > systemctl.txt');
@@ -354,7 +356,7 @@ sub bats_tests {
     run_command "echo $log_file .. > $log_file";
     run_command "echo '# $package $version $os_version' >> $log_file";
     push @commands, $cmd;
-    my $ret = script_run $cmd, 7000;
+    my $ret = script_run($cmd, timeout => 7000);
 
     unless (get_var("BATS_TESTS")) {
         $skip_tests = get_var($skip_tests, $settings->{$skip_tests});
@@ -422,9 +424,13 @@ sub bats_sources {
     }
 
     run_command "cd $test_dir";
-    run_command "git clone --branch $branch https://github.com/$github_org/$package.git", timeout => 300;
+    run_command "git clone https://github.com/$github_org/$package.git", timeout => 300;
     $test_dir .= $package;
     run_command "cd $test_dir";
+    run_command "git checkout $branch";
+
+    bats_patches;
+
     if ($package eq "podman") {
         my $hack_bats = "https://raw.githubusercontent.com/containers/podman/refs/heads/main/hack/bats";
         run_command "curl $curl_opts -o hack/bats $hack_bats";

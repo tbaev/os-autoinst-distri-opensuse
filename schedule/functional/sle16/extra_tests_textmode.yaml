@@ -18,6 +18,14 @@ conditional_schedule:
                 - network/snmp
             aarch64:
                 - network/snmp
+    wpa_supplicant:
+        ARCH:
+            x86_64:
+                - console/wpa_supplicant
+    prepare_systemd_and_testsuite:
+        ARCH:
+            x86_64:
+                - systemd_testsuite/prepare_systemd_and_testsuite
 schedule:
     - installation/bootloader_start
     - boot/boot_to_desktop
@@ -29,6 +37,7 @@ schedule:
     - console/man_pages
     - console/ping
     - console/arping
+    - console/wireshark_cli
     - console/orphaned_packages_check
     - console/zypper_lr_validate
     - console/zypper_ref
@@ -88,6 +97,12 @@ schedule:
     - console/firewalld
     - console/nftables
     - console/aaa_base
+    - console/vmstat
+    - console/libjpeg_turbo
+    - console/libgit2
+    - network/cifs
+    - '{{wpa_supplicant}}'
+    - '{{prepare_systemd_and_testsuite}}'
     - console/osinfo_db
     - console/journalctl
     - console/tar

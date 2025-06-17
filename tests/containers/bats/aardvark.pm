@@ -7,6 +7,8 @@
 # Summary: Upstream aardvark-dns integration tests
 # Maintainer: QE-C team <qa-c@suse.de>
 
+use strict;
+use warnings;
 use Mojo::Base 'containers::basetest';
 use testapi;
 use serial_terminal qw(select_serial_terminal);
@@ -49,7 +51,6 @@ sub run {
     # Download aardvark sources
     my $aardvark_version = script_output "$aardvark --version | awk '{ print \$2 }'";
     bats_sources $aardvark_version;
-    bats_patches;
 
     my $errors = run_tests;
     die "ardvark-dns tests failed" if ($errors);

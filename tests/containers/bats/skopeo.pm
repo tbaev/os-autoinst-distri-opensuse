@@ -7,6 +7,8 @@
 # Summary: Upstream skopeo integration tests
 # Maintainer: QE-C team <qa-c@suse.de>
 
+use strict;
+use warnings;
 use Mojo::Base 'containers::basetest';
 use testapi;
 use serial_terminal qw(select_serial_terminal);
@@ -49,7 +51,6 @@ sub run {
     # Download skopeo sources
     my $skopeo_version = script_output "skopeo --version  | awk '{ print \$3 }'";
     bats_sources $skopeo_version;
-    bats_patches;
 
     # Upstream script gets GOARCH by calling `go env GOARCH`.  Drop go dependency for this only use of go
     my $goarch = script_output "podman version -f '{{.OsArch}}' | cut -d/ -f2";

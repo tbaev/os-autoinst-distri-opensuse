@@ -7,6 +7,8 @@
 # Summary: Upstream podman integration tests
 # Maintainer: QE-C team <qa-c@suse.de>
 
+use strict;
+use warnings;
 use Mojo::Base 'containers::basetest';
 use testapi;
 use serial_terminal qw(select_serial_terminal);
@@ -75,7 +77,6 @@ sub run {
     # Download podman sources
     my $podman_version = script_output "podman --version | awk '{ print \$3 }'";
     bats_sources $podman_version;
-    bats_patches;
 
     $oci_runtime = get_var("OCI_RUNTIME", script_output("podman info --format '{{ .Host.OCIRuntime.Name }}'"));
 
@@ -84,6 +85,8 @@ sub run {
     run_command "rm -f contrib/systemd/system/podman-kube@.service.in";
     # This test is flaky and will fail if system is "full"
     run_command "rm -f test/system/320-system-df.bats";
+    # This tests needs criu, available only on Tumbleweed
+    run_command "rm -f test/system/520-checkpoint.bats" unless is_tumbleweed;
 
     # Compile helpers used by the tests
     run_command "make podman-testing || true", timeout => 600;

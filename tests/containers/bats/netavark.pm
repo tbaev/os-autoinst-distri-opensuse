@@ -7,6 +7,8 @@
 # Summary: Upstream netavark integration tests
 # Maintainer: QE-C team <qa-c@suse.de>
 
+use strict;
+use warnings;
 use Mojo::Base 'containers::basetest';
 use testapi;
 use serial_terminal qw(select_serial_terminal);
@@ -45,7 +47,6 @@ sub run {
     # Download netavark sources
     my $netavark_version = script_output "$netavark --version | awk '{ print \$2 }'";
     bats_sources $netavark_version;
-    bats_patches;
 
     my $firewalld_backend = script_output "awk -F= '\$1 == \"FirewallBackend\" { print \$2 }' < /etc/firewalld/firewalld.conf";
     record_info("Firewalld backend", $firewalld_backend);

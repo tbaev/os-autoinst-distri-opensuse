@@ -90,10 +90,11 @@ sub prepare_parmfile {
     }
     else {
         if (get_var('AGAMA')) {
-            $params .= " root=live:ftp://" . get_var('REPO_HOST', 'openqa') . '/' .
-              ((get_var('FLAVOR') eq "Full") ?
-                  get_required_var('REPO_0') . "/LiveOS/squashfs.img" :
-                  get_var('REPO_999'));
+            my $host = "ftp://" . get_var('REPO_HOST', 'openqa');
+            my $root_line = " root=live:" . ((get_var('FLAVOR') eq "Full") ?
+                  shorten_url($host . '/' . get_required_var('REPO_0') . "/LiveOS/squashfs.img") :
+                  $host . '/' . get_var('REPO_999'));
+            $params .= $root_line;
         }
         else {
             $params .= " install=" . $instsrc . $repo . " ";
@@ -147,7 +148,12 @@ EO_frickin_boot_parms
     for (1 .. $max_retries) {
         eval {
             # ensure that we are in cms mode before executing qaboot
-            $s3270->sequence_3270("String(\"#cp i cms\")", "ENTER", "ENTER", "ENTER", "ENTER",);
+            $s3270->sequence_3270("String(\"#cp i cms\")", "ENTER",);
+            # Wait for z/VM to load. "z/VM" is already in the buffer, but the check for "VM READ" suffices.
+            $r = $s3270->expect_3270(buffer_ready => qr/VM READ/, output_delim => qr/VM/, timeout => 20);
+            $s3270->sequence_3270("ENTER",);
+            $r = $s3270->expect_3270(output_delim => qr/Ready;/, timeout => 20);
+            $s3270->sequence_3270("ENTER", "ENTER",);
             $r = $s3270->expect_3270(output_delim => qr/CMS/, timeout => 20);
             $s3270->sequence_3270("String(\"qaboot $repo_host $dir_with_suse_ins\")", "ENTER", "Wait(InputField)",);
             # wait for qaboot dumping us into xedit. If this fails, probably the

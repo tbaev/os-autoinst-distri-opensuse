@@ -107,7 +107,8 @@ sub load_container_engine_privileged_mode {
 sub load_compose_tests {
     my ($run_args) = @_;
     return if (is_staging);
-    return unless (is_tumbleweed || is_sle('>=16.0') || is_sle_micro('>=6.0'));
+    my $min_slem_version = ($run_args->{runtime} eq "podman") ? "6.1" : "6.0";
+    return unless (is_tumbleweed || is_sle('>=16.0') || is_sle_micro(">=$min_slem_version"));
     loadtest('containers/compose', run_args => $run_args, name => $run_args->{runtime} . "_compose");
 }
 
@@ -166,17 +167,8 @@ sub load_host_tests_docker {
     load_container_engine_privileged_mode($run_args);
     # Firewall is not installed in Public Cloud, JeOS OpenStack and MicroOS but it is in SLE Micro
     load_firewall_test($run_args);
-    unless (is_sle("<=15") && is_aarch64) {
-        # these 2 packages are not avaiable for <=15 (aarch64 only)
-        # zypper-docker is only available on SLES < 15-SP6
-        loadtest 'containers/zypper_docker' if (is_sle("<15-SP6") || is_leap("<15.6"));
-        loadtest 'containers/docker_runc';
-    }
-    unless (check_var('BETA', 1) || is_sle_micro || is_microos || is_leap_micro || is_staging) {
-        # These tests use packages from Package Hub, so they are applicable
-        # to maintenance jobs or new products after Beta release
-        # PackageHub is not available in SLE Micro | MicroOS
-        loadtest 'containers/registry' if (is_x86_64 || is_sle('>=15-sp4'));
+    unless (is_staging || is_transactional || is_sle(">=16.0") || is_sle("<15-sp4")) {
+        loadtest 'containers/registry';
     }
     # Skip this test on docker-stable due to https://bugzilla.opensuse.org/show_bug.cgi?id=1239596
     unless (is_transactional || is_public_cloud || is_sle('<15-SP4') || check_var("CONTAINERS_DOCKER_FLAVOUR", "stable")) {
@@ -236,6 +228,20 @@ sub load_image_tests_in_k8s {
 
 sub load_image_tests_in_openshift {
     loadtest 'containers/openshift_image';
+}
+
+sub load_kubectl_tests {
+    my @k8s_versions = split('\s+', get_var("KUBERNETES_VERSIONS", ""));
+    if (@k8s_versions) {
+        foreach my $k8s_version (@k8s_versions) {
+            my $run_args = OpenQA::Test::RunArgs->new();
+            $run_args->{k8s_version} = $k8s_version;
+            loadtest('containers/kubectl', run_args => $run_args, name => "kubectl_" . $k8s_version);
+        }
+    } else {
+        my $run_args = OpenQA::Test::RunArgs->new();
+        loadtest('containers/kubectl', run_args => $run_args) if (/kubectl/i);
+    }
 }
 
 sub update_host_and_publish_hdd {
@@ -358,7 +364,7 @@ sub load_container_tests {
             loadtest 'containers/multi_runtime' if (/multi_runtime/i);
             load_host_tests_containerd_crictl() if (/containerd_crictl/i);
             load_host_tests_containerd_nerdctl() if (/containerd_nerdctl/i);
-            loadtest('containers/kubectl') if (/kubectl/i);
+            load_kubectl_tests() if (/kubectl/i);
             load_host_tests_helm($run_args) if (/helm/i);
             loadtest 'containers/apptainer' if (/apptainer/i);
         }

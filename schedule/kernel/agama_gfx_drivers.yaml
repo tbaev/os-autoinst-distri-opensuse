@@ -1,0 +1,17 @@
+---
+name: agama-gfx-usb-drivers
+vars:
+    INST_AUTO: agama_auto/sle_default_ipmi.jsonnet
+schedule:
+- installation/bootloader_start
+- installation/agama_reboot
+- installation/grub_test
+- installation/first_boot
+- console/system_prepare
+- console/consoletest_setup
+- console/hostname
+- console/textinfo
+- console/consoletest_finish
+- kernel/usb_nic
+- kernel/usb_drive
+- shutdown/shutdown
