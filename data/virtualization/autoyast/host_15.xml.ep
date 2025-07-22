@@ -147,22 +147,11 @@
     <languages/>
   </language>
   <login_settings/>
-  % unless ($get_var->('KUBEVIRT_TEST')) {
   <networking>
     <keep_install_network config:type="boolean">true</keep_install_network>
-<interfaces config:type="list">
-  <interface>
-    <device>br0</device>
-    <bootproto>dhcp</bootproto>
-    <bridge>yes</bridge>
-    <bridge_forwarddelay>0</bridge_forwarddelay>
-    <bridge_ports>eth0 eth1</bridge_ports>
-    <bridge_stp>off</bridge_stp>
-    <startmode>auto</startmode>
-  </interface>
-</interfaces>
+    <backend>wicked</backend>
+    <virt_bridge_proposal config:type="boolean">true</virt_bridge_proposal>
   </networking>
-  % }
   <ntp-client>
     <ntp_policy>auto</ntp_policy>
     <ntp_servers config:type="list">
