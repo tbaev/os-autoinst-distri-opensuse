@@ -173,7 +173,7 @@
       <enable_snapshots config:type="boolean">false</enable_snapshots>
       <initialize config:type="boolean">true</initialize>
       <partitions config:type="list">
-        % if ($check_var->('IPXE_UEFI', '1') or $check_var->('UEFI', '1')) {
+        % if ($check_var->('IPXE_UEFI', '10') or $check_var->('UEFI', '10')) {
         <partition>
           <create config:type="boolean">true</create>
           <filesystem config:type="symbol">vfat</filesystem>
