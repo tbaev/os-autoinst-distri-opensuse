@@ -205,7 +205,7 @@ sub install_kubevirt_packages {
     my $os_version = get_var('VERSION');
     my $virt_tests_repo = get_required_var('VIRT_TESTS_REPO');
     my $virt_manifests_repo;
-    
+
     # Support MU incidents repo
     if (get_var('INCIDENT_REPO')) {
         $virt_manifests_repo = get_var('INCIDENT_REPO');
