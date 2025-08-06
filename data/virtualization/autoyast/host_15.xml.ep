@@ -43,8 +43,8 @@
       % }
       % if ($get_var->('KUBEVIRT_TEST')) {
       <listentry>
-        <media_url>http://download.suse.de/download/ibs/SUSE/Products/SLE-Module-Development-Tools-OBS/15-SP6/x86_64/product/</media_url>
-	<alias>SLE-Module-Development-Tools-OBS</alias>
+        <media_url>http://download.suse.de/download/ibs/SUSE/Products/SLE-Module-Development-Tools-OBS/<%= $get_var->('VERSION') %>/x86_64/product/</media_url>
+	<alias>Development-Tools-OBS</alias>
       </listentry>
       % }
       % my $n =0;
