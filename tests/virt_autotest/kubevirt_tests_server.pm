@@ -203,41 +203,43 @@ sub install_kubevirt_packages {
     my $self = shift;
     # Install required kubevirt packages
     my $os_version = get_var('VERSION');
-    my $virt_tests_repo = get_required_var('VIRT_TESTS_REPO');
     my $virt_manifests_repo;
-
-    # Support MU incidents repo
-    if (get_var('INCIDENT_REPO')) {
-        $virt_manifests_repo = get_var('INCIDENT_REPO');
-    } else {
-        $virt_manifests_repo = get_var('VIRT_MANIFESTS_REPO');
-    }
+    my $virt_tests_repo;
+    my $virt_manifests_pkgs = 'containerized-data-importer-manifests kubevirt-manifests kubevirt-virtctl';
+    my $virt_tests_pkg = 'kubevirt-tests';
+    my $search_manifests;
 
     record_info('Install kubevirt packages', '');
     # Development Tools repo for OBS Module, e.g. http://download.suse.de/download/ibs/SUSE/Products/SLE-Module-Development-Tools-OBS/15-SP4/x86_64/product/
     # Development product test repo for SLE official product OSD testing, e.g. http://download.suse.de/ibs/SUSE:/SLE-15-SP4:/GA/standard/
     # Devel test repo, e.g. http://download.suse.de/download/ibs/Devel:/Virt:/SLE-15-SP4/SUSE_SLE-15-SP4_Update_standard/
     # MU product test (SLE official MU channel+incidents)
-    transactional::enter_trup_shell(global_options => '--drop-if-no-change') if (is_transactional);
+    if (get_var('INCIDENT_REPO')) {
+        zypper_call("in -f $virt_manifests_pkgs $virt_tests_pkg");
+    } else {
+        $virt_manifests_repo = get_var('VIRT_MANIFESTS_REPO');
+        $virt_tests_repo = get_var('VIRT_TESTS_REPO');
 
-    zypper_call("lr -d");
-    zypper_call("ar $virt_tests_repo Virt-Tests-Repo");
-    zypper_call("ar $virt_manifests_repo Virt-Manifests-Repo") if ($virt_manifests_repo);
-    zypper_call("--gpg-auto-import-keys ref");
+        transactional::enter_trup_shell(global_options => '--drop-if-no-change') if (is_transactional);
 
-    my $virt_manifests = 'containerized-data-importer-manifests kubevirt-manifests kubevirt-virtctl';
-    my $search_manifests = $virt_manifests =~ s/\s+/\\\|/gr;
+        zypper_call("lr -d");
+        zypper_call("ar $virt_tests_repo Virt-Tests-Repo");
+        zypper_call("ar $virt_manifests_repo Virt-Manifests-Repo") if ($virt_manifests_repo);
+        zypper_call("--gpg-auto-import-keys ref");
 
-    if ($virt_manifests_repo) {
-        zypper_call("in -f -r Virt-Manifests-Repo $virt_manifests");
-    } elsif (script_run("rpmquery $virt_manifests")) {
-        if (is_transactional || script_run("zypper se -r SLE-Module-Containers${os_version}-Updates $virt_manifests | grep -w '$search_manifests'")) {
-            zypper_call("in -f $virt_manifests");
-        } else {
-            zypper_call("in -f -r SLE-Module-Containers${os_version}-Updates $virt_manifests");
+        $search_manifests = $virt_manifests_pkgs =~ s/\s+/\\\|/gr;
+
+        if ($virt_manifests_repo) {
+            zypper_call("in -f -r Virt-Manifests-Repo $virt_manifests_pkgs");
+        } elsif (script_run("rpmquery $virt_manifests_pkgs")) {
+            if (is_transactional || script_run("zypper se -r SLE-Module-Containers${os_version}-Updates $virt_manifests_pkgs | grep -w '$search_manifests'")) {
+                zypper_call("in -f $virt_manifests_pkgs");
+            } else {
+                zypper_call("in -f -r SLE-Module-Containers${os_version}-Updates $virt_manifests_pkgs");
+            }
         }
+        zypper_call("in -f -r Virt-Tests-Repo $virt_tests_pkg");
     }
-    zypper_call("in -f -r Virt-Tests-Repo kubevirt-tests");
 
     # Install Longhorn dependencies
     our $kubevirt_ver = script_output("rpm -q --qf \%{VERSION} kubevirt-manifests");
