@@ -218,7 +218,7 @@ sub install_kubevirt_packages {
         zypper_call("in -f $virt_manifests_pkgs $virt_tests_pkg");
         my $pkgs_from_incident_repo;
         foreach (split(' ', $virt_manifests_pkgs), $virt_tests_pkg) {
-            $pkgs_from_incident_repo += 1 if (script_output("zypper info $_ | awk -F': ' '/^Repository/{print $2}'") =~ /^TEST_/);
+            $pkgs_from_incident_repo += 1 if (script_output("zypper info $_ | awk -F': ' '/^Repository/{print \$2}'") =~ /^TEST_/);
         }
         if ($pkgs_from_incident_repo < 1) {
             die "No kubevirt packages were installed from incident repositary.";
