@@ -216,6 +216,15 @@ sub install_kubevirt_packages {
     # MU product test (SLE official MU channel+incidents)
     if (get_var('INCIDENT_REPO')) {
         zypper_call("in -f $virt_manifests_pkgs $virt_tests_pkg");
+        my $pkgs_from_incident_repo;
+        foreach (split(' ', $virt_manifests_pkgs), $virt_tests_pkg) {
+            $pkgs_from_incident_repo += 1 if (script_output("zypper info $_ | awk -F': ' '/^Repository/{print $2}'") =~ /^TEST_/);
+        }
+        if ($pkgs_from_incident_repo < 1) {
+            die "No kubevirt packages were installed from incident repositary.";
+        } else {
+            record_info("There are $pkgs_from_incident_repo packages installed from incident repositary.", '');
+        }
     } else {
         $virt_manifests_repo = get_var('VIRT_MANIFESTS_REPO');
         $virt_tests_repo = get_var('VIRT_TESTS_REPO');
