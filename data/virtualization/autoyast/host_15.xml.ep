@@ -46,6 +46,10 @@
         <media_url>http://download.suse.de/download/ibs/SUSE/Products/SLE-Module-Development-Tools-OBS/<%= $get_var->('VERSION') %>/x86_64/product/</media_url>
 	<alias>Development-Tools-OBS</alias>
       </listentry>
+      <listentry>
+        <media_url>http://download.suse.de/ibs/SUSE/Updates/SLE-Module-Development-Tools-OBS/<%= $get_var->('VERSION') %>/x86_64/update/</media_url>
+	<alias>Development-Tools-OBS-IBS</alias>
+      </listentry>
       % }
       % my $n =0;
       % for my $repo (@$repos) {
@@ -155,10 +159,22 @@
   <login_settings/>
   <networking>
     <keep_install_network config:type="boolean">true</keep_install_network>
-<!--
+ % if ($get_var->('KUBEVIRT_TEST') && $check_var->('WORKER_CLASS', 'virt-mm-baremetal-ipmi')) {
     <backend>wicked</backend>
--->
     <virt_bridge_proposal config:type="boolean">true</virt_bridge_proposal>
+ % } else {
+<interfaces config:type="list">
+  <interface>
+    <device>br0</device>
+    <bootproto>dhcp</bootproto>
+    <bridge>yes</bridge>
+    <bridge_forwarddelay>0</bridge_forwarddelay>
+    <bridge_ports>eth0 eth1</bridge_ports>
+    <bridge_stp>off</bridge_stp>
+    <startmode>auto</startmode>
+  </interface>
+</interfaces>
+ % }
   </networking>
   <ntp-client>
     <ntp_policy>auto</ntp_policy>
