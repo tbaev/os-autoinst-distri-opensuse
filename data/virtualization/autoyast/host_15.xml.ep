@@ -159,10 +159,10 @@
   <login_settings/>
   <networking>
     <keep_install_network config:type="boolean">true</keep_install_network>
-% if ($get_var->('KUBEVIRT_TEST') && $get_var->('WORKER_CLASS') =~ /virt-mm-baremetal-ipmi/) {
+    % if ($get_var->('KUBEVIRT_TEST') && $get_var->('WORKER_CLASS') =~ /virt-mm-baremetal-ipmi/) {
     <backend>wicked</backend>
     <virt_bridge_proposal config:type="boolean">true</virt_bridge_proposal>
- % } else {
+% } else {
 <interfaces config:type="list">
   <interface>
     <device>br0</device>
@@ -174,7 +174,7 @@
     <startmode>auto</startmode>
   </interface>
 </interfaces>
- % }
+  % }
   </networking>
   <ntp-client>
     <ntp_policy>auto</ntp_policy>
