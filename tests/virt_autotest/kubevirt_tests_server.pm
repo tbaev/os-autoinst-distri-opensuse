@@ -220,6 +220,9 @@ sub install_kubevirt_packages {
         foreach (split(' ', $virt_manifests_pkgs), $virt_tests_pkg) {
             $pkgs_from_incident_repo += 1 if (script_output("zypper info $_ | awk -F': ' '/^Repository/{print \$2}'") =~ /^TEST_/);
         }
+        my $incident_id = get_required_var('INCIDENT_ID');
+        assert_script_run("sed -i 's|registry.suse.com/suse/|registry.suse.de/suse/maintenance/$incident_id/containerfile/suse/|g' /usr/share/kube-virt/manifests/release/kubevirt-operator.yaml");
+        record_info("Change manifest to suse.de");
 
         if ($pkgs_from_incident_repo < 1) {
             die "No kubevirt packages were installed from incident repositary.";
