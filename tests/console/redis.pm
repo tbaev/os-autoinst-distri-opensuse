@@ -13,8 +13,6 @@
 # Maintainer: QE-Core <qe-core@suse.de>
 
 use base 'consoletest';
-use strict;
-use warnings;
 use testapi;
 use serial_terminal 'select_serial_terminal';
 use utils qw(zypper_call script_retry validate_script_output_retry);
@@ -100,7 +98,7 @@ sub cleanup_redis {
     }
     assert_script_run($killall_redis_server_cmd);
     assert_script_run($remove_test_db_file_cmd);
-    assert_script_run("find / -type f -name 'dump.rdb' -print -exec rm -f {} + || true");
+    assert_script_run("find / -type f -name 'dump.rdb' -print -exec rm -f {} + || true", timeout => 180);
 }
 
 sub upload_redis_logs {

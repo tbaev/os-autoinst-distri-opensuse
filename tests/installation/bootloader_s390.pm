@@ -15,14 +15,14 @@ use base "installbasetest";
 
 use testapi;
 
-use strict;
-use warnings;
 use English;
 
 use bootloader_setup;
 use registration;
 use utils 'shorten_url';
 use version_utils qw(is_agama is_sle is_tumbleweed is_opensuse);
+use autoyast qw(parse_dud_parameter);
+
 
 # try to find the 2 longest lines that are below beyond the limit
 # collapsing the lines - we have a limit of 10 lines
@@ -95,7 +95,17 @@ sub prepare_parmfile {
                   shorten_url($host . '/' . get_required_var('REPO_0') . "/LiveOS/squashfs.img") :
                   $host . '/' . get_var('REPO_999'));
             $params .= $root_line;
-            $params .= ' inst.dud=' . data_url(get_var('INST_DUD')) . ' rd.neednet=1' if get_var('INST_DUD');
+
+            # add mandatory boot params
+            $params .= ' cio_ignore=all,!condev,!0.0.0150';
+            $params .= ' hvc_iucv=8';
+            $params .= " live.password=$testapi::password";
+
+            # add optional boot params
+            $params .= ' rd.zdev=dasd,0.0.0150' unless (get_var('AGAMA_ACTIVATE_DASD'));
+
+            # additional parameters requiring parsing
+            $params .= parse_dud_parameter(get_var('INST_DUD')) if get_var('INST_DUD');
         }
         else {
             $params .= " install=" . $instsrc . $repo . " ";
@@ -107,9 +117,7 @@ sub prepare_parmfile {
     }
 
     $params .= specific_bootmenu_params;
-    unless (get_var("AGAMA")) {
-        $params .= registration_bootloader_cmdline if check_var('SCC_REGISTER', 'installation');
-    }
+    $params .= registration_bootloader_cmdline if check_var('SCC_REGISTER', 'installation') || get_var('FLAVOR') =~ 'Online';
 
     # Pass autoyast parameter for s390x, shorten the url because of 72 columns limit in x3270 xedit
     # If 'AUTOYAST_PREPARE_PROFILE' is true, shorten url directly, otherwise shorten url with data_url method
@@ -348,7 +356,7 @@ sub run {
     }
 
     # format DASD before installation by default
-    format_dasd if (check_var('FORMAT_DASD', 'pre_install') && !get_var('INST_AUTO'));
+    format_dasd if (check_var('FORMAT_DASD', 'pre_install') && !get_var('INST_AUTO') && !get_var('INST_DUD'));
     create_encrypted_part_dasd if get_var('ENCRYPT_ACTIVATE_EXISTING');
 
     select_console("installation", timeout => 180);

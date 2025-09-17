@@ -4,8 +4,6 @@
 # Summary: Configuration steps for qe-sap-deployment
 # Maintainer: QE-SAP <qe-sap@suse.de>, Michele Pagot <michele.pagot@suse.com>
 
-use strict;
-use warnings;
 use Mojo::Base 'publiccloud::basetest';
 use publiccloud::azure_client;
 use publiccloud::utils qw(get_ssh_private_key_path);
@@ -14,6 +12,7 @@ use serial_terminal 'select_serial_terminal';
 use registration qw(get_addon_fullname scc_version %ADDONS_REGCODE);
 use qam 'get_test_repos';
 use sles4sap::qesap::qesapdeployment;
+use sles4sap::ibsm;
 
 sub run {
     my ($self) = @_;
@@ -26,7 +25,7 @@ sub run {
     # Needed to create the SAS URI token
     if ($provider_setting ne 'AZURE') {
         my $azure_client = publiccloud::azure_client->new();
-        $azure_client->init();
+        $azure_client->init(namespace => get_var('QESAPDEPLOY_HANA_NAMESPACE', 'sapha'));
     }
 
     my %variables;
@@ -80,9 +79,9 @@ sub run {
     $variables{SCC_REGCODE_SLES4SAP} = get_var('SCC_REGCODE_SLES4SAP', '');
     $variables{SCC_LTSS_REGCODE} = get_var('SCC_REGCODE_LTSS', '');
     $variables{SCC_LTSS_MODULE} = get_var('QESAPDEPLOY_SCC_LTSS_MODULE', '');
-    if ($provider_setting eq 'EC2') {
-        $variables{HANA_INSTANCE_TYPE} = get_var('QESAPDEPLOY_HANA_INSTANCE_TYPE', 'r6i.xlarge');
-    }
+
+    $variables{GOOGLE_PROJECT} = get_var('QESAPDEPLOY_GOOGLE_PROJECT', 'ei-sle-qa-sap-8469') if ($provider_setting eq 'GCE');
+    $variables{HANA_INSTANCE_TYPE} = get_var('QESAPDEPLOY_HANA_INSTANCE_TYPE', 'r6i.xlarge') if ($provider_setting eq 'EC2');
 
     $variables{HANA_ACCOUNT} = get_required_var('QESAPDEPLOY_HANA_ACCOUNT');
     $variables{HANA_CONTAINER} = get_required_var('QESAPDEPLOY_HANA_CONTAINER');
@@ -99,7 +98,7 @@ sub run {
 
     # *_ADDRESS_RANGE variables are not necessary needed by all the conf.yaml templates
     # but calculate them every time is "cheap"
-    my %peering_settings = qesap_calculate_address_range(slot => get_required_var('WORKER_ID'));
+    my %peering_settings = ibsm_calculate_address_range(slot => get_required_var('WORKER_ID'));
     $variables{MAIN_ADDRESS_RANGE} = $peering_settings{main_address_range};
     if ($provider_setting eq 'AZURE') {
         $variables{SUBNET_ADDRESS_RANGE} = $peering_settings{subnet_address_range};

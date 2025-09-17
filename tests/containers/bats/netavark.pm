@@ -7,13 +7,11 @@
 # Summary: Upstream netavark integration tests
 # Maintainer: QE-C team <qa-c@suse.de>
 
-use strict;
-use warnings;
 use Mojo::Base 'containers::basetest';
 use testapi;
 use serial_terminal qw(select_serial_terminal);
 use containers::bats;
-use version_utils qw(is_sle is_tumbleweed);
+use version_utils qw(is_sle);
 
 my $netavark;
 
@@ -22,21 +20,17 @@ sub run_tests {
         NETAVARK => $netavark,
     );
 
-    my $log_file = "netavark.tap";
+    my $log_file = "netavark";
 
-    return bats_tests($log_file, \%env, "");
+    return bats_tests($log_file, \%env, "", 1200);
 }
 
 sub run {
     my ($self) = @_;
     select_serial_terminal;
 
-    my @pkgs = qw(aardvark-dns cargo firewalld iproute2 jq make protobuf-devel netavark);
-    if (is_tumbleweed || is_sle('>=16.0')) {
-        push @pkgs, qw(dbus-1-daemon);
-    } elsif (is_sle) {
-        push @pkgs, qw(dbus-1);
-    }
+    my @pkgs = qw(aardvark-dns cargo firewalld iproute2 jq make ncat protobuf-devel netavark);
+    push @pkgs, is_sle("<16") ? qw(dbus-1) : qw(dbus-1-daemon);
 
     $self->bats_setup(@pkgs);
 
@@ -46,14 +40,17 @@ sub run {
 
     # Download netavark sources
     my $netavark_version = script_output "$netavark --version | awk '{ print \$2 }'";
-    bats_sources $netavark_version;
+    patch_sources "netavark", "v$netavark_version", "test", bats_patches();
 
     my $firewalld_backend = script_output "awk -F= '\$1 == \"FirewallBackend\" { print \$2 }' < /etc/firewalld/firewalld.conf";
     record_info("Firewalld backend", $firewalld_backend);
 
     # Compile helpers & patch tests
     run_command "make examples", timeout => 600;
-    run_command "rm -f test/100-bridge-iptables.bats" if ($firewalld_backend ne "iptables");
+
+    unless (get_var("BATS_TESTS")) {
+        run_command "rm -f test/100-bridge-iptables.bats" if ($firewalld_backend ne "iptables");
+    }
 
     my $errors = run_tests;
     die "netavark tests failed" if ($errors);

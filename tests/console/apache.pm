@@ -14,8 +14,6 @@
 use base "consoletest";
 use testapi;
 use serial_terminal 'select_serial_terminal';
-use strict;
-use warnings;
 use utils;
 use version_utils qw(is_sle is_jeos has_selinux);
 
@@ -40,6 +38,7 @@ sub run {
     zypper_call "in $apache2";
     zypper_call "in apache2-utils" if is_jeos;
     zypper_call "in policycoreutils-python-utils" if (is_jeos && has_selinux);
+    assert_script_run 'restorecon -Rv /srv/www' if (has_selinux);
     systemctl 'enable apache2';    # Note: The systemd service is always apache2, not apache2-tls13.
     systemctl 'restart apache2';    # apache2 could be already running from previous test runs
     systemctl 'status apache2';
@@ -65,7 +64,7 @@ sub run {
     }
 
     # Check if the server works and serves the right content
-    assert_script_run 'curl -v http://localhost/ | grep "index"';
+    validate_script_output('curl --fail -v http://localhost/', qr/index/);
 
     # Check if the permissions are set correctly
     assert_script_run 'ls -la /srv/www/htdocs | head -n2 | grep "drwxr\-xr\-x"';
@@ -78,7 +77,7 @@ sub run {
 
     # Start apache again
     systemctl 'start apache2';
-    assert_script_run 'curl -v http://[::1]/ | grep "index"';
+    validate_script_output('curl --fail -v http://[::1]/', qr/index/);
 
     # Listen on 85 and create a vhost for it
     assert_script_run 'echo "Listen 85" >> /etc/apache2/listen.conf';

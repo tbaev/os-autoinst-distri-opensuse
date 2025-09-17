@@ -4,13 +4,12 @@
 # Summary: Test installation and boot of Elemental ISO
 # Maintainer: unified-core@suse.com, ldevulder@suse.com
 
-use base 'opensusebasetest';
-use strict;
-use warnings;
+use base qw(opensusebasetest);
 
 use testapi;
 use power_action_utils qw(power_action);
 use serial_terminal qw(select_serial_terminal);
+use utils qw(systemctl);
 use Utils::Architectures qw(is_aarch64);
 
 =head2 wait_kubectl_cmd
@@ -82,6 +81,9 @@ sub run {
     my $rootpwd = get_required_var('TEST_PASSWORD');
     $testapi::password = $rootpwd;    # Set default root password
 
+    # Define timeouts based on the architecture
+    my $timeout = (is_aarch64) ? 480 : 240;
+
     # For HDD image boot
     if (check_var('IMAGE_TYPE', 'disk')) {
         # Wait for GRUB and select default entry
@@ -96,6 +98,10 @@ sub run {
 
     # Record boot
     record_info('OS boot', 'Successfully booted!');
+
+    # Start rke2-server
+    # TODO: use the ReleaseManifest functionality later!
+    systemctl('enable --now rke2-server', timeout => $timeout);
 
     # Wait for kubectl command to be available
     wait_kubectl_cmd();
@@ -113,7 +119,7 @@ sub run {
     record_info('RKE2 version/node', script_output('kubectl version; kubectl get nodes'));
 
     # Check toolkit version
-    record_info('Toolkit version', script_output('elemental3-toolkit version'));
+    record_info('Toolkit version', script_output('elemental3ctl version'));
 }
 
 sub test_flags {

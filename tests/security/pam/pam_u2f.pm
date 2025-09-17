@@ -1,4 +1,4 @@
-# Copyright 2021 SUSE LLC
+# Copyright SUSE LLC
 # SPDX-License-Identifier: GPL-2.0-or-later
 #
 # Summary: Update pam_u2f to 1.1.1 (or later)
@@ -14,8 +14,6 @@
 # Tags: poo#104181 tc#1769990
 
 use base 'opensusebasetest';
-use strict;
-use warnings;
 use testapi;
 use base 'consoletest';
 use utils qw(zypper_call package_upgrade_check);

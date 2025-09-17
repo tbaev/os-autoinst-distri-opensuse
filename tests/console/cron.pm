@@ -9,8 +9,6 @@
 # Maintainer: Dominik Heidler <dheidler@suse.de>
 
 use base 'consoletest';
-use strict;
-use warnings;
 use testapi;
 use serial_terminal 'select_serial_terminal';
 use utils;
@@ -32,7 +30,7 @@ sub run {
     # check if cronie is installed, enabled and running
     assert_script_run 'rpm -q cronie';
     systemctl 'is-enabled cron';
-    systemctl 'is-active cron';
+    script_retry 'systemctl is-active cron', retry => 3, delay => 10;
     systemctl 'status cron';
 }
 

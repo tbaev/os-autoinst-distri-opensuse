@@ -8,8 +8,6 @@
 use parent 'sles4sap::sap_deployment_automation_framework::basetest';
 use Mojo::Base 'publiccloud::basetest';
 
-use strict;
-use warnings;
 use sles4sap::sap_deployment_automation_framework::deployment
   qw(serial_console_diag_banner load_os_env_variables sdaf_execute_deployment az_login sdaf_deployment_reused);
 use sles4sap::sap_deployment_automation_framework::configure_sap_systems_tfvars qw(create_sap_systems_tfvars);
@@ -97,9 +95,11 @@ sub run {
         sdaf_region_code => $sdaf_region_code,
         env_code => $env_code);
 
+    my $custom_sizing_file = get_sizing_filename();
+    record_info('Sizing file', "Sizing file used: $custom_sizing_file");
     my $retrieve_custom_sizing = join(' ', 'curl', '-v', '-fL',
-        data_url('sles4sap/sap_deployment_automation_framework/custom_sizes.json'),
-        '-o', $config_root_path . '/custom_sizes.json');
+        data_url("sles4sap/sap_deployment_automation_framework/$custom_sizing_file"),
+        '-o', $config_root_path . "/$custom_sizing_file");
 
     assert_script_run($retrieve_custom_sizing);
 

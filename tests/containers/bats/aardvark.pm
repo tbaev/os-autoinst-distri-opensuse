@@ -7,13 +7,11 @@
 # Summary: Upstream aardvark-dns integration tests
 # Maintainer: QE-C team <qa-c@suse.de>
 
-use strict;
-use warnings;
 use Mojo::Base 'containers::basetest';
 use testapi;
 use serial_terminal qw(select_serial_terminal);
 use containers::bats;
-use version_utils qw(is_sle is_tumbleweed);
+use version_utils qw(is_sle);
 
 my $aardvark = "";
 
@@ -25,9 +23,9 @@ sub run_tests {
         NETAVARK => $netavark,
     );
 
-    my $log_file = "aardvark.tap";
+    my $log_file = "aardvark";
 
-    return bats_tests($log_file, \%env, "");
+    return bats_tests($log_file, \%env, "", 800);
 }
 
 sub run {
@@ -35,13 +33,8 @@ sub run {
     select_serial_terminal;
 
     # Install tests dependencies
-    my @pkgs = qw(aardvark-dns firewalld iproute2 jq netavark podman);
-    if (is_tumbleweed || is_sle('>=16.0')) {
-        push @pkgs, qw(dbus-1-daemon);
-    } elsif (is_sle) {
-        push @pkgs, qw(dbus-1);
-    }
-
+    my @pkgs = qw(aardvark-dns firewalld iproute2 jq netavark podman socat);
+    push @pkgs, is_sle("<16") ? qw(dbus-1) : qw(dbus-1-daemon);
     $self->bats_setup(@pkgs);
 
     $aardvark = script_output "rpm -ql aardvark-dns | grep podman/aardvark-dns";
@@ -50,7 +43,7 @@ sub run {
 
     # Download aardvark sources
     my $aardvark_version = script_output "$aardvark --version | awk '{ print \$2 }'";
-    bats_sources $aardvark_version;
+    patch_sources "aardvark-dns", "v$aardvark_version", "test", bats_patches();
 
     my $errors = run_tests;
     die "ardvark-dns tests failed" if ($errors);

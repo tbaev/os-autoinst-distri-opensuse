@@ -6,8 +6,6 @@
 # Tags: poo#53579, poo#100694, poo#102311
 
 use base 'opensusebasetest';
-use strict;
-use warnings;
 use testapi;
 use serial_terminal 'select_serial_terminal';
 use utils;
@@ -28,9 +26,8 @@ sub run {
     my $tcb_cmdline = ($kver lt 4.13) ? 'ima_appraise_tcb' : 'ima_policy=appraise_tcb';
 
     add_grub_cmdline_settings("ima_appraise=fix $tcb_cmdline", update_grub => 1);
-    my $sb_state = script_output('mokutil --sb-state');
     power_action("reboot", textmode => 1);
-    handle_secureboot($self, $sb_state);
+    handle_secureboot($self, 'disable');
     select_serial_terminal;
 
     my $findret = script_output("find / -fstype $fstype -type f -uid 0 -exec sh -c \"< '{}'\" \\;", 900, proceed_on_failure => 1);
@@ -53,7 +50,7 @@ sub run {
 
     # We need re-enable the secureboot after removing "ima_appraise=fix" kernel parameter
     power_action('reboot', textmode => 1);
-    handle_secureboot($self, $sb_state, 're_enable');
+    handle_secureboot($self, 'enable');
     select_serial_terminal;
 
     my $ret = script_output($sample_cmd, 30, proceed_on_failure => 1);

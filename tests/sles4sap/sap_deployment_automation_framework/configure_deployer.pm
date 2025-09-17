@@ -16,8 +16,6 @@
 
 use parent 'sles4sap::sap_deployment_automation_framework::basetest';
 
-use strict;
-use warnings;
 use sles4sap::sap_deployment_automation_framework::deployment;
 use sles4sap::console_redirection;
 use serial_terminal qw(select_serial_terminal);
@@ -52,6 +50,9 @@ sub run {
     my $subscription_id = az_login();
     set_common_sdaf_os_env(subscription_id => $subscription_id);
     prepare_sdaf_project();
+    my $tf_version_out = script_output('terraform -v');
+    $tf_version_out =~ /Terraform\s(v\.*)/;
+    record_info("Terraform $1", $tf_version_out);
     record_info('Jumphost ready');
 
     # Do not leave connection hanging around between modules.

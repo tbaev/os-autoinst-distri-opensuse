@@ -7,29 +7,27 @@
 # Summary: Upstream runc integration tests
 # Maintainer: QE-C team <qa-c@suse.de>
 
-use strict;
-use warnings;
 use Mojo::Base 'containers::basetest';
 use testapi;
 use serial_terminal qw(select_serial_terminal);
 use containers::bats;
 use version_utils qw(is_tumbleweed);
-
+use Utils::Architectures qw(is_ppc64le is_s390x);
 
 sub run_tests {
     my %params = @_;
     my ($rootless, $skip_tests) = ($params{rootless}, $params{skip_tests});
 
-    return if check_var($skip_tests, "all");
+    return 0 if check_var($skip_tests, "all");
 
     my %env = (
         RUNC_USE_SYSTEMD => "1",
         RUNC => "/usr/bin/runc",
     );
 
-    my $log_file = "runc-" . ($rootless ? "user" : "root") . ".tap";
+    my $log_file = "runc-" . ($rootless ? "user" : "root");
 
-    return bats_tests($log_file, \%env, $skip_tests);
+    return bats_tests($log_file, \%env, $skip_tests, 1200);
 }
 
 sub run {
@@ -49,17 +47,25 @@ sub run {
 
     # Download runc sources
     my $runc_version = script_output "runc --version  | awk '{ print \$3 }'";
-    bats_sources $runc_version;
+    patch_sources "runc", "v$runc_version", "tests/integration", bats_patches();
 
     # Compile helpers used by the tests
-    my $cmds = script_output "find contrib/cmd tests/cmd -mindepth 1 -maxdepth 1 -type d -printf '%f ' || true";
-    run_command "make $cmds || true";
+    my $helpers = script_output "find contrib/cmd tests/cmd -mindepth 1 -maxdepth 1 -type d ! -name _bin -printf '%f ' || true";
+    record_info("helpers", $helpers);
+    run_command "make $helpers || true";
 
-    my $errors = run_tests(rootless => 1, skip_tests => 'BATS_SKIP_USER');
+    unless (get_var("BATS_TESTS")) {
+        # Skip this test due to https://bugzilla.suse.com/show_bug.cgi?id=1247568
+        run_command "rm -f tests/integration/no_pivot.bats" if is_ppc64le;
+        # Skip this test due to https://bugzilla.suse.com/show_bug.cgi?id=1247567
+        run_command "rm -f tests/integration/seccomp.bats" if is_s390x;
+    }
+
+    my $errors = run_tests(rootless => 1, skip_tests => 'BATS_IGNORE_USER');
 
     switch_to_root;
 
-    $errors += run_tests(rootless => 0, skip_tests => 'BATS_SKIP_ROOT');
+    $errors += run_tests(rootless => 0, skip_tests => 'BATS_IGNORE_ROOT');
 
     die "runc tests failed" if ($errors);
 }

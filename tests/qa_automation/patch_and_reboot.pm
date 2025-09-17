@@ -17,8 +17,6 @@
 # Maintainer: Stephan Kulow <coolo@suse.de>
 
 use base "opensusebasetest";
-use strict;
-use warnings;
 use utils;
 use testapi;
 use serial_terminal 'select_serial_terminal';
@@ -29,7 +27,7 @@ use power_action_utils qw(power_action);
 use version_utils qw(is_sle);
 use serial_terminal qw(add_serial_console);
 use version_utils qw(is_jeos);
-use registration qw(add_suseconnect_product);
+use registration qw(add_suseconnect_product get_addon_fullname);
 
 sub run {
     my $self = shift;
@@ -40,6 +38,7 @@ sub run {
     zypper_call(q{mr -d $(zypper lr | awk -F '|' '{IGNORECASE=1} /nvidia/ {print $2}')}, exitcode => [0, 3]);
     zypper_call(q{mr -e $(zypper lr | awk -F '|' '/Basesystem-Module/ {print $2}')}, exitcode => [0, 3]) if get_var('FLAVOR') =~ /TERADATA/;
 
+    add_suseconnect_product(get_addon_fullname('phub')) if check_var('PATTERNS', 'all') && is_sle('15-SP6+') && is_sle('<16');
     add_test_repositories;
 
     # JeOS is a bootable image and doesn't have installation where we can install

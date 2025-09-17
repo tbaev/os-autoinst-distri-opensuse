@@ -6,8 +6,6 @@
 # Maintainer: QE Kernel <kernel-qa@suse.de>
 
 use base "opensusebasetest";
-use strict;
-use warnings;
 use testapi;
 use serial_terminal 'select_serial_terminal';
 use utils;
@@ -15,10 +13,11 @@ use utils;
 sub run {
     my $self = shift;
     select_serial_terminal;
-    # clear console to prevent linux-login to match before reboot
-    clear_console;
     # Copy kernel image and rename it
-    my $kernel_orig = script_output('find /boot -maxdepth 1 -name "*$(uname -r)" | grep -iP "image|vmlinu"', 600);
+    my $find_output = script_output('find /boot -maxdepth 1 -name "*$(uname -r)"', 600);
+    record_info('Find output', $find_output);
+    my @filtered = grep { /image|vmlinu/i } split /\n/, $find_output;
+    my $kernel_orig = $filtered[0];
     (my $kernel_new = $kernel_orig) =~ s/-default$/-kexec/;
     assert_script_run("cp $kernel_orig $kernel_new");
 

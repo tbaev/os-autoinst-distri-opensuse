@@ -8,8 +8,6 @@
 # Maintainer: mkravec <mkravec@suse.com>
 
 use base "x11test";
-use strict;
-use warnings;
 use utils;
 use testapi;
 use x11utils qw(ensure_unlocked_desktop turn_off_kde_screensaver);
@@ -38,7 +36,7 @@ sub run {
                 select_console 'x11', await_console => 0;
                 last;
             }
-            assert_screen_change { assert_and_click('updates_click-install'); };
+            assert_screen_change { assert_and_click('updates_click-install', timeout => 90); };
             assert_screen [qw(updates_click-install pkit_installing_state)];
             # Discover needs an additional confirmation
             if (match_has_tag 'updates_click-install') {

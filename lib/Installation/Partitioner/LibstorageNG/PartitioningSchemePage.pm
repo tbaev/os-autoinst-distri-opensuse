@@ -33,8 +33,8 @@ sub press_next {
 sub select_enable_disk_encryption_checkbox {
     assert_screen(PARTITIONING_SCHEME_PAGE);
     # after https://build.opensuse.org/request/show/1277719 there's a new control
-    # Authentication, which takes the 'alt-a' change is currently in Staging:F
-    my $shortcut = (is_tumbleweed && check_var("VERSION", "Staging:F")) ? 'alt-d' : 'alt-a';
+    # Authentication, which takes the 'alt-a'
+    my $shortcut = ((!is_sle || !is_leap) && check_var("VERSION", "Staging:F")) ? 'alt-d' : 'alt-a';
     send_key($shortcut);
 }
 

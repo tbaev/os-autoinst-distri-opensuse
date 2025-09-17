@@ -1,4 +1,4 @@
-# Copyright 2022 SUSE LLC
+# Copyright SUSE LLC
 # SPDX-License-Identifier: GPL-2.0-or-Later
 #
 # Summary: Verify the "aulast" can print a list of the last logged-in users
@@ -6,8 +6,6 @@
 # Tags: poo#81772, tc#1768581
 
 use base 'opensusebasetest';
-use strict;
-use warnings;
 use testapi;
 use utils;
 use version_utils qw(is_tumbleweed);

@@ -9,9 +9,7 @@
 # Maintainer: QE Security <none@suse.de>
 # Tags: poo#39071, poo#105591, poo#105999, poo#109133
 
-use base qw(consoletest opensusebasetest);
-use strict;
-use warnings;
+use base qw(consoletest);
 use testapi;
 use bootloader_setup qw(add_grub_cmdline_settings change_grub_config);
 use power_action_utils 'power_action';
@@ -19,7 +17,8 @@ use serial_terminal 'select_serial_terminal';
 use transactional qw(trup_call process_reboot);
 use utils qw(zypper_call reconnect_mgmt_console);
 use Utils::Backends 'is_pvm';
-use version_utils qw(is_jeos is_sle_micro is_sle is_tumbleweed is_transactional);
+use Utils::Architectures 'is_aarch64';
+use version_utils qw(is_jeos is_sle_micro is_sle is_tumbleweed is_transactional is_microos);
 
 my @vars = ('OPENSSL_FIPS', 'OPENSSL_FORCE_FIPS_MODE', 'LIBGCRYPT_FORCE_FIPS_MODE', 'NSS_FIPS', 'GNUTLS_FORCE_FIPS_MODE');
 
@@ -28,7 +27,11 @@ sub reboot_and_select_serial_term {
 
     is_transactional ? process_reboot(trigger => 1) : power_action('reboot', textmode => 1, keepconsole => is_pvm);
     reconnect_mgmt_console if is_pvm;
-    $self->wait_boot if !is_transactional;
+    if (is_sle('>=16') && is_aarch64 && (check_var('FLAVOR', 'Full-QR') || check_var('FLAVOR', 'Full'))) {
+        $self->wait_boot_past_bootloader(textmode => 1);
+    } else {
+        $self->wait_boot if !is_transactional;
+    }
     select_serial_terminal;
     return;
 }
@@ -45,7 +48,7 @@ sub enable_fips {
             change_grub_config('=\"[^\"]*', '& fips=1 ', 'GRUB_CMDLINE_LINUX_DEFAULT');
             trup_call('--continue grub.cfg');
         } else {
-            add_grub_cmdline_settings('fips=1', update_grub => 1) unless is_sle_micro;
+            add_grub_cmdline_settings('fips=1', update_grub => 1) unless (is_sle_micro || is_microos);
         }
         $self->reboot_and_select_serial_term;
     }
@@ -53,7 +56,7 @@ sub enable_fips {
 }
 
 sub ensure_fips_enabled {
-    if (is_sle('>=15-SP4') || is_jeos || is_tumbleweed) {
+    if (is_sle('>=15-SP4') || is_jeos || is_tumbleweed || is_microos) {
         validate_script_output("fips-mode-setup --check",
             sub { m/FIPS mode is enabled\.\n.*\nThe current crypto policy \(FIPS\) is based on the FIPS policy\./ });
     } else {
@@ -73,6 +76,8 @@ sub install_fips {
         # crypto-policies script reports Cannot handle transactional systems.
     } elsif (((is_sle('>=15-SP4') || is_jeos || is_tumbleweed)) && !get_var("FIPS_ENV_MODE")) {
         zypper_call("in crypto-policies-scripts");
+        # Explicitly install openssl-3 on s390x SLE16 https://bugzilla.suse.com/show_bug.cgi?id=1247463
+        zypper_call("in openssl-3") if (is_s390x && is_sle('>=16'));
     } elsif (is_sle('<=15-SP3') || get_var("FIPS_ENV_MODE")) {
         # No crypto-policies in older SLE
         zypper_call("in -t pattern fips");
@@ -88,9 +93,15 @@ sub run {
 
     select_serial_terminal;
 
+    if (get_var 'WORKAROUND_BSC1247463') {
+        record_info('!! Workaround !!', 'Workaround for https://bugzilla.suse.com/show_bug.cgi?id=1247463');
+        zypper_call 'in openssl-3';
+    }
+
     # For installation only. FIPS has already been setup during installation
     # (DVD installer booted with fips=1), so we only do verification here.
     if (get_var("FIPS_INSTALLATION")) {
+        install_fips;
         ensure_fips_enabled;
         record_info 'Kernel Mode', 'FIPS kernel mode (for global) configured!';
         return;

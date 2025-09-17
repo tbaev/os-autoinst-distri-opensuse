@@ -7,8 +7,6 @@
 # Summary: Test podman netavark network backend
 # Maintainer: QE-C team <qa-c@suse.de>
 
-use strict;
-use warnings;
 use Mojo::Base 'containers::basetest';
 use testapi;
 use serial_terminal qw(select_serial_terminal);
@@ -70,9 +68,6 @@ sub is_container_running {
     foreach my $cont (@containers) {
         if ($out =~ m/$cont/) {
             next;
-        } elsif (is_sle_micro) {
-            record_soft_failure('bsc#1211774 - podman fails to start container with SELinux');
-            return 0;
         } else {
             die "Container $cont is not running!";
         }

@@ -10,6 +10,9 @@ schedule:
   - console/ping
   - console/arping
   - console/wireshark_cli
+  - console/traceroute
+  - console/tracepath
+  - console/dig
   - console/man_pages
   - console/openvswitch
   - console/pam
@@ -39,12 +42,15 @@ schedule:
   - console/cpio
   - console/tar
   - console/ruby
+  - console/tcpdump
   - '{{version_specific}}'
   - console/coredump_collect
 conditional_schedule:
   version_specific:
     VERSION:
       15-SP7:
+        - console/rabbitmq
+        - console/chrony
         - console/openssl_nodejs
         - console/golang
         - console/redis
@@ -52,6 +58,8 @@ conditional_schedule:
         - qe-core/systemd/journal_remote
         - '{{arch_specific}}'
       15-SP6:
+        - console/rabbitmq
+        - console/chrony
         - console/openssl_nodejs
         - console/golang
         - console/redis
@@ -59,23 +67,31 @@ conditional_schedule:
         - qe-core/systemd/journal_remote
         - '{{arch_specific}}'
       15-SP5:
+        - console/rabbitmq
+        - console/chrony
         - console/openssl_nodejs
         - console/golang
         - console/redis
         - console/ansible
         - '{{arch_specific}}'
       15-SP4:
+        - console/rabbitmq
+        - console/chrony
         - console/openssl_nodejs
         - console/golang
         - console/redis
         - console/ansible
         - '{{arch_specific}}'
       15-SP3:
+        - console/rabbitmq
+        - console/chrony
         - console/openssl_nodejs
         - console/golang
         - console/redis
         - '{{arch_specific}}'
       15-SP2:
+        - console/rabbitmq
+        - console/chrony
         - console/openssl_nodejs
         - console/golang
         - console/redis

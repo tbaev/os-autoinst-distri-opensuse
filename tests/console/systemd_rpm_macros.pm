@@ -5,13 +5,11 @@
 
 # Summary: systemd-rpm-macros test
 #          - call a list of macros to make sure they are available (list taken from manual testing report)
-#          - if Tumbleweed or SLE >= 15, also download sources and install multipath-tools to run some macros
+#          - SLE >= 15, also download sources and install multipath-tools to run some macros
 #
 # Maintainer: QE Core <qe-core@suse.de>
 
 use base 'consoletest';
-use strict;
-use warnings;
 use testapi;
 use serial_terminal 'select_serial_terminal';
 use utils;
@@ -42,10 +40,6 @@ sub run {
         zypper_call("--gpg-auto-import-keys ref", 300) if (get_var('FIPS') || get_var('FIPS_ENABLED'));
         build_mt();
         assert_script_run(q(zypper mr -d $(zypper lr|awk '/Basesystem.*Source/ {print$5}')));
-    } elsif (is_tumbleweed) {
-        zypper_call("ar -f http://download.opensuse.org/source/tumbleweed/repo/oss/ my-source-repo");
-        build_mt();
-        zypper_call("rr my-source-repo");
     }
 }
 1;

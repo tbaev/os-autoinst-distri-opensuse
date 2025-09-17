@@ -12,8 +12,6 @@
 #   be used by OpenQA to represent the results in "External results"
 # Maintainer: QE-C team <qa-c@suse.de>
 
-use strict;
-use warnings;
 use Mojo::Base 'opensusebasetest';
 use XML::LibXML;
 use testapi;
@@ -57,7 +55,6 @@ sub run {
                 my $skippedNode = $tc->findnodes('./skipped[1]');
                 next unless (scalar $skippedNode);
                 my $node = $skippedNode->[0];
-                record_info('TYPE', $node->{type});
                 next unless ($node->{type} eq 'pytest.xfail');
                 my $message = $node->{type} . ': ' . $node->{message};
                 my $softfailure = $dom->createElement('softfailure');

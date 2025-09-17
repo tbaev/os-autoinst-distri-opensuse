@@ -607,6 +607,7 @@ sub load_virt_guest_install_tests {
         loadtest "virt_autotest/set_config_as_glue";
         loadtest "virt_autotest/uefi_guest_verification" if get_var("VIRT_UEFI_GUEST_INSTALL");
         loadtest "virt_autotest/sev_es_guest_verification" if get_var("VIRT_SEV_ES_GUEST_INSTALL");
+        loadtest "virt_autotest/sev_snp_validation" if get_var("VIRT_SEV_SNP_GUEST_INSTALL");
     }
     else {
         loadtest "virt_autotest/guest_installation_run";
@@ -646,6 +647,8 @@ sub load_virt_feature_tests {
     }
 }
 
+# Workaround as use fake build15.99
+set_var('VERSION', '16.0') if (check_var('VERSION', '15.99'));
 testapi::set_distribution(DistributionProvider->provide());
 
 # set failures
@@ -694,6 +697,7 @@ elsif (is_public_cloud) {
 }
 elsif (is_container_test) {
     load_container_tests();
+    load_helm_chart_tests() if (get_var("HELM_CHART"));
 }
 elsif (get_var("NFV")) {
     load_kernel_baremetal_tests();
@@ -817,6 +821,7 @@ elsif (get_var('XFSTESTS')) {
         }
         if (check_var('XFSTESTS', 'installation')) {
             loadtest 'shutdown/shutdown';
+            loadtest 'shutdown/svirt_upload_assets' if check_var('BACKEND', 'svirt');
         }
         else {
             loadtest 'xfstests/partition';
@@ -995,7 +1000,7 @@ elsif (get_var('LIBSOLV_INSTALLCHECK')) {
 elsif (get_var("EXTRATEST")) {
     boot_hdd_image;
     load_extra_tests();
-    loadtest "console/coredump_collect" unless (check_var('EXTRATEST', 'wicked') || get_var('PUBLIC_CLOUD') || is_jeos);
+    loadtest "console/coredump_collect" unless (get_var('EXTRATEST') =~ /wicked|himmelblau/ || get_var('PUBLIC_CLOUD') || is_jeos);
 }
 elsif (get_var("WINDOWS")) {
     loadtest "installation/win10_installation";

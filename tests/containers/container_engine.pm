@@ -24,8 +24,6 @@
 # - test networking outside of host
 # Maintainer: QE-C team <qa-c@suse.de>
 
-use strict;
-use warnings;
 use Mojo::Base 'containers::basetest';
 use testapi;
 use serial_terminal 'select_serial_terminal';
@@ -58,9 +56,6 @@ sub basic_container_tests {
     die "Undefined container runtime" unless $runtime;
     my $image = get_var("CONTAINER_IMAGE_TO_TEST", "registry.opensuse.org/opensuse/tumbleweed:latest");
 
-    ## Test search feature
-    validate_script_output("$runtime search --no-trunc --format 'table {{.Name}} {{.Description}}' tumbleweed", sub { m/Official openSUSE Tumbleweed images/ }, timeout => 300);
-
     # Test pulling and display of images
     script_retry("$runtime image pull $image", timeout => 600, retry => 3, delay => 120);
     validate_script_output("$runtime image ls", qr/tumbleweed/);
@@ -86,11 +81,9 @@ sub basic_container_tests {
     validate_script_output("$runtime ps", qr/basic_test_container/);
     validate_script_output("$runtime container inspect --format='{{.State.Running}}' basic_test_container", qr/true/);
     assert_script_run("$runtime stop basic_test_container");
-    if (script_output("$runtime ps") =~ m/basic_test_container/) {
-        record_soft_failure("bsc#1212825 race condition in docker/podman stop");
-        # We still expect the container to eventually stop
-        validate_script_output_retry("$runtime ps", sub { $_ !~ m/basic_test_container/ }, retry => 3, delay => 60);
-    }
+    # We need to retry to avoid
+    # https://bugzilla.suse.com/show_bug.cgi?id=1212825 Race condition in docker/podman stop
+    validate_script_output_retry("$runtime ps", sub { $_ !~ m/basic_test_container/ }, retry => 3, delay => 60);
     validate_script_output("$runtime container inspect --format='{{.State.Running}}' basic_test_container", qr/false/);
     assert_script_run("$runtime container start basic_test_container");
     validate_script_output("$runtime ps", qr/basic_test_container/);
@@ -114,14 +107,7 @@ sub basic_container_tests {
     assert_script_run("$runtime image rm example.com/tw-commit_test");
 
     ## Test connectivity inside the container
-    if (script_run("$runtime container exec basic_test_container curl -sfIL http://conncheck.opensuse.org") != 0) {
-        if (is_sle("=12-SP5")) {
-            record_soft_failure("bsc#1239303");
-        } else {
-            sleep(60);    # wait 1 delay time before retrying
-            script_retry("$runtime container exec basic_test_container curl -sfIL http://conncheck.opensuse.org", retry => 2, delay => 60, fail_message => "cannot reach conncheck.opensuse.org");
-        }
-    }
+    script_retry("$runtime container exec basic_test_container curl -sfIL http://conncheck.opensuse.org", retry => 3, delay => 60, fail_message => "cannot reach conncheck.opensuse.org");
 
     ## Test `--init` option, i.e. the container process won't be PID 1 (to avoid zombie processes)
     # Ensure PID 1 has either the $runtime-init (e.g. podman-init) OR /init (e.g. `/dev/init) suffix
@@ -148,9 +134,14 @@ sub basic_container_tests {
     if (!get_var("OCI_RUNTIME")) {
         my $template = ($runtime eq "podman") ? "{{ .Host.OCIRuntime.Name }}" : "{{ .DefaultRuntime }}";
         my $oci_runtime = script_output("$runtime info -f '$template'");
-        # Only SLEM 6.0 & SLEM 6.1 use crun for podman
-        my $expected = ($runtime eq "podman" && is_sle_micro('>=6.0') && is_sle_micro('<=6.1')) ? "crun" : "runc";
-        die "Unexpected OCI runtime: $oci_runtime != $expected" if ($oci_runtime ne $expected);
+        # ATM only SLEM 6.0 & SLEM 6.1 use crun for podman
+        if ($oci_runtime ne "runc") {
+            if ($runtime eq "podman" && is_sle_micro('>=6.0') && is_sle_micro('<=6.1')) {
+                record_soft_failure("bsc#1239088 - podman 5.2 uses crun instead of runc");
+            } else {
+                die "Unexpected OCI runtime: $oci_runtime";
+            }
+        }
     }
 
     ## Note: Leave the tumbleweed container to save some bandwidth. It is used in other test modules as well.

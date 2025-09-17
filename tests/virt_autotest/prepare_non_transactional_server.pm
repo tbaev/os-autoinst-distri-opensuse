@@ -13,8 +13,6 @@
 package prepare_non_transactional_server;
 
 use base "opensusebasetest";
-use strict;
-use warnings;
 use testapi;
 use transactional;
 use utils;
@@ -22,6 +20,7 @@ use version_utils;
 use Utils::Systemd;
 use Utils::Backends qw(get_serial_console);
 use ipmi_backend_utils;
+use virt_autotest::virtual_network_utils;
 use virt_autotest::utils;
 
 sub run {
@@ -33,7 +32,19 @@ sub run {
     $self->prepare_bootloader;
     $self->prepare_services;
     $self->prepare_reboot;
+    $self->prepare_networks;
     $self->restore_ground;
+}
+
+sub prepare_networks {
+    my $self = shift;
+
+    # Skip br0 bridge creation if SKIP_HOST_BRIDGE_SETUP is set
+    if (get_var('SKIP_HOST_BRIDGE_SETUP')) {
+        record_info("Host bridge preparation skipped", "Host bridge preparation skipped due to SKIP_HOST_BRIDGE_SETUP setting");
+    } else {
+        virt_autotest::virtual_network_utils::create_host_bridge_nm;
+    }
 }
 
 sub prepare_ground {

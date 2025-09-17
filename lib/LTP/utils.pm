@@ -289,7 +289,7 @@ EOF
         script_run('ip6tables -S');
 
         # display various network configuration
-        script_run('netstat -nap');
+        script_run('ss -nap || netstat -nap');
 
         script_run('cat /etc/resolv.conf');
         script_run('f=/etc/nsswitch.conf; [ ! -f $f ] && f=/usr$f; cat $f');
@@ -523,6 +523,7 @@ sub prepare_whitelist_environment {
         flavor => get_var('FLAVOR'),
         arch => get_var('ARCH'),
         backend => get_var('BACKEND'),
+        machine => get_var('MACHINE'),
         kernel => '',
         libc => '',
         gcc => '',

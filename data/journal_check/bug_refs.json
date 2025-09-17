@@ -211,14 +211,6 @@
         },
         "type": "bug"
     },
-    "boo#1197904": {
-        "description": "check_config_dict\\(\\) takes 2 positional arguments but 3 were given",
-        "products": {
-            "opensuse": ["15.3", "15.4"],
-            "sle": ["15-SP3", "15-SP4"]
-        },
-        "type": "bug"
-    },
     "bsc#1197679": {
         "description": "route ipv4 0.0.0.0/0 via.*dev eth0#2 type unicast table main scope universe protocol dhcp covered by a ipv4:dhcp lease",
         "products": {
@@ -262,6 +254,23 @@
             "opensuse": ["Tumbleweed", "15.2", "15.3"]
         },
         "type": "ignore"
+    },
+    "bsc#1245376": {
+        "description": "kernel: watchdog: watchdog0: watchdog did not stop!|Failed to send WATCHDOG=1 notification message: Connection refused",
+        "products": {
+            "sle-micro": ["6.2"],
+            "opensuse": ["Tumbleweed"],
+            "microos":  ["Tumbleweed"]
+        },
+        "type": "ignore"
+    },
+    "bsc#1248738": {
+        "description": "kernel: PCI: OF: of_root node is NULL, cannot create PCI host bridge node",
+        "products": {
+            "opensuse": ["Tumbleweed"],
+            "microos":  ["Tumbleweed"]
+        },
+        "type": "feature"
     },
     "apci-bridge": {
         "description": "fail to add MMCONFIG information, can't access extended (PCI|.*configuration) space under this bridge|PCI: System does not support PCI",
@@ -324,7 +333,7 @@
     "xen-trim-btrfs-on-mechaninal-drive": {
         "description": "kernel: BTRFS warning.*: failed to trim.*, last error -512",
         "products": {
-            "sle": ["15-SP2", "15-SP3", "15-SP4", "15-SP5", "15-SP6", "15-SP7"]
+            "sle": ["15-SP2", "15-SP3", "15-SP4", "15-SP5", "15-SP6", "15-SP7", "16.0"]
         },
         "type": "ignore"
     },
@@ -669,7 +678,9 @@
     "bsc#1231457": {
         "description": "vas: API is supported only with radix page tables|SED: plpks not available|NX-GZIP is not supported|ibmvscsi.*couldn't initialize crq|ibmvscsi.*probe with driver ibmvscsi failed",
         "products": {
-            "sle-micro": ["6.1", "6.2"]
+            "sle-micro": ["6.1", "6.2"],
+            "opensuse": ["Tumbleweed"],
+            "microos":  ["Tumbleweed"]
         },
         "type": "bug"
     },
@@ -815,7 +826,7 @@
         "type": "ignore"
     },
     "vmware-RETBleed": {
-        "description": "kernel: RETBleed: WARNING: Spectre v2 mitigation leaves CPU vulnerable to RETBleed attacks, data leaks possible!",
+        "description": "kernel: RETBleed: WARNING: Spectre v2 mitigation leaves CPU vulnerable to RETBleed attacks, data leaks possible!|Speculative Return Stack Overflow: (IBPB-extending microcode not applied|WARNING: See .* for mitigation options)",
         "products": {
             "sle": ["15-SP6", "15-SP7", "16.0"],
             "sle-micro": ["6.2"]
@@ -847,6 +858,14 @@
     },
     "boo#1229935": {
         "description": "sshd-session.*(error|fatal).*(mm_reap: preauth child terminated|mm_request_receive: read: Broken pipe|mm_request_receive: read: Connection reset by peer)",
+        "products": {
+            "opensuse": ["Tumbleweed"],
+            "microos":  ["Tumbleweed"]
+        },
+        "type": "bug"
+    },
+    "boo#1245608": {
+        "description": "basic hdkf.*hkdf_extract failed with -22",
         "products": {
             "opensuse": ["Tumbleweed"],
             "microos":  ["Tumbleweed"]
@@ -893,7 +912,8 @@
         "description": "No '\/dev\/log' or 'logger' included for syslog logging",
         "products": {
             "opensuse": ["Tumbleweed"],
-            "microos":  ["Tumbleweed"]
+            "microos":  ["Tumbleweed"],
+            "sle-micro": ["6.2"]
         },
         "type": "ignore"
     },
@@ -904,8 +924,64 @@
         },
         "type": "ignore"
     },
+    "ppc64le-power10-secvar-sysfs-nosb": {
+        "description": "kernel: secvar-sysfs: Failed to retrieve secvar operations",
+        "products": {
+            "sle": ["16.0"]
+        },
+        "type": "ignore"
+    },
+    "ppc64le-power10-no-sed": {
+        "description": "kernel: SED: plpks not available",
+        "products": {
+            "sle": ["16.0"]
+        },
+        "type": "ignore"
+    },
+    "ppc64le-power10-no-sriov-hw": {
+        "description": "kernel: pci .*: No hypervisor support for SR-IOV on this device, IOV BARs disabled",
+        "products": {
+            "sle": ["16.0"]
+        },
+        "type": "ignore"
+    },
     "block-dm-0-deprecated": {
         "description": "kernel: block dm-0: the capability attribute has been deprecated",
+        "products": {
+            "sle": ["16.0"]
+        },
+        "type": "ignore"
+    },
+    "boo#1245786": {
+        "description": "Failed to start Update import-pubring.gpg with keys from rpmdb",
+        "products": {
+            "microos":  ["Tumbleweed"]
+        },
+        "type": "bug"
+    },
+    "bsc#1236723": {
+        "description": "hv_storvsc.*: tag#\\d+ cmd 0x5a status: scsi 0x2 srb 0x86 host 0xc0000001",
+        "products": {
+            "sle": ["16.0"]
+        },
+        "type": "bug"
+    },
+    "bsc#1246862": {
+        "description": "hcnscan:error code 5, Failed to load bonding module|hcn-init-NetworkManager.service: Failed with result 'exit-code'|Failed to start hybrid virtual network scan and config for NetworkManager",
+        "products": {
+            "sle": ["16.0"]
+        },
+        "type": "bug"
+    },
+    "bsc#1238885": {
+        "description": "kernel: Could not retrieve perf counters \\(-19\\)",
+        "products": {
+            "sle": ["16.0"]
+        },
+        "type": "ignore"
+    },
+    "replenish-aarch74": {
+        "description": "kernel: sched: DL replenish lagged too much",
         "products": {
             "sle": ["16.0"]
         },

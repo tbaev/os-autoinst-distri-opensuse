@@ -6,8 +6,6 @@
 # Tags: poo#53579, poo#100694, poo#102311
 
 use base 'opensusebasetest';
-use strict;
-use warnings;
 use testapi;
 use serial_terminal 'select_serial_terminal';
 use utils;
@@ -28,9 +26,8 @@ sub run {
     my $cert_der = '/root/certs/ima_cert.der';
 
     add_grub_cmdline_settings("ima_appraise=fix", update_grub => 1);
-    my $sb_state = script_output('mokutil --sb-state');
     power_action("reboot", textmode => 1);
-    handle_secureboot($self, $sb_state);
+    handle_secureboot($self, 'disable');
     select_serial_terminal;
 
     my @sign_cmd = (
@@ -65,7 +62,7 @@ sub run {
 
         replace_grub_cmdline_settings('ima_appraise=fix', '', update_grub => 1);
         power_action('reboot', textmode => 1);
-        handle_secureboot($self, $sb_state, 're_enable');
+        handle_secureboot($self, 'enable');
 
         select_serial_terminal;
         assert_script_run "dmesg | grep IMA:.*completed";

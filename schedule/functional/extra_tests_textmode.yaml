@@ -81,10 +81,6 @@ conditional_schedule:
                 - console/kdump_and_crash
                 - console/ansible
                 - console/libgit2
-    opensuse_repos:
-        DISTRI:
-            opensuse:
-                - console/opensuse_repos
     validate_packages_and_patterns:
         DISTRI:
             sle:
@@ -104,6 +100,7 @@ conditional_schedule:
     tumbleweed_tests:
         VERSION:
             'Tumbleweed':
+                - console/systemd_resolved
                 - console/parsec
                 - console/systemd_rpm_macros
                 - console/vsftpd
@@ -111,6 +108,7 @@ conditional_schedule:
                 - console/libjpeg_turbo
                 - console/valkey
                 - '{{velociraptor_tests}}'
+                - console/apache2_php_fpm
     velociraptor_tests:
         ARCH:
             x86_64:
@@ -126,12 +124,15 @@ schedule:
     - console/prepare_test_data
     - console/consoletest_setup
     - '{{update_repos}}'
-    - console/ntp_client
+    - console/chrony
     - console/dnsmasq
     - console/man_pages
     - console/ping
     - console/arping
     - console/wireshark_cli
+    - console/traceroute
+    - console/tracepath
+    - console/dig
     - console/orphaned_packages_check
     - console/zypper_lr_validate
     - console/zypper_ref
@@ -196,7 +197,6 @@ schedule:
     - console/aaa_base
     - console/osinfo_db
     - '{{opensuse_tests}}'
-    - '{{opensuse_repos}}'
     - '{{leap_tests}}'
     - '{{tumbleweed_tests}}'
     - console/journalctl
@@ -205,4 +205,5 @@ schedule:
     - console/coredump_collect
     - console/valgrind
     - console/sssd_389ds_functional
+    - console/tcpdump
     - console/zypper_log_packages

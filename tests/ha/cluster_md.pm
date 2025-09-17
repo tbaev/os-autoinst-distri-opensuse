@@ -7,9 +7,7 @@
 # Summary: cluster-md tests
 # Maintainer: QE-SAP <qe-sap@suse.de>, Loic Devulder <ldevulder@suse.com>
 
-use base 'opensusebasetest';
-use strict;
-use warnings;
+use base 'haclusterbasetest';
 use version_utils 'is_sle';
 use testapi;
 use lockapi;

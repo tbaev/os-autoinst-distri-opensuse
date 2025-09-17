@@ -12,8 +12,6 @@
 package partition;
 
 use 5.018;
-use strict;
-use warnings;
 use base 'opensusebasetest';
 use utils;
 use testapi;
@@ -210,6 +208,8 @@ sub create_loop_device_by_rootsize {
     set_var('XFSTESTS_TEST_DEV', '/dev/loop0');
     script_run("echo 'export TEST_DIR=$TEST_FOLDER' >> $CONFIG_FILE");
     script_run("echo 'export SCRATCH_MNT=$SCRATCH_FOLDER' >> $CONFIG_FILE");
+    script_run("echo 'export DUMP_CORRUPT_FS=1' >> $CONFIG_FILE");
+    script_run("echo 'export DUMP_COMPRESSOR=gzip' >> $CONFIG_FILE") if (script_run('which gzip') == 0);
     if ($amount == 1) {
         script_run("echo 'export SCRATCH_DEV=/dev/loop1' >> $CONFIG_FILE");
         set_var('XFSTESTS_SCRATCH_DEV', '/dev/loop1');
@@ -246,6 +246,16 @@ sub set_config {
         script_run("echo export SCRATCH_MNT=/opt/nfs/scratch >> $CONFIG_FILE");
         if ($NFS_VERSION =~ 'pnfs') {
             script_run("echo export NFS_MOUNT_OPTIONS='\"-o rw,relatime,vers=4.1,minorversion=1\"' >> $CONFIG_FILE");
+        }
+        elsif ($NFS_VERSION =~ 'TLS') {
+            script_run('modprobe tls');
+            my ($vers_num) = $NFS_VERSION =~ /-([\d.]+)/;
+            script_run("echo export NFS_MOUNT_OPTIONS='\"-o rw,relatime,vers=$vers_num,sec=sys,xprtsec=mtls\"' >> $CONFIG_FILE");
+        }
+        elsif ($NFS_VERSION =~ 'krb5') {
+            my ($vers_num) = $NFS_VERSION =~ /-([\d.]+)/;
+            my ($krb5_type) = $NFS_VERSION =~ /(krb5[pi]?)/;
+            script_run("echo export NFS_MOUNT_OPTIONS='\"-o rw,relatime,vers=$vers_num,sec=$krb5_type\"' >> $CONFIG_FILE");
         }
         else {
             script_run("echo export NFS_MOUNT_OPTIONS='\"-o rw,relatime,vers=$NFS_VERSION\"' >> $CONFIG_FILE");
@@ -349,6 +359,8 @@ sub install_dependencies_nfs {
       nfs-kernel-server
       nfs4-acl-tools
     );
+    push @deps, 'ktls-utils', 'openssl-3' if ($NFS_VERSION =~ 'TLS');
+    push @deps, 'krb5-client', 'krb5-server' if ($NFS_VERSION =~ 'krb5');
     script_run('zypper --gpg-auto-import-keys ref');
     if (is_transactional) {
         trup_install(join(' ', @deps));
@@ -376,10 +388,95 @@ sub install_dependencies_overlayfs {
     }
 }
 
+sub setup_ktls {
+    my $tlshd_dir = '/etc/tlshd';
+    assert_script_run("mkdir $tlshd_dir; cd $tlshd_dir");
+    #Generate CA
+    assert_script_run("openssl req -x509 -nodes -days 365 -newkey rsa:2048 -keyout ca.key -out ca.pem -subj \"/CN=NFS Test CA\"");
+    #Generate server-CA
+    assert_script_run("openssl req -new -nodes -newkey rsa:2048 -keyout server.key -out server.csr  -subj \"/CN=nfs-server\" -addext \"subjectAltName=IP:127.0.0.1,IP:0:0:0:0:0:0:0:1\"");
+    assert_script_run("openssl x509 -req -in server.csr -CA ca.pem -CAkey ca.key -CAcreateserial -out server.pem -days 365 -extfile <(printf \"subjectAltName=IP:127.0.0.1,IP:0:0:0:0:0:0:0:1\")");
+    #Generate client-CA(use for mtls, multi-way tls verification)
+    assert_script_run("openssl req -new -nodes -newkey rsa:2048 -keyout client.key -out client.csr -subj \"/CN=nfs-client\" -addext \"subjectAltName=IP:127.0.0.1,IP:0:0:0:0:0:0:0:1\"");
+    assert_script_run("openssl x509 -req -in client.csr -CA ca.pem -CAkey ca.key -CAcreateserial -out client.pem -days 365 -extfile <(printf \"subjectAltName=IP:127.0.0.1,IP:0:0:0:0:0:0:0:1\")");
+    script_run('cd -');
+    my $content = <<END;
+[debug]
+loglevel=1
+tls=1
+nl=1
+
+[authenticate.client]
+x509.truststore = /etc/tlshd/ca.pem
+x509.certificate = /etc/tlshd/client.pem
+x509.private_key = /etc/tlshd/client.key
+
+[authenticate.server]
+x509.truststore = /etc/tlshd/ca.pem
+x509.certificate = /etc/tlshd/server.pem
+x509.private_key = /etc/tlshd/server.key
+END
+    script_run("echo '$content' > \"/etc/tlshd.conf\"");
+    script_run("sed -i '/^ExecStart/ s|ExecStart=.*|ExecStart=/usr/sbin/tlshd -c /etc/tlshd.conf|' /usr/lib/systemd/system/tlshd.service");
+    script_run('systemctl daemon-reload; systemctl enable tlshd.service; systemctl start tlshd.service');
+}
+
+sub setup_krb5 {
+    script_run('hostname localhost');
+    my $content = <<END;
+includedir  /etc/krb5.conf.d
+
+[libdefaults]
+    dns_canonicalize_hostname = false
+    rdns = false
+    verify_ap_req_nofail = true
+    default_ccache_name = KEYRING:persistent:%{uid}
+    default_realm = SUSETEST.COM
+    dns_lookup_realm = false
+    dns_lookup_kdc = false
+
+[realms]
+       SUSETEST.COM = {
+        kdc = 127.0.0.1:88
+        admin_server = 127.0.0.1:749
+    }
+
+[logging]
+    kdc = FILE:/var/log/krb5/krb5kdc.log
+    admin_server = FILE:/var/log/krb5/kadmind.log
+    default = SYSLOG:NOTICE:DAEMON
+END
+    script_run("echo '$content' > \"/etc/krb5.conf\"");
+
+    #create KDC database, start service and setup key
+    script_run('kdb5_util create -s -P susetest -r SUSETEST.COM');
+    script_run('systemctl start krb5kdc kadmind; systemctl enable krb5kdc kadmind');
+    script_run('echo -e "susetest\nsusetest" | kadmin.local -q "addprinc root/admin@SUSETEST.COM"');
+    script_run('kadmin.local -q "addprinc -randkey nfs/$(hostname -f)@SUSETEST.COM"');
+    script_run('kadmin.local -q "ktadd -k /etc/krb5.keytab nfs/$(hostname -f)@SUSETEST.COM"');
+
+    #verify the key
+    script_run('klist -kte /etc/krb5.keytab');
+    script_run('kadmin.local -q "getprinc nfs/$(hostname -f)@SUSETEST.COM"');
+
+    #get kerberos ticket and check
+    script_run('kinit -k host/$(hostname -f)@SUSETEST.COM');
+    script_run('klist');
+    script_run('kinit -k nfs/$(hostname -f)@SUSETEST.COM');
+    script_run('klist');
+}
+
 sub setup_nfs_server {
     my $nfsversion = shift;
+    if ($nfsversion =~ 'TLS') {
+        setup_ktls;
+    }
     if ($nfsversion =~ 'pnfs') {
         assert_script_run('mkdir -p /opt/export/test /opt/export/scratch /opt/nfs/test /opt/nfs/scratch && chown nobody:nogroup /opt/export/test /opt/export/scratch && echo \'/opt/export/test *(rw,pnfs,no_subtree_check,no_root_squash,fsid=1)\' >> /etc/exports && echo \'/opt/export/scratch *(rw,pnfs,no_subtree_check,no_root_squash,fsid=2)\' >> /etc/exports');
+    }
+    elsif ($nfsversion =~ 'krb5') {
+        setup_krb5($nfsversion);
+        assert_script_run('mkdir -p /opt/export/test /opt/export/scratch /opt/nfs/test /opt/nfs/scratch && chown nobody:nogroup /opt/export/test /opt/export/scratch && echo \'/opt/export/test *(rw,no_subtree_check,no_root_squash,sec=krb5:krb5i:krb5p,fsid=1)\' >> /etc/exports && echo \'/opt/export/scratch *(rw,no_subtree_check,no_root_squash,sec=krb5:krb5i:krb5p,fsid=2)\' >> /etc/exports');
     }
     else {
         assert_script_run('mkdir -p /opt/export/test /opt/export/scratch /opt/nfs/test /opt/nfs/scratch && chown nobody:nogroup /opt/export/test /opt/export/scratch && echo \'/opt/export/test *(rw,no_subtree_check,no_root_squash,fsid=1)\' >> /etc/exports && echo \'/opt/export/scratch *(rw,no_subtree_check,no_root_squash,fsid=2)\' >> /etc/exports');
@@ -387,7 +484,7 @@ sub setup_nfs_server {
     my $nfsgrace = get_var('NFS_GRACE_TIME', 15);
     assert_script_run("echo 'options lockd nlm_grace_period=$nfsgrace' >> /etc/modprobe.d/lockd.conf && echo 'options lockd nlm_timeout=5' >> /etc/modprobe.d/lockd.conf");
 
-    if ($nfsversion == '3') {
+    if ($nfsversion =~ '3') {
         assert_script_run("echo 'MOUNT_NFS_V3=\"yes\"' >> /etc/sysconfig/nfs");
         assert_script_run("echo 'MOUNT_NFS_DEFAULT_PROTOCOL=3' >> /etc/sysconfig/autofs && echo 'OPTIONS=\"-O vers=3\"' >> /etc/sysconfig/autofs");
         assert_script_run("echo '[NFSMount_Global_Options]' >> /etc/nfsmount.conf && echo 'Defaultvers=3' >> /etc/nfsmount.conf && echo 'Nfsvers=3' >> /etc/nfsmount.conf");
@@ -434,10 +531,6 @@ sub setup_nfs_client {
 
 sub run {
     my ($self) = @_;
-    if (is_sle_micro && is_ppc64le) {
-        record_info('INFO', 'Booting microos on ppc64le');
-        $self->wait_boot(ready_time => 1800);
-    }
     select_serial_terminal;
 
     # DO NOT set XFSTESTS_DEVICE if you don't know what's this mean
@@ -477,6 +570,7 @@ sub run {
             setup_nfs_server("$NFS_VERSION");
             setup_nfs_client("$NFS_VERSION");
             $NFS_SERVER_IP = 'localhost';
+            $NFS_SERVER_IP = '127.0.0.1' if $NFS_VERSION =~ 'TLS';    #ipv6 will make some issue for the test key
             $NFS_SERVER_IP = script_output("ip route | awk 'NR==2 {print \$9}'") if $NFS_VERSION =~ 'rdma';
         }
     }

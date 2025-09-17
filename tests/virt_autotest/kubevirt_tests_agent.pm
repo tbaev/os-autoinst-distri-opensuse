@@ -8,8 +8,6 @@
 # Maintainer: Nan Zhang <nan.zhang@suse.com> qe-virt@suse.de
 
 use base multi_machine_job_base;
-use strict;
-use warnings;
 use testapi;
 use lockapi;
 use transactional;
@@ -48,8 +46,8 @@ sub rke2_agent_setup {
 
     record_info('RKE2 Agent Setup', '');
     unless (is_transactional) {
-        disable_and_stop_service('apparmor.service');
-        disable_and_stop_service('firewalld.service');
+        disable_and_stop_service('apparmor.service') if (script_run('systemctl is-active apparmor') == 0);
+        disable_and_stop_service('firewalld.service') if (script_run('systemctl is-active firewalld') == 0);
     }
     # Enable NTP service
     systemctl('enable --now chronyd', timeout => 180);

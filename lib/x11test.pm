@@ -16,7 +16,7 @@ use Config::Tiny;
 use Utils::Architectures;
 use utils;
 use version_utils qw(is_sle is_leap is_tumbleweed);
-use x11utils qw(select_user_gnome start_root_shell_in_xterm handle_gnome_activities);
+use x11utils qw(select_user_gnome start_root_shell_in_xterm handle_gnome_activities default_gui_terminal);
 use POSIX 'strftime';
 use mm_network;
 use Utils::Logging qw(export_healthcheck_basic select_log_console export_logs_basic export_logs_desktop record_avc_selinux_alerts);
@@ -33,7 +33,7 @@ sub post_fail_hook {
     select_serial_terminal();
     export_healthcheck_basic;
     export_logs_basic;
-    record_avc_selinux_alerts;
+    shift->record_avc_selinux_alerts;
     # Export extra log after failure for further check gdm issue 1127317, also poo#45236 used for tracking action on Openqa
     export_logs_desktop;
     select_log_console;
@@ -599,7 +599,7 @@ sub start_clean_firefox {
     my ($self) = @_;
     mouse_hide(1);
 
-    x11_start_program('xterm');
+    x11_start_program(default_gui_terminal());
     # Clean and Start Firefox
     enter_cmd "killall -9 firefox;rm -rf .moz* .config/iced* .cache/iced* .local/share/gnome-shell/extensions/*; firefox /home >firefox.log 2>&1 &";
     wait_still_screen 3;
@@ -627,7 +627,7 @@ sub start_firefox_with_profile {
     $url ||= '/home';
     mouse_hide(1);
 
-    x11_start_program('xterm');
+    x11_start_program(default_gui_terminal());
     # use mozilla configuration stored with start_clean_firefox
     enter_cmd "killall -9 firefox;rm -rf .mozilla .config/iced* .cache/iced* .local/share/gnome-shell/extensions/*;cp -rp .mozilla_first_run .mozilla";
     # Start Firefox
@@ -701,18 +701,22 @@ sub firefox_open_url {
 }
 
 sub firefox_preferences {
-    send_key_until_needlematch 'firefox-edit-menu', 'alt-e', 6, 5;
-    send_key_until_needlematch 'firefox-preferences', 'n', 6, 5;
+    send_key "alt";
+    assert_and_click "firefox-title-appear";
+    assert_and_click "firefox-edit-menu";
 }
 
 sub exit_firefox_common {
     # Exit
     send_key 'ctrl-q';
     wait_still_screen 3, 6;
-    send_key_until_needlematch([qw(firefox-save-and-quit xterm-left-open xterm-without-focus)], "alt-f4", 7, 30);
+    send_key_until_needlematch([qw(firefox-save-and-quit xterm-left-open xterm-without-focus console-left-open)], "alt-f4", 7, 30);
     if (match_has_tag 'firefox-save-and-quit') {
         # confirm "save&quit"
         send_key "ret";
+    }
+    if (check_screen("http-server-running", 5)) {
+        send_key "ctrl-c";
     }
     # wait a sec because xterm-without-focus can match while firefox is being closed
     wait_still_screen 3, 6;
@@ -1009,6 +1013,9 @@ sub libreoffice_start_program {
     my %start_program_args;
     $start_program_args{timeout} = 100 if get_var('LIVECD') && check_var('MACHINE', 'uefi-usb');
     x11_start_program($program, %start_program_args);
+    if (check_screen('popup-welcome-to-libreoffice')) {
+        send_key "alt-f4";
+    }
     if (check_screen([qw(ooffice-tip-of-the-day oomath-tip-of-the-day)], 5)) {
         # Unselect "_S_how tips on startup", select "_O_k"
         send_key "alt-s";

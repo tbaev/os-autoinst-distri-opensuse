@@ -1,7 +1,15 @@
 {
-  bootloader: {
-    stopOnBootMenu: true
+  bootloader(bootloader, bootloader_timeout, bootloader_extra_kernel_params):: {
+    [if bootloader || bootloader_timeout != '' || bootloader_extra_kernel_params != '' then 'bootloader']: std.prune({
+      [if bootloader then 'stopOnBootMenu']: true,
+      [if bootloader_timeout then 'timeout']: 15,
+      [if bootloader_extra_kernel_params != '' then 'extraKernelParams']: bootloader_extra_kernel_params,
+    }),
   },
+  files: [{
+     destination: '/usr/local/share/dummy.xml',
+     url: 'dummy.xml'
+  }],
   localization: {
     language: 'cs_CZ.UTF-8',
     keyboard: 'cz',

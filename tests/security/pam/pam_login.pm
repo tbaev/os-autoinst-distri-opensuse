@@ -1,4 +1,4 @@
-# Copyright 2020 SUSE LLC
+# Copyright SUSE LLC
 # SPDX-License-Identifier: GPL-2.0-or-later
 #
 # Summary: PAM tests for login, user login should fail without authentication
@@ -6,14 +6,18 @@
 # Tags: poo#70345, tc#1767577
 
 use base 'opensusebasetest';
-use strict;
-use warnings;
 use testapi;
 use serial_terminal 'select_serial_terminal';
 use version_utils;
 
 sub run {
     select_serial_terminal;
+
+    # pam_ssh is not part of SLE16 and above
+    if (is_sle('>=16')) {
+        record_info('SKIPPING TEST', "Skipping pam_login for now as pam_ssh.so is no longer part of SLE>=16. Refactoring might be needed.");
+        return;
+    }
 
     # Define the user and password, which are already configured in previous milestone
     my $user = 'suse';

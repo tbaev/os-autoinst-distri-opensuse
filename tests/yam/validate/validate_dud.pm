@@ -10,14 +10,26 @@
 # Maintainer: QE YaST and Migration (QE Yam) <qe-yam at suse de>
 
 use base Yam::Agama::agama_base;
-use strict;
-use warnings;
 use testapi;
 
 sub run {
     select_console 'root-console';
     # See https://build.opensuse.org/package/show/home:lslezak:dud-test/hello-world
     validate_script_output("hello-world.sh", qr/Hello world!/);
+
+    my $agama_output = script_output("journalctl -u agama-autoinstall");
+    if ($agama_output =~ /Configuration\sloaded\sfrom\sfile\:\/\/\/autoinst\.json/ms) {
+        diag "DUD profile loaded successfully";
+    } else {
+        die "Error, JSON profile in DUD file not loaded";
+    }
+
+    my $kernel_dud_output = script_output("journalctl -u dracut-pre-pivot");
+    if ($kernel_dud_output =~ /Unloading kernel module .+?nfs\.ko/) {
+        diag "Kernel module DUD applied successfully";
+    } else {
+        die "Error, kernel module DUD not loaded";
+    }
 }
 
 1;

@@ -7,8 +7,6 @@
 
 use parent 'sles4sap::sap_deployment_automation_framework::basetest';
 
-use warnings;
-use strict;
 use testapi;
 use serial_terminal qw(select_serial_terminal);
 use sles4sap::console_redirection qw(connect_target_to_serial disconnect_target_from_serial);
@@ -60,6 +58,7 @@ sub run {
     for my $instance (@$instances) {
         $self->{my_instance} = $instance;
         record_info('Wait SSH', 'Running "wait_for_ssh()" on: ' . $instance->{instance_id});
+        $instance->update_instance_ip();
         $instance->wait_for_ssh();
 
         # Check hostname and verify `ssh_script_output` function working

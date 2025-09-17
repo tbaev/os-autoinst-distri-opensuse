@@ -6,8 +6,6 @@
 # Summary: Check qe-sap-deployment health before start using it.
 # https://github.com/SUSE/qe-sap-deployment
 
-use strict;
-use warnings;
 use base 'sles4sap_publiccloud_basetest';
 use testapi;
 use publiccloud::utils;
@@ -33,10 +31,14 @@ sub run {
         $self->{my_instance} = $instance;
         my $instance_id = $instance->{'instance_id'};
         # Check ssh connection for all hosts
+        $instance->update_instance_ip();
         $instance->wait_for_ssh();
 
         # Skip instances without HANA db or setup without cluster
         next if ($instance_id !~ m/vmhana/) or !$ha_enabled;
+
+        # check zypper ref for errors
+        $self->check_zypper_ref();
 
         # Output the version of tool 'SAPHanaSR-showAttr'
         record_info('SAPHanaSR version number', $self->saphanasr_showAttr_version());

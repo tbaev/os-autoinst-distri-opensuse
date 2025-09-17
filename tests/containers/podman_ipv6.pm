@@ -7,8 +7,6 @@
 # Summary: Test podman IPv6
 # Maintainer: QE-C team <qa-c@suse.de>
 
-use strict;
-use warnings;
 use Mojo::Base 'containers::basetest';
 use testapi;
 use serial_terminal qw(select_serial_terminal);
@@ -48,7 +46,7 @@ sub run {
     assert_script_run("iptables -A OUTPUT -d $registry_ipv4 -j DROP");
     validate_script_output('iptables -L OUTPUT', sub { m/$registry_ipv4/g });
     # Test that access to openSUSE registry no longer works via IPv4
-    script_retry("!curl -sSf4 https://registry.opensuse.org/v2/", delay => 25, retry => 4);
+    assert_script_run("!curl -sSf4 https://registry.opensuse.org/v2/");
     # Test that access to openSUSE registry still works (IPv6 should work)
     script_retry('curl -sSf https://registry.opensuse.org/v2/', delay => 25, retry => 4);
     # Pull image from openSUSE registry (over IPv6 now)

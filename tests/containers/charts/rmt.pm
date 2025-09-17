@@ -12,8 +12,6 @@
 #
 # Maintainer: QE-C team <qa-c@suse.de>
 
-use strict;
-use warnings;
 use Mojo::Base 'containers::basetest';
 use File::Basename qw(dirname);
 use testapi;
@@ -33,12 +31,15 @@ sub run {
     install_kubectl();
     install_helm();
 
-    helm_install_chart($helm_chart, $helm_values, "rmt");
+    helm_install_chart($helm_chart, $helm_values, "rmt", split_image_registry => 0);
 
     validate_script_output_retry("kubectl get pods", qr/rmt-app/, retry => 10, delay => 30, timeout => 120, fail_message => "rmt-app didn't become ready");
     my @rmts = split(' ', script_output("kubectl get pods | grep rmt-app"));
     my $rmtapp = $rmts[0];
-    validate_script_output_retry("kubectl logs $rmtapp", sub { m/All repositories have already been enabled/ }, retry => 30, timeout => 60, delay => 60);
+    # Wait for app to be running for at most 10 minutes
+    validate_script_output_retry("kubectl get pods", sub { m/rmt-app.* .* Running .*/ }, retry => 20, delay => 30);
+    # Wait for rmt to sync all repos for 1h
+    validate_script_output_retry("kubectl logs $rmtapp", sub { m/All repositories have already been enabled/ }, retry => 60, delay => 30);
     assert_script_run("kubectl exec $rmtapp -- rmt-cli repos list");
     assert_script_run('test $(kubectl get pods --field-selector=status.phase=Running | grep -c rmt) -eq 3');
 }

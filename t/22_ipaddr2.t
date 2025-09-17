@@ -39,6 +39,10 @@ subtest '[ipaddr2_infra_deploy]' => sub {
         'No cloudinit_profile provided so az vm create has no custom-data. Cloud-init disabled by default');
     ok((none { /sudo cloud-init status/ } @cmds),
         'No cloudinit_profile. Cloud-init disabled by default');
+    ok((any { /az network nic ip-config update.*private-ip-address.*\..+\..+\.41/ } @cmds),
+        "Run expected ip-config update for the VM with IP 41");
+    ok((any { /az network nic ip-config update.*private-ip-address.*\..+\..+\.42/ } @cmds),
+        "Run expected ip-config update for the VM with IP 42");
 };
 
 subtest '[ipaddr2_infra_deploy] cloudinit_profile' => sub {
@@ -296,6 +300,21 @@ subtest '[ipaddr2_cluster_create] rootless' => sub {
     ok((any { /.*cluster join.*-c.*cloudadmin@/ } @calls), 'crm cluster join uses a non root username');
 };
 
+subtest '[ipaddr2_cluster_check_version]' => sub {
+    my $ipaddr2 = Test::MockModule->new('sles4sap::ipaddr2', no_auto => 1);
+    my @calls;
+    $ipaddr2->redefine(get_current_job_id => sub { return 'Volta'; });
+    $ipaddr2->redefine(ipaddr2_bastion_pubip => sub { return 'Invalid_IP_Galileo'; });
+    $ipaddr2->redefine(assert_script_run => sub { push @calls, $_[0]; return; });
+
+    ipaddr2_cluster_check_version();
+
+    note("\n  -->  " . join("\n  -->  ", @calls));
+    ok((any { /ssh.*\.41.*rpm.*qf.*which crm/ } @calls), "Get rpm crm");
+    ok((any { /ssh.*\.41.*crm --version/ } @calls), "Get crm --version");
+    ok((any { /ssh.*\.41.*zypper se.*crmsh/ } @calls), "Get installed crmsh zypper package");
+};
+
 subtest '[ipaddr2_deployment_sanity] Pass' => sub {
     my $ipaddr2 = Test::MockModule->new('sles4sap::ipaddr2', no_auto => 1);
     my @calls;
@@ -353,7 +372,7 @@ subtest '[ipaddr2_os_sanity]' => sub {
     my $ipaddr2 = Test::MockModule->new('sles4sap::ipaddr2', no_auto => 1);
     $ipaddr2->redefine(record_info => sub { note(join(' ', 'RECORD_INFO -->', @_)); });
     $ipaddr2->redefine(ipaddr2_get_internal_vm_name => sub { return 'Galileo'; });
-    $ipaddr2->redefine(ipaddr2_bastion_pubip => sub { return 'Galileo'; });
+    $ipaddr2->redefine(ipaddr2_bastion_pubip => sub { return 'Invalid_IP_Galileo'; });
     my @calls;
     $ipaddr2->redefine(script_run => sub {
             push @calls, ['local', $_[0]]; });
@@ -383,7 +402,7 @@ subtest '[ipaddr2_os_sanity] root' => sub {
     my $ipaddr2 = Test::MockModule->new('sles4sap::ipaddr2', no_auto => 1);
     $ipaddr2->redefine(record_info => sub { note(join(' ', 'RECORD_INFO -->', @_)); });
     $ipaddr2->redefine(ipaddr2_get_internal_vm_name => sub { return 'Galileo'; });
-    $ipaddr2->redefine(ipaddr2_bastion_pubip => sub { return 'Galileo'; });
+    $ipaddr2->redefine(ipaddr2_bastion_pubip => sub { return 'Invalid_IP_Galileo'; });
     my @calls;
     $ipaddr2->redefine(script_run => sub {
             push @calls, ['local', $_[0]]; });
@@ -413,8 +432,22 @@ subtest '[ipaddr2_bastion_pubip]' => sub {
     my $ipaddr2 = Test::MockModule->new('sles4sap::ipaddr2', no_auto => 1);
     $ipaddr2->redefine(get_current_job_id => sub { return 'Volta'; });
     $ipaddr2->redefine(az_network_publicip_get => sub { return '1.2.3.4'; });
+
     my $res = ipaddr2_bastion_pubip();
+
     ok(($res eq '1.2.3.4'), "Expect 1.2.3.4 and get $res");
+};
+
+subtest '[ipaddr2_bastion_pubip] get invalid IP' => sub {
+    my $ipaddr2 = Test::MockModule->new('sles4sap::ipaddr2', no_auto => 1);
+
+    $ipaddr2->redefine(get_current_job_id => sub { return 'Volta'; });
+    $ipaddr2->redefine(az_network_publicip_get => sub { return 'Invalid_IP_Galileo'; });
+    my $res;
+
+    dies_ok { $res = ipaddr2_bastion_pubip() } 'ipaddr2_bastion_pubip get an invalid IP from az_network_publicip_get and died';
+
+    is($res, undef, 'Expect undef');
 };
 
 subtest '[ipaddr2_internal_key_gen]' => sub {
@@ -455,7 +488,6 @@ subtest '[ipaddr2_internal_key_gen] custom user' => sub {
     ipaddr2_internal_key_gen(user => 'EliaLocatelli');
 
     note("\n  -->  " . join("\n  -->  ", @calls));
-
     ok((any { /mv.*\/home\/EliaLocatelli.*/ } @calls), 'Move the key in the remote user home folder');
 };
 
@@ -471,20 +503,7 @@ subtest '[ipaddr2_internal_key_gen] root' => sub {
     ipaddr2_internal_key_gen(user => 'root');
 
     note("\n  -->  " . join("\n  -->  ", @calls));
-
     ok((any { /mv.*\/root\/.*/ } @calls), 'Move the key in the remote root home folder');
-};
-
-subtest '[ipaddr2_deployment_logs]' => sub {
-    my $ipaddr2 = Test::MockModule->new('sles4sap::ipaddr2', no_auto => 1);
-    my $called = 0;
-    $ipaddr2->redefine(ipaddr2_azure_resource_group => sub { return 'Volta'; });
-    $ipaddr2->redefine(az_vm_diagnostic_log_get => sub { $called = 1; return ('aaaaa.log', 'bbbbbb.log'); });
-    $ipaddr2->redefine(upload_logs => sub { return; });
-
-    ipaddr2_deployment_logs();
-
-    ok(($called eq 1), "az_vm_diagnostic_log_get called");
 };
 
 subtest '[ipaddr2_crm_move]' => sub {
@@ -844,7 +863,26 @@ subtest '[ipaddr2_scc_register]' => sub {
 
     note("\n  -->  " . join("\n  -->  ", @calls));
     ok((any { /registercloudguest.*clean/ } @calls), 'registercloudguest clean');
-    ok((any { /registercloudguest.*-r.*1234567890/ } @calls), 'registercloudguest register');
+    ok((any { /registercloudguest.*force-new.*-r.*1234567890/ } @calls), 'registercloudguest register');
+};
+
+subtest '[ipaddr2_scc_register] scc_endpoint' => sub {
+    my $ipaddr2 = Test::MockModule->new('sles4sap::ipaddr2', no_auto => 1);
+    $ipaddr2->redefine(ipaddr2_bastion_pubip => sub { return '1.2.3.4'; });
+    my @calls;
+
+    $ipaddr2->redefine(ipaddr2_ssh_internal => sub {
+            my (%args) = @_;
+            push @calls, $args{cmd};
+            return;
+    });
+
+    ipaddr2_scc_register(id => 42, scc_code => '1234567890', scc_endpoint => 'SUSEConnect');
+
+    note("\n  -->  " . join("\n  -->  ", @calls));
+    ok((any { /SUSEConnect.*clean/ } @calls), 'SUSEConnect clean');
+    ok((any { /SUSEConnect.*-r.*1234567890/ } @calls), 'SUSEConnect register');
+    ok((none { /SUSEConnect.*force.*1234567890/ } @calls), 'SUSEConnect register does not have force-new');
 };
 
 subtest '[ipaddr2_cloudinit_logs]' => sub {
@@ -961,16 +999,29 @@ subtest '[ipaddr2_test_other_vm]' => sub {
     ok((scalar @calls > 0), "Some calls");
 };
 
-subtest '[ipaddr2_refresh_repo]' => sub {
+subtest '[ipaddr2_repo_refresh]' => sub {
     my $ipaddr2 = Test::MockModule->new('sles4sap::ipaddr2', no_auto => 1);
     $ipaddr2->redefine(ipaddr2_bastion_pubip => sub { return '1.2.3.4'; });
     my @calls;
     $ipaddr2->redefine(assert_script_run => sub { push @calls, $_[0]; return; });
 
-    ipaddr2_refresh_repo(id => '42');
+    ipaddr2_repo_refresh(id => '2');
 
     note("\n  -->  " . join("\n  -->  ", @calls));
-    ok((any { /zypper ref/ } @calls), 'Call zypper ref');
+    ok((any { /ssh.*\.42 .*zypper.*ref/ } @calls), 'Call zypper ref');
+};
+
+subtest '[ipaddr2_repo_list]' => sub {
+    my $ipaddr2 = Test::MockModule->new('sles4sap::ipaddr2', no_auto => 1);
+    $ipaddr2->redefine(ipaddr2_bastion_pubip => sub { return '1.2.3.4'; });
+    my @calls;
+    $ipaddr2->redefine(assert_script_run => sub { push @calls, $_[0]; return; });
+
+    ipaddr2_repo_list(id => '2');
+
+    note("\n  -->  " . join("\n  -->  ", @calls));
+    ok((any { /ssh.*\.42 .*zypper.*lr/ } @calls), 'Call zypper lr');
+    ok((any { /ssh.*\.42 .*zypper.*ls/ } @calls), 'Call zypper ls');
 };
 
 subtest '[get_private_ip_range]' => sub {
@@ -989,16 +1040,169 @@ subtest '[get_private_ip_range]' => sub {
 
 subtest '[ipaddr2_network_peering_create]' => sub {
     my $ipaddr2 = Test::MockModule->new('sles4sap::ipaddr2', no_auto => 1);
-    $ipaddr2->redefine(az_network_vnet_get => sub { return 'DavidCuartielles'; });
-    $ipaddr2->redefine(qesap_az_clean_old_peerings => sub { return; });
     $ipaddr2->redefine(ipaddr2_azure_resource_group => sub { return 'Volta'; });
-
-    my $create_peering = 0;
-    $ipaddr2->redefine(qesap_az_vnet_peering => sub { $create_peering = 1; });
+    my %rec_args;
+    $ipaddr2->redefine(ibsm_network_peering_azure_create => sub {
+            my (%args) = @_;
+            note(" --> ibsm_network_peering_azure_create(ibsm_rg => '$args{ibsm_rg}', sut_rg => '$args{sut_rg}', name_prefix => '$args{name_prefix}')");
+            $rec_args{ibsm_rg} = $args{ibsm_rg};
+            $rec_args{sut_rg} = $args{sut_rg};
+            $rec_args{name_prefix} = $args{name_prefix};
+            return; });
 
     ipaddr2_network_peering_create(ibsm_rg => 'MassimoBanzi');
 
-    ok $create_peering, "qesap_az_vnet_peering called";
+    my %expected_args;
+    $expected_args{ibsm_rg} = 'MassimoBanzi';
+    $expected_args{sut_rg} = 'Volta';
+    $expected_args{name_prefix} = 'ip2t';
+    is_deeply \%rec_args, \%expected_args, "Internal ibsm_network_peering_azure_create get the expected arguments";
 };
+
+subtest '[ipaddr2_patch_system] no args' => sub {
+    my $ipaddr2 = Test::MockModule->new('sles4sap::ipaddr2', no_auto => 1);
+    $ipaddr2->redefine(ipaddr2_bastion_pubip => sub { return '1.2.3.4'; });
+    dies_ok { ipaddr2_patch_systems() } "die if no scc_addons argument is provided";
+    dies_ok { ipaddr2_patch_systems(scc_addons => '') } "die if empty scc_addons argument is provided";
+};
+
+subtest '[ipaddr2_patch_system]' => sub {
+    my $ipaddr2 = Test::MockModule->new('sles4sap::ipaddr2', no_auto => 1);
+    $ipaddr2->redefine(ipaddr2_bastion_pubip => sub { return '1.2.3.4'; });
+    my @calls;
+    $ipaddr2->redefine(assert_script_run => sub { push @calls, $_[0]; return; });
+    $ipaddr2->redefine(script_run => sub {
+            push @calls, $_[0];
+            # simulate zypper is not running anymore
+            return 1 if $_[0] =~ /pgrep.*zypper/;
+            return 0; });
+    my @fully_patch;
+    $ipaddr2->redefine(ssh_fully_patch_system => sub {
+            push @fully_patch, $_[0]; return;
+    });
+    $ipaddr2->redefine(record_info => sub { note(join(' ', 'RECORD_INFO -->', @_)); });
+
+    ipaddr2_patch_system();
+
+    note("\n  -->  " . join("\n  -->  ", @calls));
+    note("\n  FULLY PATCH CALL -->  " . join("\n  FULLY PATCH CALL -->  ", @fully_patch));
+    ok @fully_patch, "Fully patch not called";
+};
+
+subtest '[ipaddr2_scc_addons] no args' => sub {
+    my $ipaddr2 = Test::MockModule->new('sles4sap::ipaddr2', no_auto => 1);
+    $ipaddr2->redefine(ipaddr2_bastion_pubip => sub { return '1.2.3.4'; });
+    dies_ok { ipaddr2_scc_addons() } "die if no argument is provided";
+    dies_ok { ipaddr2_scc_addons(priv_ip_range => '1.2.3') } "die if no scc_addons argument is provided";
+    dies_ok { ipaddr2_scc_addons(priv_ip_range => '1.2.3', scc_addons => '') } "die if empty scc_addons argument is provided";
+};
+
+subtest '[ipaddr2_scc_addons] addons' => sub {
+    my $ipaddr2 = Test::MockModule->new('sles4sap::ipaddr2', no_auto => 1);
+    $ipaddr2->redefine(ipaddr2_bastion_pubip => sub { return '1.2.3.4'; });
+    my (@remotes, @addons);
+    $ipaddr2->redefine(register_addon => sub {
+            my ($remote, $addon) = @_;
+            push @remotes, $remote;
+            push @addons, $addon;
+    });
+    my ($exp, $act);
+    # Here there are 2 test coded:
+    #  - one for SCC_ADDONS with value for a single addon
+    #  - one for SCC_ADDONS with string containing two addons
+    foreach ('123', '456,789') {
+        ipaddr2_scc_addons(scc_addons => $_);
+        note("\n  REMOTE[$_] -->  " . join("\n  REMOTE[$_] -->  ", @remotes));
+        note("\n  ADDON[$_] -->  " . join("\n  ADDON[$_] -->  ", @addons));
+        $act = scalar @remotes;
+        $exp = (1 + ($_ =~ tr/,//)) * 2;
+        ok(($act eq $exp), "Expected remotes to have $exp elements and it has $act");
+        @remotes = ();
+        @addons = ();
+    }
+};
+
+subtest '[ipaddr2_repos_add_server_to_hosts]' => sub {
+    my $ipaddr2 = Test::MockModule->new('sles4sap::ipaddr2', no_auto => 1);
+    my @calls;
+    $ipaddr2->redefine(assert_script_run => sub { push @calls, $_[0]; return; });
+    $ipaddr2->redefine(ipaddr2_bastion_pubip => sub { return '1.2.3.4'; });
+
+    ipaddr2_repos_add_server_to_hosts(ibsm_ip => 7.6.5.4, incident_repos => 'AAAA,BBBB');
+    note("\n  -->  " . join("\n  -->  ", @calls));
+    ok((any { /ssh.*41.*download.suse.de.*\/etc\/hosts/ } @calls), "Node 1 /etc/hosts");
+    ok((any { /ssh.*42.*download.suse.de.*\/etc\/hosts/ } @calls), "Node 2 /etc/hosts");
+    ok((any { /ssh.*41.*zypper.*ar.*TEST_0.*AAAA/ } @calls), "Node 1 Repo TEST_0");
+    ok((any { /ssh.*41.*zypper.*ar.*TEST_1.*BBBB/ } @calls), "Node 1 Repo TEST_1");
+    ok((any { /ssh.*42.*zypper.*ar.*TEST_0.*AAAA/ } @calls), "Node 2 Repo TEST_0");
+    ok((any { /ssh.*42.*zypper.*ar.*TEST_1.*BBBB/ } @calls), "Node 2 Repo TEST_1");
+};
+
+subtest '[ipaddr2_cleanup]' => sub {
+    my $ipaddr2 = Test::MockModule->new('sles4sap::ipaddr2', no_auto => 1);
+    my $deployment_logs_called = 0;
+    $ipaddr2->redefine(ipaddr2_deployment_logs => sub { $deployment_logs_called = 1; });
+    my $cloudinit_logs_called = 0;
+    $ipaddr2->redefine(ipaddr2_cloudinit_logs => sub { $cloudinit_logs_called = 1; });
+    my $infra_destroy_called = 0;
+    $ipaddr2->redefine(ipaddr2_infra_destroy => sub { $infra_destroy_called = 1; });
+
+    ipaddr2_cleanup();
+
+    ok(($deployment_logs_called eq 0), "ipaddr2_deployment_logs not called");
+    ok(($cloudinit_logs_called eq 1), "ipaddr2_cloudinit called");
+    ok(($infra_destroy_called eq 1), "ipaddr2_infra_destroy called");
+};
+
+subtest '[ipaddr2_cleanup] deployment_logs' => sub {
+    my $ipaddr2 = Test::MockModule->new('sles4sap::ipaddr2', no_auto => 1);
+    my $deployment_logs_called = 0;
+    $ipaddr2->redefine(ipaddr2_deployment_logs => sub { $deployment_logs_called = 1; });
+    my $cloudinit_logs_called = 0;
+    $ipaddr2->redefine(ipaddr2_cloudinit_logs => sub { $cloudinit_logs_called = 1; });
+    my $infra_destroy_called = 0;
+    $ipaddr2->redefine(ipaddr2_infra_destroy => sub { $infra_destroy_called = 1; });
+
+    ipaddr2_cleanup(diagnostic => 1);
+
+    ok(($deployment_logs_called eq 1), "ipaddr2_deployment_logs called");
+    ok(($cloudinit_logs_called eq 1), "ipaddr2_cloudinit called");
+    ok(($infra_destroy_called eq 1), "ipaddr2_infra_destroy called");
+};
+
+subtest '[ipaddr2_cleanup] ibsm_rg' => sub {
+    my $ipaddr2 = Test::MockModule->new('sles4sap::ipaddr2', no_auto => 1);
+    my $deployment_logs_called = 0;
+    $ipaddr2->redefine(ipaddr2_deployment_logs => sub { $deployment_logs_called = 1; });
+    my $cloudinit_logs_called = 0;
+    $ipaddr2->redefine(ipaddr2_cloudinit_logs => sub { $cloudinit_logs_called = 1; });
+    my $infra_destroy_called = 0;
+    $ipaddr2->redefine(ipaddr2_infra_destroy => sub { $infra_destroy_called = 1; });
+    $ipaddr2->redefine(ipaddr2_azure_resource_group => sub { return 'Fermi'; });
+    $ipaddr2->redefine(get_current_job_id => sub { return 42; });
+    my $ibsm_called = 0;
+    $ipaddr2->redefine(ibsm_network_peering_azure_delete => sub { $ibsm_called = 1; });
+
+    ipaddr2_cleanup(ibsm_rg => 'Volta');
+
+    ok(($deployment_logs_called eq 0), "ipaddr2_deployment_logs not called");
+    ok(($cloudinit_logs_called eq 1), "ipaddr2_cloudinit called");
+    ok(($infra_destroy_called eq 1), "ipaddr2_infra_destroy called");
+    ok(($ibsm_called eq 1), "ibsm_network_peering_azure_delete called");
+};
+
+subtest '[ipaddr2_cleanup] ipaddr2_deployment_logs' => sub {
+    my $ipaddr2 = Test::MockModule->new('sles4sap::ipaddr2', no_auto => 1);
+    my $called = 0;
+    $ipaddr2->redefine(ipaddr2_azure_resource_group => sub { return 'Volta'; });
+    $ipaddr2->redefine(az_vm_diagnostic_log_get => sub { $called = 1; return ('aaaaa.log', 'bbbbbb.log'); });
+    $ipaddr2->redefine(upload_logs => sub { return; });
+    $ipaddr2->redefine(ipaddr2_infra_destroy => sub { return; });
+
+    ipaddr2_cleanup(diagnostic => 1, cloudinit => 0);
+
+    ok(($called eq 1), "az_vm_diagnostic_log_get called");
+};
+
 
 done_testing;

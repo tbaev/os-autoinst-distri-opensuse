@@ -3,13 +3,11 @@
 # Copyright 2016-2020 SUSE LLC
 # SPDX-License-Identifier: FSFAP
 
-# Package: iscsi-client-sles-16
+# Package: open-iscsi, iscsiuio
 # Summary: Configure iSCSI target for HA tests
 # Maintainer: QE-SAP <qe-sap@suse.de>
 
-use base 'opensusebasetest';
-use strict;
-use warnings;
+use base 'haclusterbasetest';
 use Utils::Backends qw(is_remote_backend);
 use utils qw(zypper_call systemctl ping_size_check file_content_replace script_retry);
 use testapi;
@@ -17,21 +15,91 @@ use hacluster;
 use serial_terminal qw(select_serial_terminal);
 use version_utils qw(is_sle package_version_cmp);
 
+=head1 NAME
+
+ha/iscsi_client_setup.pm - Add iSCSI targets to the System Under Test
+
+=head1 MAINTAINER
+
+QE-SAP <qe-sap@suse.de>
+
+=head1 DESCRIPTION
+
+Configure iSCSI targets from a known iSCSI server in the System Under Test using CLI commands.
+
+B<The key tasks performed by this module include:>
+
+=over
+
+=item * Verify the test module runs in SLES 16 or older. Skip in older versions.
+
+=item * Restart C<systemd-udevd> service.
+
+=item * Verify the iSCSI server is reachable.
+
+=item * Record iSCSI initiator value.
+
+=item * Install C<open-iscsi> and C<iscsiuio>
+
+=item * Generate a new initiator
+
+=item * Enable and start C<iscsid> service.
+
+=item * Query a list of IQN nodes from the iSCSI server, and select one that matches to the C<openqa> string.
+
+=item * Change the startup of the IQN node name from C<manual> to C<automatic> in the C<default>
+configuration file generated after discovery.
+
+=item * Start a new session to the IQN node name in the iSCSI server.
+
+=item * Restart C<iscsid> and C<iscsi> services.
+
+=item * Verify there are new block devices starting with the text C<ip-> in the SUT.
+
+=back
+
+=head1 OPENQA SETTINGS
+
+=over
+
+=item * USE_SUPPORT_SERVER: indicates whether test runs in a Multi Machine scenario with a Support Server.
+
+=item * ISCSI_SERVER: IP address or FQHN of the iSCSI server.
+
+=back
+
+=cut
+
 sub run {
     return record_info('Skip iscsi_client_setup', 'Module skipped on older versions of SLES. Use ha/iscsi_client instead') if (is_sle('<16'));
     my $iscsi_server = get_var('USE_SUPPORT_SERVER') ? 'ns' : get_required_var('ISCSI_SERVER');
 
     select_serial_terminal;
 
+    # Restart udevd in SLES 16, as it comes configured with
+    # ProtectHostname=yes, meaning that the hostname seen by
+    # udevd and the one configured in the system may differ in
+    # scenarios where console/hostname is also scheduled which
+    # can lead to issues later with some HA resources. We need to
+    # do this before iSCSI and watchdog setup
+    systemctl 'restart systemd-udevd.service';
+
     # Perform a ping size check to several hosts which need to be accessible while
     # running this module
     ping_size_check(testapi::host_ip());
     ping_size_check($iscsi_server);
 
+    record_info 'iscsi initiator pre configuration', script_output('cat /etc/iscsi/initiatorname.iscsi', proceed_on_failure => 1);
+    record_info 'rpm-qf', script_output('rpm -qf /etc/iscsi/initiatorname.iscsi', proceed_on_failure => 1);
+
     # open-iscsi & iscsiuio
     zypper_call 'in open-iscsi' if (script_run('rpm -q open-iscsi'));
+    record_info 'iscsi initiator pre configuration', script_output('cat /etc/iscsi/initiatorname.iscsi', proceed_on_failure => 1);
+    record_info 'rpm-qf', script_output('rpm -qf /etc/iscsi/initiatorname.iscsi', proceed_on_failure => 1);
     record_info('open-iscsi version', script_output('rpm -q open-iscsi'));
 
+    assert_script_run '/sbin/iscsi-gen-initiatorname -f';
+    record_info 'iscsi initiator after forcing regeneration', script_output('cat /etc/iscsi/initiatorname.iscsi', proceed_on_failure => 1);
     systemctl 'enable --now iscsid';
     record_info('iscsid status', script_output('systemctl status iscsid'));
 

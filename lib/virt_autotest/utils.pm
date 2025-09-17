@@ -24,6 +24,7 @@ use File::Basename;
 use LWP::Simple 'head';
 use Utils::Architectures;
 use IO::Socket::INET;
+use mm_network;
 use Carp;
 
 our @EXPORT = qw(
@@ -75,7 +76,6 @@ our @EXPORT = qw(
   ssh_copy_id
   add_guest_to_hosts
   ensure_default_net_is_active
-  ensure_guest_started
   remove_additional_disks
   remove_additional_nic
   start_guests
@@ -97,6 +97,7 @@ our @EXPORT = qw(
   reboot_virtual_machine
   reconnect_console_if_not_good
   get_guest_settings
+  reselect_openqa_console
 );
 
 my %log_cursors;
@@ -216,7 +217,7 @@ sub guest_is_sle {
 
     # Version check
     $guest_name =~ /sles-*(\d{2})(?:-*sp(\d))?/;
-    my $version = $2 eq '' ? "$1-sp0" : "$1-sp$2";
+    my $version = defined($2) ? "$1-sp$2" : "$1-sp0";
     return check_version($query, $version, qr/\d{2}(?:-sp\d)?/);
 }
 
@@ -423,7 +424,11 @@ sub check_guest_health {
     if ($vmstate eq "ok") {
         $failures = caller 0 eq 'validate_system_health' ? check_failures_in_journal($vm, no_cursor => 1) : check_failures_in_journal($vm);
         return 'fail' if $failures;
-        record_info("Healthy guest!", "$vm looks good so far!");
+        if (script_run("ssh root\@$vm 'ping -c3 www.opensuse.org'") == 0 or script_run("ssh root\@$vm 'ping -c3 www.qemu.org'") == 0) {
+            record_info("Healthy guest!", "$vm looks good so far!");
+        } else {
+            record_info("Possible network inaccessibility", "Unable to access outside network from $vm!", result => 'fail');
+        }
     }
     else {
         record_info("Skip check_failures_in_journal for $vm", "$vm is not in desired state judged by either virsh or xl tool stack", result => 'softfail');
@@ -480,11 +485,21 @@ sub download_script {
             # Have to output debug info at here because no logs will be uploaded if there are connection problems
             if (script_run("ssh root\@$machine 'hostname'") == 0) {
                 $script_url =~ /^https?:\/\/([\w\.]+)(:\d+)?\/.*/;
-                script_run("ssh root\@$machine 'ping $1'");
+                record_info("Guest $machine ssh accessible from host", "Debugging its network availability", result => 'fail');
+                # Debug: to check where the access problem lies in.
+                script_run("ssh root\@$machine 'ping -c3 $1'");
                 script_run("ssh root\@$machine 'traceroute $1'");
+                script_run("ssh root\@$machine 'ip route show'");
                 script_run("ssh root\@$machine 'ping -c3 openqa.suse.de'");
+                # Debug: to check if there is problem with DNS resolution: OSD <=> 10.145.10.207
+                script_run("ssh root\@$machine 'ping -c3 10.145.10.207'");
+                # Debug: to check if the guest can access its host
+                script_run("ssh root\@$machine 'ping -c3 192.168.123.1'");
                 script_run("ssh root\@$machine 'nslookup " . get_var('WORKER_HOSTNAME', 'openqa.suse.de') . "'");
+                script_run("ssh root\@$machine 'ip a'");
                 script_run("ssh root\@$machine 'cat /etc/resolv.conf'");
+                script_run('cat /etc/resolv.conf');
+                record_info("Debugging done", "for Guest $machine", result => 'fail');
             }
             else {
                 record_info("machine is not ssh accessible", "$machine", result => 'fail');
@@ -550,6 +565,12 @@ sub create_guest {
     my ($guest, $method) = @_;
     my $v_type = $guest->{name} =~ /HVM/ ? "-v" : "";
 
+    # Ensure UEFI firmware package is installed if this guest requires UEFI mode
+    if ($guest->{boot_firmware} && $guest->{boot_firmware} eq 'efi' && script_run("rpm -q ovmf") != 0) {
+        record_info("Installing OVMF", "Installing OVMF package for UEFI support for guest $guest->{name}");
+        zypper_call("in ovmf");
+    }
+
     my $name = $guest->{name};
     my $location = $guest->{location};
     my $autoyast = $guest->{autoyast};
@@ -576,6 +597,11 @@ sub create_guest {
         $virtinstall = "virt-install $v_type $guest->{osinfo} --name $name --vcpus=$vcpus,maxvcpus=$maxvcpus --memory=$memory,maxmemory=$maxmemory --vnc";
         $virtinstall .= " --disk path=/var/lib/libvirt/images/$name.$diskformat,size=20,format=$diskformat --noautoconsole";
         $virtinstall .= " --network bridge=br0 --autostart --location=$location --wait -1";
+        # Configure boot firmware based on guest configuration
+        if ($guest->{boot_firmware} && $guest->{boot_firmware} eq 'efi') {
+            $virtinstall .= " --boot firmware=efi";
+            record_info("Boot Firmware", "Guest $name configured for EFI boot");
+        }
         $virtinstall .= " --events on_reboot=$on_reboot" unless ($on_reboot eq '');
         $virtinstall .= " --extra-args '$extra_args'" unless ($extra_args eq '');
         record_info("$name", "Creating $name guests:\n$virtinstall");
@@ -688,7 +714,9 @@ sub ensure_default_net_is_active {
 sub add_guest_to_hosts {
     my ($hostname, $address) = @_;
     assert_script_run "sed -i '/ $hostname /d' /etc/hosts";
-    assert_script_run "echo '$address $hostname # virtualization' >> /etc/hosts";
+    my $ret = assert_script_run "echo '$address $hostname # virtualization' >> /etc/hosts";
+    record_info("Content of /etc/hosts", script_output("cat /etc/hosts"));
+    return $ret;
 }
 
 # Remove additional disks from the given guest. We remove all disks that match the given pattern or 'vd[b-z]' if no pattern is given
@@ -805,15 +833,16 @@ sub start_guests {
 
 #Add common ssh options to host ssh config file to be used for all ssh connections when host tries to ssh to another host/guest.
 sub setup_common_ssh_config {
-    my $ssh_config_file = shift;
+    my %args = @_;
+    $args{ssh_config_file} //= '/root/.ssh/config';
+    $args{ssh_id_file} //= '';
 
-    $ssh_config_file //= '/root/.ssh/config';
-    if (script_run("test -f $ssh_config_file") ne 0) {
-        script_run "mkdir -p " . dirname($ssh_config_file);
-        assert_script_run("touch $ssh_config_file");
+    if (script_run("test -f $args{ssh_config_file}") ne 0) {
+        script_run "mkdir -p " . dirname($args{ssh_config_file});
+        assert_script_run("touch $args{ssh_config_file}");
     }
-    if (script_run("grep \"Host \\\*\" $ssh_config_file") ne 0) {
-        type_string("cat >> $ssh_config_file <<EOF
+    if (script_run("grep \"Host \\\*\" $args{ssh_config_file}") ne 0) {
+        type_string("cat >> $args{ssh_config_file} <<EOF
 Host *
     UserKnownHostsFile /dev/null
     StrictHostKeyChecking no
@@ -821,8 +850,11 @@ Host *
 EOF
 ");
     }
-    assert_script_run("chmod 600 $ssh_config_file");
-    record_info("Content of $ssh_config_file after common ssh config setup", script_output("cat $ssh_config_file;ls -lah $ssh_config_file"));
+    if ($args{ssh_id_file} and script_run("grep \"IdentityFile $args{ssh_id_file}\" $args{ssh_config_file}") ne 0) {
+        assert_script_run("sed -i -r \'/^Host \\*/a \\    IdentityFile $args{ssh_id_file}\' $args{ssh_config_file}");
+    }
+    assert_script_run("chmod 600 $args{ssh_config_file}");
+    record_info("Content of $args{ssh_config_file} after common ssh config setup", script_output("cat $args{ssh_config_file};ls -lah $args{ssh_config_file}"));
     return;
 }
 
@@ -1484,6 +1516,46 @@ sub get_guest_settings {
     }
 
     return \%settings_matrix;
+}
+
+=head2 reselect_openqa_console
+
+Reselect named console in openQA test if concerned console is lost after detecting
+ssh port or needle. Arguments include address to be detected, console to be selected
+, needle to be checked on console, counter to be used for lost console detection,
+countdown value to be decreased at the end of each loopthe number of retries when
+detecting ssh port of address and delay before next ssh port detection.
+=cut
+
+sub reselect_openqa_console {
+    my (%args) = @_;
+    $args{address} //= '';
+    $args{console} //= 'root-ssh';
+    $args{needle} //= 'text-logged-in-root';
+    $args{counter} //= 180;
+    $args{countdown} //= 3;
+    $args{retries} //= 6;
+    $args{delay} //= 10;
+    die("Address must be given for ssh port detecting") unless $args{address};
+
+    my $reselect_console_counter = $args{counter};
+    while ($reselect_console_counter >= 0) {
+        my $countdown = $args{countdown};
+        if (!(check_port_state($args{address}, 22)) or !(check_screen($args{needle}))) {
+            $countdown = $args{retries} * $args{delay};
+            if (check_port_state($args{address}, 22, $args{retries}, $args{delay})) {
+                reset_consoles;
+                select_console($args{console});
+                record_info("Console $args{console} reconnected after being lost");
+                last;
+            }
+            else {
+                die("System $args{address} ssh port not open for reconnection on waiting after console $args{console} lost");
+            }
+        }
+        enter_cmd("reset") for (0 .. 2);
+        $reselect_console_counter -= $countdown;
+    }
 }
 
 1;

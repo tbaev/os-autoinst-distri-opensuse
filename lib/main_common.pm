@@ -16,7 +16,7 @@ use autotest;
 use utils;
 use wicked::TestContext;
 use Utils::Architectures;
-use version_utils qw(:VERSION :BACKEND :SCENARIO is_community_jeos is_public_cloud);
+use version_utils qw(:VERSION :BACKEND :SCENARIO is_community_jeos is_public_cloud is_leap is_sle);
 use Utils::Backends;
 use data_integrity_utils 'verify_checksum';
 use bmwqemu ();
@@ -222,7 +222,7 @@ sub have_addn_repos {
       !get_var("NET")
       && !get_var("EVERGREEN")
       && get_var("SUSEMIRROR")
-      && !get_var("FLAVOR", '') =~ m/^Staging2?[\-]DVD$/;
+      && get_var("FLAVOR", '') !~ m/^Staging2?[\-]DVD$/;
 }
 
 sub is_livesystem {
@@ -455,7 +455,9 @@ sub load_reboot_tests {
         }
         # exclude this scenario for autoyast test with switched keyboard layaout
         loadtest "installation/first_boot" unless get_var('INSTALL_KEYBOARD_LAYOUT');
-        loadtest "installation/opensuse_welcome" if opensuse_welcome_applicable();
+        # Autoyast tests that aren't using yaml schedule, will schedule opensuse_welcome
+        # right after installation is finished
+        loadtest "installation/opensuse_welcome" if opensuse_welcome_applicable() && !get_var("AUTOYAST");
         if (is_aarch64 && !get_var('INSTALLONLY') && !get_var('LIVE_INSTALLATION') && !get_var('LIVE_UPGRADE')) {
             loadtest "installation/system_workarounds";
         }
@@ -502,6 +504,7 @@ sub load_zdup_tests {
 sub load_autoyast_tests {
     #    init boot in load_boot_tests
     loadtest("autoyast/installation");
+    loadtest "installation/opensuse_welcome" if opensuse_welcome_applicable();
     #   library function like send_key or reboot will not work, therefore exiting earlier
     return loadtest "locale/keymap_or_locale" if get_var('INSTALL_KEYBOARD_LAYOUT');
     loadtest("autoyast/console");
@@ -1103,7 +1106,8 @@ sub load_inst_tests {
         # On Xen PV we don't have GRUB on VNC
         # SELinux relabel reboots on SLE <16 and Leap <16.0, so grub needs to timeout
         set_var('KEEP_GRUB_TIMEOUT', 1) if check_var('VIRSH_VMM_TYPE', 'linux') || (get_var('SELINUX') && (is_sle('<16') || is_leap('<16.0')));
-        loadtest "installation/disable_grub_timeout" unless get_var('KEEP_GRUB_TIMEOUT');
+        loadtest 'installation/configure_bls' if (is_bootloader_sdboot || is_bootloader_grub2_bls);
+        loadtest "installation/disable_grub_timeout" if is_bootloader_grub2 && !get_var('KEEP_GRUB_TIMEOUT');
         if (check_var('VIDEOMODE', 'text') && is_ipmi) {
             loadtest "installation/disable_grub_graphics";
         }
@@ -1210,6 +1214,7 @@ sub load_consoletests {
             loadtest "console/installation_snapshots" unless get_var('FLAVOR') =~ /OpenStack-Cloud/;
         }
     }
+    loadtest "console/opensuse_repos" if is_opensuse && !(is_staging || is_updates_tests);
     loadtest "console/zypper_lr";
     # Enable installation repo from the usb, unless we boot from USB, but don't use it
     # for the installation, like in case of LiveCDs and when using http/smb/ftp mirror
@@ -1234,6 +1239,8 @@ sub load_consoletests {
         }
         loadtest "console/zypper_ref";
     }
+    loadtest "console/zypper_in";
+    loadtest "console/zypper_log";
     if (is_jeos) {
         loadtest "jeos/glibc_locale";
         loadtest "jeos/kiwi_templates" unless (is_leap('<15.2') || is_staging);
@@ -1264,8 +1271,6 @@ sub load_consoletests {
     loadtest "console/glibc_tunables";
     load_system_update_tests(console_updates => 1);
     loadtest "console/console_reboot" if is_jeos;
-    loadtest "console/zypper_in";
-    loadtest "console/zypper_log";
     if (!get_var("LIVETEST")) {
         loadtest "console/yast2_i" unless (is_sle("16+") || is_leap("16.0+"));
         loadtest "console/yast2_bootloader" unless ((is_sle("16+") || is_leap("16.0+")) || is_bootloader_sdboot || is_bootloader_grub2_bls);
@@ -1275,6 +1280,9 @@ sub load_consoletests {
     # For virtualization server xen and kvm is disabled by default: https://fate.suse.com/324207
     if ((is_sle || !check_var("DESKTOP", "textmode")) && !is_krypton_argon && !is_virtualization_server && !is_vmware) {
         loadtest "console/firewall_enabled";
+    }
+    if (is_sle('>=16.0') && get_var('FLAVOR', '') =~ /Minimal-VM-.*-sap/) {
+        loadtest "console/validate_selinux_permissive";
     }
     if (is_jeos) {
         loadtest "console/kdump_disabled";
@@ -1662,6 +1670,10 @@ sub load_extra_tests_perl_bootloader {
 }
 
 sub load_extra_tests_kdump {
+    if (is_jeos && is_sle('16.0+')) {
+        loadtest "kernel/kdump";
+        return;
+    }
     return unless kdump_is_applicable;
     loadtest "console/kdump_and_crash";
 }
@@ -1720,7 +1732,7 @@ sub load_extra_tests_console {
     }
     loadtest "console/cron" unless is_jeos;
     loadtest "console/syslog";
-    loadtest "console/ntp_client" if (!is_sle || is_jeos);
+    loadtest "console/chrony" if (!is_sle || is_jeos);
     loadtest "console/mta" unless is_jeos;
     # part of load_extra_tests_y2uitest_ncurses & load_extra_tests_y2uitest_cmd except jeos
     loadtest "console/yast2_lan_device_settings" if is_jeos;
@@ -1837,6 +1849,10 @@ sub load_rollback_tests {
     if (get_var('MIGRATION_ROLLBACK')) {
         loadtest "migration/online_migration/snapper_rollback";
     }
+}
+
+sub load_extra_tests_himmelblau {
+    loadtest("console/azure_himmelblau");
 }
 
 sub load_extra_tests_filesystem {
@@ -2094,7 +2110,7 @@ sub load_x11_webbrowser {
     loadtest "x11/firefox/firefox_html5";
     loadtest "x11/firefox/firefox_developertool";
     loadtest "x11/firefox/firefox_ssl";
-    loadtest "x11/firefox/firefox_emaillink";
+    loadtest "x11/firefox/firefox_emaillink" if (is_sle('<16') || is_leap('<16.0'));
     loadtest "x11/firefox/firefox_plugins";
     loadtest "x11/firefox/firefox_extcontent";
     if (!get_var("OFW") && is_qemu) {
@@ -2143,11 +2159,11 @@ sub load_x11_remote {
         loadtest 'x11/remote_desktop/windows_network_setup';
         loadtest 'x11/remote_desktop/windows_server_setup';
     }
-    elsif (check_var('REMOTE_DESKTOP_TYPE', 'x11_server')) {
-        loadtest 'microos/workloads/x11-container/x11_server';
+    elsif (check_var('REMOTE_DESKTOP_TYPE', 'x11_podman_server')) {
+        loadtest 'microos/workloads/x11-container/x11_podman_server';
     }
-    elsif (check_var('REMOTE_DESKTOP_TYPE', 'x11_client')) {
-        loadtest 'microos/workloads/x11-container/x11_client';
+    elsif (check_var('REMOTE_DESKTOP_TYPE', 'x11_podman_client')) {
+        loadtest 'microos/workloads/x11-container/x11_podman_client';
     }
 }
 
@@ -2182,7 +2198,7 @@ sub load_common_x11 {
     elsif (check_var('REGRESSION', 'remote')) {
         if (check_var("REMOTE_DESKTOP_TYPE", "win_client") || check_var('REMOTE_DESKTOP_TYPE', "win_server")) {
             loadtest "x11/remote_desktop/windows_client_boot";
-        } elsif (check_var("REMOTE_DESKTOP_TYPE", "x11_server")) {
+        } elsif (check_var("REMOTE_DESKTOP_TYPE", "x11_podman_server") || check_var("REMOTE_DESKTOP_TYPE", "x11_helm_server")) {
             loadtest 'microos/disk_boot';
         }
         else {
@@ -2201,10 +2217,12 @@ sub load_common_x11 {
     elsif (check_var("REGRESSION", "ibus")) {
         loadtest "boot/boot_to_desktop";
         loadtest "x11/ibus/ibus_installation";
-        loadtest "x11/ibus/ibus_test_cn";
-        loadtest "x11/ibus/ibus_test_jp";
-        loadtest "x11/ibus/ibus_test_kr";
-        loadtest "x11/ibus/ibus_clean";
+        if ((is_sle("<16")) || is_tumbleweed) {
+            loadtest "x11/ibus/ibus_test_cn";
+            loadtest "x11/ibus/ibus_test_jp";
+            loadtest "x11/ibus/ibus_test_kr";
+            loadtest "x11/ibus/ibus_clean";
+        }
     }
 }
 
@@ -2438,6 +2456,7 @@ sub set_mu_virt_vars {
     # Set PXE resource
     unless (get_var('PXE_PRODUCT_NAME') || get_var('MIRROR_HTTP')) {
         unless (get_var('IPXE')) {
+            set_var('IPXE', 0);
             # PRG1 lab SUTs use pxe way
             my $pxe_product_name = "SLE-" . get_required_var('VERSION');
             if (is_sle('15+')) {
@@ -2481,6 +2500,7 @@ sub set_mu_virt_vars {
     if (is_sle('15+')) {
         $scc_addons .= ',' if ($scc_addons);
         $scc_addons .= 'base,sdk,serverapp,desktop';
+        $scc_addons .= ',contm' if (get_var('KUBEVIRT_TEST'));
     }
     set_var('SCC_ADDONS', "$scc_addons");
 
@@ -2574,6 +2594,9 @@ sub load_hypervisor_tests {
         ENABLE_SRIOV_NETWORK_CARD_PCI_PASSTHROUGH => {
             modules => ['virt_autotest/sriov_network_card_pci_passthrough'],
         },
+        ENABLE_SEV_SNP => {
+            modules => ['virt_autotest/sev_snp_validation'],
+        },
     );
 
     for my $test (keys %virt_features) {
@@ -2584,6 +2607,10 @@ sub load_hypervisor_tests {
         # The LTSS for SUSE 15-SP1 has ended. Due to a bug (bsc#1230913), also skip 15-SP2.
         if ($test eq 'ENABLE_SRIOV_NETWORK_CARD_PCI_PASSTHROUGH') {
             next unless is_sle('>=15-sp3');
+        }
+        # SEV-SNP tests are available from SLE15-SP7 onwards and SLE16+
+        if ($test eq 'ENABLE_SEV_SNP') {
+            next unless (is_sle('>=15-sp7') || is_sle('>=16'));
         }
         check_and_load_mu_virt_features($test, $modules, $hypervisor);
     }
@@ -2698,7 +2725,7 @@ sub load_sles4sap_tests {
     loadtest "console/check_os_release";
     loadtest "sles4sap/desktop_icons" if (is_desktop_installed());
     loadtest "sles4sap/patterns";
-    loadtest "sles4sap/sapconf";
+    loadtest "sles4sap/sapconf" if is_sle('<16.0');
     loadtest "sles4sap/saptune";
     loadtest "sles4sap/saptune/mr_test" if (get_var('MR_TEST'));
     if (get_var('NW')) {
@@ -2996,13 +3023,12 @@ sub load_kernel_baremetal_tests {
     set_var('ADDONURL', 'sdk') if (is_sle('>=12') && is_sle('<15')) && !is_released;
     loadtest "kernel/ibtests_barriers" if get_var("IBTESTS");
     loadtest "autoyast/prepare_profile" if get_var("AUTOYAST_PREPARE_PROFILE");
+    load_boot_tests();
+    get_var("AUTOYAST") ? load_ayinst_tests() : load_inst_tests();
+    load_reboot_tests();
     if (get_var('IPXE')) {
-        loadtest "installation/ipxe_install";
-        loadtest "console/suseconnect_scc";
-    } else {
-        load_boot_tests();
-        get_var("AUTOYAST") ? load_ayinst_tests() : load_inst_tests();
-        load_reboot_tests();
+        loadtest 'boot/reconnect_mgmt_console';
+        loadtest 'installation/first_boot';
     }
     # make sure we always have the toolchain installed
     loadtest "toolchain/install";

@@ -8,8 +8,6 @@
 # - check if firewalld doesn't break either
 # Maintainer: QE-C team <qa-c@suse.de>
 
-use strict;
-use warnings;
 use Mojo::Base qw(containers::basetest);
 use testapi;
 use serial_terminal qw(select_serial_terminal select_user_serial_terminal);
@@ -114,7 +112,6 @@ sub run {
     # - https://fedoraproject.org/wiki/Changes/NetavarkNftablesDefault#Known_Issue_with_docker
     # - https://docs.docker.com/engine/network/packet-filtering-firewalls/#docker-on-a-router
     if (script_run("iptables -L -v | grep -q DOCKER") == 0) {
-        record_soft_failure("bsc#1196801");
         script_run "iptables -I DOCKER-USER -j ACCEPT";
         script_run "ip6tables -I DOCKER-USER -j ACCEPT";
     }

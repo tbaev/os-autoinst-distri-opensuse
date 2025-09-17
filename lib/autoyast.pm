@@ -21,7 +21,7 @@ use warnings;
 use testapi;
 use Utils::Backends;
 use Utils::Architectures;
-use version_utils qw(is_sle is_opensuse);
+use version_utils qw(is_sle is_opensuse is_agama);
 use registration qw(scc_version get_addon_fullname);
 use File::Copy 'copy';
 use File::Find qw(finddepth);
@@ -29,11 +29,13 @@ use File::Path 'make_path';
 use LWP::Simple 'head';
 use Mojo::Util 'trim';
 use Socket;
+use utils;
 
 use xml_utils;
 
 our @EXPORT = qw(
   detect_profile_directory
+  create_file_as_profile_companion
   expand_template
   expand_version
   adjust_network_conf
@@ -50,6 +52,7 @@ our @EXPORT = qw(
   get_test_data_files
   prepare_ay_file
   generate_xml
+  parse_dud_parameter
 );
 
 =head2 expand_patterns
@@ -711,6 +714,10 @@ sub expand_variables {
       SCC_REGCODE_LTSS SCC_REGCODE_WE SCC_REGCODE_SLES4SAP SCC_URL ARCH LOADER_TYPE NTP_SERVER_ADDRESS
       AGAMA_PRODUCT_ID OSDISK SUT_NETDEVICE
       REPO_SLE_MODULE_DEVELOPMENT_TOOLS SCC_REGCODE_LIVE);
+    if (is_agama && get_var('STAGING', '')) {
+        record_info 'Add extra repo for staging incident';
+        push @vars, 'INCIDENT_REPO';
+    }
     # Push more variables to expand from the job setting
     my @extra_vars = push @vars, split(/,/, get_var('AY_EXPAND_VARS', ''));
     if (get_var 'SALT_FORMULAS_PATH') {
@@ -809,6 +816,7 @@ sub generate_json_profile {
 
     save_tmp_file($profile_name, $profile_content);
     my $profile_url = autoinst_url("/files/$profile_name");
+    diag $profile_url;
     upload_profile(path => $profile_name, profile => $profile_content);
     return $profile_url;
 }
@@ -842,6 +850,22 @@ sub upload_profile {
     $path =~ s/\//-/g;
 
     copy(hashed_string($file_path), 'ulogs/' . $path);
+}
+
+=head2 create_file_as_profile_companion
+
+ create_file_as_profile_companion()
+
+ It gets the content of the file dummy.xml
+ and puts it in the same path as the jsonnet profile
+
+=cut
+
+sub create_file_as_profile_companion {
+    my $path = 'dummy.xml';
+    my $content = get_test_data('yam/autoyast/dummy.xml');
+    save_tmp_file($path, $content);
+    record_info("Profile companion", "Content:\n$content\n\nLocal URL: " . autoinst_url("/files/$path"));
 }
 
 =head2 inject_registration
@@ -1029,6 +1053,24 @@ sub generate_xml {
     $writer->endTag("add_on_products");
     $writer->end();
     return $writer->to_string;
+}
+
+=head2 parse_dud_parameter
+
+ parse_dud_parameter();
+
+ Process DUD raw value (comma separated)
+ Return a string of inst.dud well formed parameters
+
+=cut
+
+sub parse_dud_parameter {
+    my ($dud_raw_value) = @_;
+    my $dud;
+
+    $dud .= ' inst.dud=' . shorten_url(data_url($_)) for split(',', $dud_raw_value);
+    $dud .= ' rd.neednet=1 ';
+    return $dud;
 }
 
 1;

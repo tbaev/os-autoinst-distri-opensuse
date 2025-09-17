@@ -18,8 +18,6 @@
 #    we need to access to live root system to monitor installation process
 # Maintainer: Lubos Kocman <lubos.kocman@suse.com>,
 
-use strict;
-use warnings;
 use base "installbasetest";
 use testapi;
 use version_utils qw(is_leap is_sle);
@@ -32,16 +30,11 @@ use power_action_utils 'assert_shutdown_and_restore_system';
 
 sub upload_agama_logs {
     return if (get_var('NOLOGS'));
-    select_console("root-console");
+    select_console("install-shell");
     script_run('agama logs store -d /tmp');
     script_run('agama config show > /tmp/agama_config.txt');
     upload_logs('/tmp/agama-logs.tar.gz');
     upload_logs('/tmp/agama_config.txt');
-}
-
-sub get_agama_install_console_tty {
-    # get_x11_console_tty would otherwise autodetermine 2
-    return 7;
 }
 
 sub verify_agama_auto_install_done_cmdline {
@@ -66,7 +59,7 @@ sub run {
     my ($self) = @_;
 
     if ((is_ipmi || is_pvm || is_s390x) && get_var('INST_AUTO')) {
-        select_console('root-console');
+        select_console('install-shell');
         record_info 'Wait for installation phase done';
         verify_agama_auto_install_done_cmdline();
         upload_agama_logs();
@@ -85,7 +78,6 @@ sub run {
     }
 
     assert_screen('agama-congratulations');
-    console('installation')->set_tty(get_agama_install_console_tty());
     upload_agama_logs();
     select_console('installation', await_console => 0);
     # make sure newly booted system does not expect we're still logged in console
@@ -113,7 +105,7 @@ sub post_fail_hook {
 
     return if (get_var('NOLOGS'));
 
-    select_console("root-console");
+    select_console("install-shell");
     export_healthcheck_basic();
     upload_agama_logs();
 }

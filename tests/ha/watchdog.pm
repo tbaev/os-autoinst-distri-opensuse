@@ -6,9 +6,7 @@
 # Summary: Configure software watchdog
 # Maintainer: QE-SAP <qe-sap@suse.de>, Loic Devulder <ldevulder@suse.com>
 
-use base 'opensusebasetest';
-use strict;
-use warnings;
+use base 'haclusterbasetest';
 use testapi;
 use hacluster;
 use lockapi;

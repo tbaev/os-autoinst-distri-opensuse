@@ -7,8 +7,6 @@
 # Summary: Upstream buildah integration tests
 # Maintainer: QE-C team <qa-c@suse.de>
 
-use strict;
-use warnings;
 use Mojo::Base 'containers::basetest';
 use testapi;
 use serial_terminal qw(select_serial_terminal);
@@ -19,7 +17,7 @@ sub run_tests {
     my %params = @_;
     my ($rootless, $skip_tests) = ($params{rootless}, $params{skip_tests});
 
-    return if check_var($skip_tests, "all");
+    return 0 if check_var($skip_tests, "all");
 
     my $storage_driver = $rootless ? "vfs" : script_output("buildah info --format '{{ .store.GraphDriverName }}'");
     $storage_driver = get_var("BUILDAH_STORAGE_DRIVER", $storage_driver);
@@ -34,9 +32,9 @@ sub run_tests {
         STORAGE_DRIVER => $storage_driver,
     );
 
-    my $log_file = "buildah-" . ($rootless ? "user" : "root") . ".tap";
+    my $log_file = "buildah-" . ($rootless ? "user" : "root");
 
-    my $ret = bats_tests($log_file, \%env, $skip_tests);
+    my $ret = bats_tests($log_file, \%env, $skip_tests, 5000);
 
     run_command 'podman rm -vf $(podman ps -aq --external) || true';
     run_command "podman system reset -f";
@@ -89,22 +87,21 @@ sub run {
 
     # Download buildah sources
     my $buildah_version = script_output "buildah --version | awk '{ print \$3 }'";
-    bats_sources $buildah_version;
+    patch_sources "buildah", "v$buildah_version", "tests", bats_patches();
 
     # Patch mkdir to always use -p
     run_command "sed -i 's/ mkdir /& -p /' tests/*.bats tests/helpers.bash";
-    # This test is flaky and depends on 3rd party images
-    run_command "rm -f tests/sbom.bats";
 
     # Compile helpers used by the tests
     my $helpers = script_output 'echo $(grep ^all: Makefile | grep -o "bin/[a-z]*" | grep -v bin/buildah)';
+    record_info("helpers", $helpers);
     run_command "make $helpers", timeout => 600;
 
-    my $errors = run_tests(rootless => 1, skip_tests => 'BATS_SKIP_USER');
+    my $errors = run_tests(rootless => 1, skip_tests => 'BATS_IGNORE_USER');
 
     switch_to_root;
 
-    $errors += run_tests(rootless => 0, skip_tests => 'BATS_SKIP_ROOT');
+    $errors += run_tests(rootless => 0, skip_tests => 'BATS_IGNORE_ROOT');
 
     die "buildah tests failed" if ($errors);
 }

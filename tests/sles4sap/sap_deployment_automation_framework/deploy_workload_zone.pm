@@ -7,8 +7,6 @@
 
 use parent 'sles4sap::sap_deployment_automation_framework::basetest';
 
-use strict;
-use warnings;
 use sles4sap::sap_deployment_automation_framework::deployment;
 use sles4sap::sap_deployment_automation_framework::naming_conventions;
 use sles4sap::sap_deployment_automation_framework::deployment_connector qw(no_cleanup_tag);
@@ -45,7 +43,7 @@ sub run {
     # additional 30m buffer.
     # Tests will therefore attempt to assign only networks which are older than max terraform runtime.
     my $terraform_retries = 3;
-    my $terraform_timeout = 1800;
+    my $terraform_timeout = 2600;
     my $networks_older_than = $terraform_retries * $terraform_timeout + 1800;
 
     # reserve network address space either by reusing already existing one or create a new file

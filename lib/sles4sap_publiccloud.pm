@@ -27,7 +27,7 @@ use serial_terminal qw(serial_term_prompt);
 use version_utils qw(check_version is_sle);
 use hacluster;
 use sles4sap::qesap::qesapdeployment;
-use sles4sap::qesap::qesap_aws;
+use sles4sap::qesap::aws;
 use publiccloud::utils;
 use publiccloud::provider;
 use publiccloud::ssh_interactive qw(select_host_console);
@@ -37,6 +37,7 @@ use saputils;
 
 our @EXPORT = qw(
   run_cmd
+  run_cmd_retry
   get_promoted_hostname
   is_hana_resource_running
   stop_hana
@@ -70,6 +71,7 @@ our @EXPORT = qw(
   get_hana_site_names
   wait_for_cluster
   wait_for_zypper
+  check_zypper_ref
   wait_for_idle
 );
 
@@ -115,10 +117,49 @@ sub run_cmd {
     delete($args{timeout});
     delete($args{runas});
 
+    $self->{my_instance}->update_instance_ip();
     $self->{my_instance}->wait_for_ssh(timeout => $timeout);
     my $out = $self->{my_instance}->run_ssh_command(cmd => "sudo $cmd", timeout => $timeout, %args);
     record_info("$title output - $self->{my_instance}->{instance_id}", $out) unless ($timeout == 0 or $args{quiet} or $args{rc_only});
     return $out;
+}
+
+=head2 run_cmd_retry
+    run_cmd_retry(cmd => 'command', [retry => 3, timeout => 60, delay => 10]);
+
+    Runs a command C<cmd> via ssh in the given VM and log the output.
+    If command fails or C<timeout> is reached, then the command will be
+    retried for C<retry> times, with C<delay> seconds of interval in between.
+
+=over
+
+=item B<cmd> - command string to be executed remotely
+
+=item B<timeout> - command execution timeout
+
+=item B<retry> - number of retry attempts
+
+=item B<delay> - idle time between retry attempts
+
+=item B<...> - pass through all other arguments supported by run_cmd
+
+=back
+=cut
+
+sub run_cmd_retry {
+    my ($self, %args) = @_;
+    my $timeout = delete $args{timeout} // 60;
+    my $retry = delete $args{retry} // 3;
+    my $delay = delete $args{delay} // 10;
+    delete($args{proceed_on_failure});
+
+    for (1 .. $retry) {
+        my $ret = eval { $self->run_cmd(timeout => $timeout, proceed_on_failure => 0, %args); };
+        return $ret if (defined $ret);
+        sleep $delay;
+        record_soft_failure('jsc#TEAM-10485 SSH timeout or failure, retrying');
+    }
+    die('Maximum number of SSH retry attempts exceeded');
 }
 
 =head2 get_promoted_hostname()
@@ -177,7 +218,8 @@ sub sles4sap_cleanup {
     return 0 if ($args{cleanup_called});
 
     # If there's an open ssh connection to the VMs, return to host console first
-    select_host_console(force => 1);
+    # Useful for tests that use ssh_interactive modules
+    select_host_console(force => 1) if (get_var('MR_TEST', ''));
 
     # ETX is the same as pressing Ctrl-C on a terminal,
     # make sure the serial terminal is NOT blocked
@@ -241,7 +283,7 @@ sub get_hana_topology {
     my ($self) = @_;
     my $output_format = get_var('USE_SAP_HANA_SR_ANGI') ? 'json' : 'script';
     $self->wait_for_idle(timeout => 240);
-    my $cmd_out = $self->run_cmd(cmd => "SAPHanaSR-showAttr --format=$output_format", quiet => 1);
+    my $cmd_out = $self->run_cmd_retry(cmd => "SAPHanaSR-showAttr --format=$output_format", quiet => 1);
     return calculate_hana_topology(input_format => $output_format, input => $cmd_out);
 }
 
@@ -390,6 +432,7 @@ sub stop_hana {
         # Crash needs to be executed as root and wait for host reboot
 
         # Ensure the remote node is in a normal state before to trigger the crash
+        $self->{my_instance}->update_instance_ip();
         $self->{my_instance}->wait_for_ssh(timeout => $timeout, scan_ssh_host_key => 1);
 
         $self->{my_instance}->run_ssh_command(cmd => 'sudo su -c sync', timeout => $timeout);
@@ -437,6 +480,7 @@ sub stop_hana {
     else {
         my $sapadmin = lc(get_required_var('INSTANCE_SID')) . 'adm';
         $self->run_cmd(cmd => $cmd, runas => $sapadmin, timeout => $timeout);
+        $self->{my_instance}->update_instance_ip();
         $self->{my_instance}->wait_for_ssh(username => 'cloudadmin', scan_ssh_host_key => 1);
     }
 }
@@ -467,8 +511,21 @@ sub start_hana {
 sub cleanup_resource {
     my ($self, %args) = @_;
     my $timeout = bmwqemu::scale_timeout($args{timeout} // 300);
+    my @errors = (
+        qr/Aborting because no messages received in \d+ seconds/,
+        qr/Error performing operation: Timeout occurred/
+    );
+    my $retry = '3';
+    my $out = undef;
 
-    $self->run_cmd(cmd => 'crm resource cleanup');
+    # Retry when running crm command with issue, refer to TEAM-10483
+    while ($retry) {
+        $out = $self->run_cmd(cmd => 'crm resource cleanup', proceed_on_failure => 1);
+        last if (!grep { $out =~ /$_/ } @errors);
+        $retry--;
+        sleep 5;
+    }
+    die "Clean up resource failed:\n$out" if ($retry == 0);
 
     # Wait for resource to start
     my $start_time = time;
@@ -1391,6 +1448,41 @@ sub wait_for_zypper {
     }
 
     die("Zypper is still locked after $args{max_retries} retries, aborting (rc: 7)") if $retry >= $args{max_retries};
+}
+
+=head2 check_zypper_ref
+
+    The function attempts to run 'zypper ref' and check for errors related to repositories.
+
+=over
+
+=item B<$instance> - The instance object on which the Zypper command is executed. This object must have the run_ssh_command method implemented.
+
+=item B<runas> - If 'runas' defined, command will be executed as specified user, otherwise it will be executed as cloudadmin.
+
+=back
+=cut
+
+sub check_zypper_ref {
+    my $self = shift;
+    my %args = @_;
+    $args{runas} //= 'cloudadmin';
+
+    my $ret = $self->{my_instance}->run_ssh_command(cmd => 'sudo zypper ref',
+        username => $args{runas},
+        proceed_on_failure => 1,
+        rc_only => 1,
+        quiet => 1,
+        timeout => $args{timeout});
+    if ($ret == 4) {
+        die('ZYPPER: libzypp reported error while refreshing repositories');
+    } elsif ($ret == 6) {
+        die('ZYPPER reported no repositories defined');
+    } elsif ($ret == 106) {
+        die('ZYPPER reported some repositories failed to refresh');
+    } else {
+        record_info('ZYPPER REF', "Zypper ref returned $ret");
+    }
 }
 
 =head2 wait_for_idle

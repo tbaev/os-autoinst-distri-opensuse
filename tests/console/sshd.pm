@@ -20,9 +20,7 @@
 # Maintainer: Pavel Dostál <pdostal@suse.cz>
 # Tags: poo#65375, poo#68200, poo#104415
 
-use warnings;
 use base "consoletest";
-use strict;
 use testapi qw(is_serial_terminal :DEFAULT);
 use serial_terminal 'select_serial_terminal';
 use utils qw(systemctl exec_and_insert_password zypper_call random_string clear_console);
@@ -70,7 +68,7 @@ sub run {
     services::sshd::do_ssh_cleanup();
 }
 
-sub test_cryptographic_policies() {
+sub test_cryptographic_policies {
     my %args = @_;
     my $remote_user = $args{remote_user};
 

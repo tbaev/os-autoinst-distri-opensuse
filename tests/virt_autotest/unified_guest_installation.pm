@@ -47,8 +47,6 @@
 package unified_guest_installation;
 
 use base 'concurrent_guest_installations';
-use strict;
-use warnings;
 use testapi;
 use Carp;
 use Utils::Backends 'use_ssh_serial_console';
@@ -62,6 +60,7 @@ sub run {
     use_ssh_serial_console;
 
     $self->reveal_myself;
+    return if get_var('SKIP_GUEST_INSTALL');
     my @guest_names = split(/\|/, get_required_var('UNIFIED_GUEST_LIST'));
     my @guest_profiles = split(/\|/, get_required_var('UNIFIED_GUEST_PROFILES'));
     croak("Guest names and profiles must be given to create, configure and install guests.") if ((scalar(@guest_names) eq 0) or (scalar(@guest_profiles) eq 0));

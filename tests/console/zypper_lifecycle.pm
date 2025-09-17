@@ -26,8 +26,6 @@
 # Tags: fate#320597
 
 use base "consoletest";
-use strict;
-use warnings;
 use testapi;
 use utils;
 use version_utils qw(is_sle is_jeos is_upgrade);
@@ -101,7 +99,14 @@ sub run {
 
     die "Got malformed repo list:\nOutput: '$output'" unless $base_repos;
 
-    $output = script_output 'echo $(for repo in ' . $base_repos . ' ; do zypper -n -x se -t package -i -s -r $repo ; done | grep name= | head -n 1 )', 600;
+    if (is_sle('>=16')) {
+        # For sle16, it has only one repository, see https://progress.opensuse.org/issues/185221
+        $output = script_output('echo $(zypper -n -x se -t package -i -s | grep name= | head -n 1 )', 600);
+    }
+    else {
+        $output = script_output 'echo $(for repo in ' . $base_repos . ' ; do zypper -n -x se -t package -i -s -r $repo ; done | grep name= | head -n 1 )', 600;
+    }
+
     # Parse package name
     if ($output =~ /name="(?<package>[^"]+)"/) {
         $package = $+{package};

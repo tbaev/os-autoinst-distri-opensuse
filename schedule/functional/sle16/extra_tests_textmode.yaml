@@ -28,12 +28,15 @@ schedule:
     - console/system_prepare
     - console/prepare_test_data
     - console/consoletest_setup
-    - console/ntp_client
+    - console/chrony
     - console/dnsmasq
     - console/man_pages
     - console/ping
     - console/arping
     - console/wireshark_cli
+    - console/traceroute
+    - console/tracepath
+    - console/dig
     - console/orphaned_packages_check
     - console/zypper_lr_validate
     - console/zypper_ref
@@ -105,4 +108,5 @@ schedule:
     - console/coredump_collect
     - console/valgrind
     - console/sssd_389ds_functional
+    - console/tcpdump
     - console/zypper_log_packages

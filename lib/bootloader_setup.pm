@@ -344,7 +344,7 @@ sub select_bootmenu_option {
 
     # Special handling for Agama
     if (get_var('AGAMA')) {
-        send_key_until_needlematch 'boot-agama-installation', 'up', 11, 5;
+        send_key_until_needlematch 'boot-agama-installation', 'down', 11, 5;
         return 0;
     }
     if (get_var('LIVECD')) {
@@ -627,12 +627,14 @@ sub bootmenu_default_params {
         push @params, "Y2DEBUG=1";
     }
     elsif (get_var('AGAMA')) {
-        wait_screen_change { send_key "e" };
-        send_key "down";
-        send_key "down";
-        send_key "down";
-        send_key "down";
-        wait_screen_change { send_key "end" };
+        if (!$args{in_grub_edit}) {
+            wait_screen_change { send_key "e" };
+            send_key "down";
+            send_key "down";
+            send_key "down";
+            send_key "down";
+            wait_screen_change { send_key "end" };
+        }
         # REPO_0 should be set everywhere where we rsync repo (aside from iso)
         if (get_var('REPO_0')) {
             my $host = get_var('OPENQA_HOST', 'https://openqa.opensuse.org');
@@ -899,8 +901,9 @@ sub specific_bootmenu_params {
         push @params, "autoupgrade=1";
     }
 
-    if (my $agama_auto = get_var('INST_AUTO')) {
-        my $url = ($agama_auto =~ /\.libsonnet/) ? autoyast::generate_json_profile($agama_auto) : autoyast::expand_agama_profile($agama_auto);
+    if (my $inst_auto = get_var('INST_AUTO')) {
+        autoyast::create_file_as_profile_companion() if get_var('AGAMA_PROFILE_OPTIONS') =~ /files=true/;
+        my $url = ($inst_auto =~ /\.libsonnet/) ? autoyast::generate_json_profile($inst_auto) : autoyast::expand_agama_profile($inst_auto);
         $url = shorten_url($url) if (is_backend_s390x && !is_opensuse);
         push @params, "inst.auto=$url inst.finish=stop";
     }
@@ -1122,9 +1125,13 @@ sub select_bootmenu_language {
 sub tianocore_enter_menu {
     # we need to reduce this waiting time as much as possible
     my $counter = 300;
-    while (!check_screen('tianocore-mainmenu', 0, no_wait => 1) && $counter--) {
+    while (!check_screen([qw(tianocore-mainmenu tianocore-bootmenu)], 0, no_wait => 1) && $counter--) {
         send_key 'f2';
         sleep 0.1;
+    }
+    if (check_screen('tianocore-bootmenu')) {
+        send_key_until_needlematch("tianocore-bootmenu-EFI-fimware-selected", 'down', 6, 1);
+        send_key "ret";
     }
 }
 
@@ -1137,8 +1144,19 @@ sub tianocore_disable_secureboot {
 
     assert_screen 'grub2';
     send_key 'c';
-    sleep 2;
+    sleep 5;
     enter_cmd "exit";
+
+    # There might be a boot menu before the mainmenu.
+    # Wait until the main menu appears and move to the EFI firmware setup, if the boot menu is present
+    while (!check_screen('tianocore-mainmenu')) {
+        wait_still_screen();
+        if (check_screen('tianocore-bootmenu')) {
+            send_key_until_needlematch("tianocore-bootmenu-EFI-fimware-selected", 'down', 6, 1);
+            send_key "ret";
+        }
+    }
+
     assert_screen 'tianocore-mainmenu';
     # Select 'Boot manager' entry
     send_key_until_needlematch('tianocore-devicemanager', 'down', 6, 5);

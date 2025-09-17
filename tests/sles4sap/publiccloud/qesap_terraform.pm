@@ -21,11 +21,10 @@
 # _HANA_MASTER_PW (mandatory) - Hana master PW (secret)
 # INSTANCE_SID - SAP Sid
 # INSTANCE_ID - SAP instance id
-# ANSIBLE_REMOTE_PYTHON - define python version to be used for qe-sap-deploymnet (default '/usr/bin/python3')
+# ANSIBLE_REMOTE_PYTHON - define python version to be used for qe-sap-deployment (default '/usr/bin/python3')
 # PUBLIC_CLOUD_IMAGE_LOCATION - needed by get_blob_uri
+# HANA_NAMESPACE - used to configure the Azure credentials involved in obtaining the HANA media
 
-use strict;
-use warnings;
 use base 'sles4sap_publiccloud_basetest';
 use testapi;
 use publiccloud::ssh_interactive 'select_host_console';
@@ -34,7 +33,9 @@ use publiccloud::instances;
 use publiccloud::utils qw(is_azure is_gce is_ec2 get_ssh_private_key_path is_byos);
 use sles4sap_publiccloud;
 use sles4sap::qesap::qesapdeployment;
+use sles4sap::qesap::azure;
 use sles4sap::azure_cli;
+use sles4sap::ibsm;
 use serial_terminal 'select_serial_terminal';
 use registration qw(get_addon_fullname scc_version %ADDONS_REGCODE);
 use qam;
@@ -67,7 +68,7 @@ sub run {
 
     # *_ADDRESS_RANGE variables are not necessary needed by all the conf.yaml templates
     # but calculate them every time is "cheap"
-    my %maintenance_vars = qesap_calculate_address_range(slot => get_required_var('WORKER_ID'));
+    my %maintenance_vars = ibsm_calculate_address_range(slot => get_required_var('WORKER_ID'));
     set_var("MAIN_ADDRESS_RANGE", $maintenance_vars{main_address_range});
     set_var("SUBNET_ADDRESS_RANGE", $maintenance_vars{subnet_address_range});
 
@@ -85,7 +86,7 @@ sub run {
     set_var('ISCSI_ENABLED', check_var('FENCING_MECHANISM', 'sbd') ? 'true' : 'false');
     set_var_output('ANSIBLE_REMOTE_PYTHON', '/usr/bin/python3');
 
-    # Within the qe-sap-deployment terraform code, in each differend CSP implementation,
+    # Within the qe-sap-deployment terraform code, in each different CSP implementation,
     # an empty string means no peering.
     # This "trick" is needed to only have one conf.yaml
     # for both jobs that creates the peering with terraform or the az cli
@@ -122,7 +123,7 @@ sub run {
     # Needed to create the SAS URI token
     if (!is_azure()) {
         my $azure_client = publiccloud::azure_client->new();
-        $azure_client->init();
+        $azure_client->init(namespace => get_var('HANA_NAMESPACE', 'sapha'));
     }
 
     # variable to be conditionally used to hold ptf file names,
@@ -167,7 +168,7 @@ sub run {
     # This is the path where community.sles-for-sap repo
     # has been cloned.
     # Not all the conf.yaml used by this file needs it but
-    # it is just easyer to define it here for all.
+    # it is just easier to define it here for all.
     set_var("ANSIBLE_ROLES", qesap_get_ansible_roles_dir());
     my $reg_mode = 'registercloudguest';    # Use registercloudguest by default
     if (get_var('QESAP_SCC_NO_REGISTER')) {
@@ -234,6 +235,9 @@ sub run {
         qesap_az_clean_old_peerings(rg => $group, vnet => az_network_vnet_get(resource_group => $group, query => "[0].name"));
         record_info 'PEERING CLEANUP', "Peering cleanup END";
     }
+    elsif (is_ec2 && get_var('IBSM_PRJ_TAG')) {
+        qesap_aws_delete_leftover_tgw_attachments(mirror_tag => get_var('IBSM_PRJ_TAG'));
+    }
 
     # Regenerate config files (This workaround will be replaced with full yaml generator)
     qesap_prepare_env(provider => $provider_setting, only_configure => 1, region => get_required_var('PUBLIC_CLOUD_REGION'));
@@ -246,7 +250,7 @@ sub run {
             'An internal execution error occurred. Please retry later',
             'There is a peering operation in progress'
         ],
-        destroy => 1);
+        destroy => 0);
     # Retrying terraform more times in case of GCP, to handle concurrent peering attempts
     $retry_args{retries} = is_gce() ? 5 : 2;
     $retry_args{cmd_options} = '--parallel ' . get_var('HANASR_TERRAFORM_PARALLEL') if get_var('HANASR_TERRAFORM_PARALLEL');
@@ -266,6 +270,8 @@ sub run {
         $self->{my_instance} = $instance;
         $self->set_cli_ssh_opts;
         my $expected_hostname = $instance->{instance_id};
+        # We need to scan for the SSH host key as the Ansible later
+        $instance->update_instance_ip();
         $instance->wait_for_ssh();
 
         my $real_hostname = $instance->ssh_script_output(cmd => 'hostname', username => 'cloudadmin');

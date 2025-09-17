@@ -10,13 +10,12 @@
 use base 'opensusebasetest';
 use testapi;
 use serial_terminal 'select_serial_terminal';
-use strict;
-use warnings;
 use utils;
 use package_utils;
 use power_action_utils 'power_action';
 use version_utils qw(is_sle is_leap is_sle_micro is_leap_micro check_version is_transactional);
 use Utils::Backends 'is_pvm';
+use Utils::Logging qw(record_avc_selinux_alerts);
 use transactional;
 
 sub run {
@@ -89,6 +88,11 @@ sub post_fail_hook {
     my ($self) = @_;
     $self->SUPER::post_fail_hook;
     upload_logs('/var/log/pbl.log');
+}
+
+sub post_run_hook {
+    select_console('log-console');
+    shift->record_avc_selinux_alerts;
 }
 
 1;

@@ -40,6 +40,8 @@ our @EXPORT = qw(
   az_network_lb_probe_create
   az_network_lb_rule_create
   az_vm_as_create
+  az_vm_as_list
+  az_vm_as_show
   az_img_from_vhd_create
   az_vm_create
   az_vm_list
@@ -263,7 +265,11 @@ sub az_network_vnet_subnet_update {
 
     my $res = az_network_vnet_get(resource_group => 'openqa-rg')
 
-Return the output of az network vnet list
+Return the output of az network vnet list as an object.
+Take care that this command is always calling the az cli with --json
+and returns the decoded object. But the format of the object can change
+accordingly to the provided value of --query. It is also possible that
+some query result in the function to die on decode_json.
 
 =over
 
@@ -640,9 +646,9 @@ Create an availability set. Later on VM can be assigned to it.
 
 =over
 
-=item B<resource_group> - existing resource group where to create the Availability set
+=item B<resource_group> - existing resource group where to create the availability set
 
-=item B<region> - region where to create the Availability set
+=item B<region> - region where to create the availability set
 
 =item B<name> - availability set name
 
@@ -663,6 +669,60 @@ sub az_vm_as_create {
         '-n', $args{name},
         '-l', $args{region},
         $fc_cmd);
+    assert_script_run($az_cmd);
+}
+
+=head2 az_vm_as_list
+
+    az_vm_as_list(resource_group => 'openqa-rg');
+
+List all availability set in a resource group.
+
+=over
+
+=item B<resource_group> - existing resource group where to create the availability set
+
+=back
+=cut
+
+sub az_vm_as_list {
+    my (%args) = @_;
+    croak("Argument < resource_group > missing") unless $args{resource_group};
+    my $az_cmd = join(' ', 'az vm availability-set list',
+        '--resource-group', $args{resource_group},
+        '--query "[].{name:name}" -o tsv');
+    return script_output($az_cmd);
+}
+
+=head2 az_vm_as_show
+
+    az_vm_as_show(resource_group => 'openqa-rg', name => 'openqa-as');
+
+Show all the details of an availability set. For the moment it only show and does not return anything.
+
+=over
+
+=item B<resource_group> - existing resource group where to create the availability set
+
+=item B<name> - name of the availability set
+
+=back
+=cut
+
+sub az_vm_as_show {
+    my (%args) = @_;
+    foreach (qw(resource_group name)) {
+        croak("Argument < $_ > missing") unless $args{$_}; }
+
+    my $az_cmd = join(' ', 'az vm availability-set show',
+        '--resource-group', $args{resource_group},
+        '--name', $args{name},
+        '-o table');
+    assert_script_run($az_cmd);
+
+    $az_cmd = join(' ', 'az vm availability-set list-sizes',
+        '--resource-group', $args{resource_group},
+        '--name', $args{name});
     assert_script_run($az_cmd);
 }
 
@@ -1382,6 +1442,8 @@ Delete a specific network peering
 
 =item B<vnet> - existing vnet in resource_group, used as source of the peering
 
+=item B<timeout> - (Optional) Timeout for the assert_script_run command
+
 =back
 =cut
 
@@ -1389,12 +1451,13 @@ sub az_network_peering_delete {
     my (%args) = @_;
     foreach (qw(name resource_group vnet)) {
         croak("Argument < $_ > missing") unless $args{$_}; }
+    $args{timeout} //= bmwqemu::scale_timeout(300);
 
     my $az_cmd = join(' ', 'az network vnet peering delete',
         '--name', $args{name},
         '--resource-group', $args{resource_group},
         '--vnet-name', $args{vnet});
-    assert_script_run($az_cmd);
+    return script_run($az_cmd, timeout => $args{timeout});
 }
 
 =head2 az_disk_create
@@ -1514,11 +1577,25 @@ sub az_resource_list {
 
 =head2 az_validate_uuid_pattern
 
-    az_validate_uuid_pattern( uuid => $uuid_string )
+    my $is_valid = az_validate_uuid_pattern(uuid => $uuid_string);
 
-    Function checks input string against uuid pattern
-    which is commonly used as an identifier for Azure resources.
-    returns uuid (true) on match, 0 (false) on mismatch.
+    Validates if a given string matches the standard UUID pattern (e.g.,
+    C<xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx>). This is commonly used to verify
+    identifiers for Azure resources.
+
+B<Return value:>
+
+=over
+
+=item * On a successful match, returns the original B<scalar string> containing the UUID.
+This value is considered true in a boolean context.
+
+=item * On a failed match, returns B<undef>. This value is considered false in a
+boolean context.
+
+=back
+
+B<Arguments:>
 
 =over
 
@@ -1530,10 +1607,10 @@ sub az_resource_list {
 sub az_validate_uuid_pattern {
     my (%args) = @_;
     croak "Mandatory argument 'uuid' missing" unless $args{uuid};
-    my $pattern = '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}';
+    my $pattern = '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$';
     return $args{uuid} if ($args{uuid} =~ /$pattern/i);
     diag("String did not match UUID pattern:\nString: '$args{uuid}'\nPattern: '$pattern'");
-    return 0;
+    return undef;
 }
 
 
@@ -1546,7 +1623,7 @@ sub az_validate_uuid_pattern {
 
 Uploads file to a storage container.
 
-=over 4
+=over
 
 =item B<container_name> Existing storage container name.
 
@@ -1578,20 +1655,32 @@ sub az_storage_blob_upload {
 
 =head2 az_storage_blob_lease_acquire
 
-    az_storage_blob_lease_acquire(
-        container_name=>'somecontainer',
-        storage_account_name=>'storageaccount',
-        blob_name => 'somefilename' [, lease_duration=>'42']
+    my $lease_id = az_storage_blob_lease_acquire(
+        container_name       => 'somecontainer',
+        storage_account_name => 'storageaccount',
+        blob_name            => 'somefilename',
+        lease_duration       => 60
     );
 
-Acquire a lease for a storage blob. Function returns UUID which is then required to modify the file and gives the
+Acquire a lease for a storage blob.
+The function returns a UUID which is then required to modify the file and gives the
 UUID owner exclusive rights.
-Optionally B<lease_duration> can be defined to limit this file lock up to 60s instead of infinity.
-In case of function returns nothing, the reasons may vary and it is up to caller to decide how to deal with the result.
-In that case
-Possible reasons are that there is already a lease present (az cli returns a message which is not a valid UUID)
 
-=over 4
+If the lease cannot be acquired (e.g., the blob is already leased by another
+process, or another Azure error occurs), the function will return C<undef>.
+
+B<Return value:>
+
+=over
+
+=item * On success, returns a B<scalar string> containing the lease UUID.
+
+=item * On failure, returns B<undef>. The reasons may vary and it is up to caller to decide how to deal with the result.
+        Possible reasons are that there is already a lease present (az cli returns a message which is not a valid UUID)
+
+=back
+
+=over
 
 =item B<container_name> Existing storage container name.
 
@@ -1599,7 +1688,9 @@ Possible reasons are that there is already a lease present (az cli returns a mes
 
 =item B<blob_name> Blob name to acquire lease for.
 
-=item B<lease_duration> Lease duration between 15-60s. Default: infinite
+=item B<lease_duration> Specifies the duration of the lease in seconds. A non-infinite
+                        lease can be between 15 and 60 seconds. A value of -1 indicates an infinite
+                        lease. Default: -1 (infinite).
 
 =back
 =cut
@@ -1625,7 +1716,9 @@ sub az_storage_blob_lease_acquire {
 
     my $lease_id = script_output($az_cmd, proceed_on_failure => 1);
     record_info('AZ CLI out', "AZ CLI returned output:\n $lease_id");
-    return ($lease_id) if az_validate_uuid_pattern(uuid => $lease_id);    # Return only valid output.
+    # Return a string if az_validate_uuid_pattern return "true"
+    # otherwise return undef, thanks to Perl's implicit return that get value from the if statement.
+    return $lease_id if (az_validate_uuid_pattern(uuid => $lease_id));
 }
 
 =head2 az_storage_blob_list
@@ -1637,7 +1730,7 @@ sub az_storage_blob_lease_acquire {
 
 List information about storage blob(s) specified by B<storage_account_name>, B<container_name> and B<query>.
 
-=over 3
+=over
 
 =item B<container_name> Existing storage container name.
 
@@ -1673,7 +1766,7 @@ sub az_storage_blob_list {
 
 Update properties of storage blob. Returns az cli command exit code.
 
-=over 4
+=over
 
 =item B<container_name> Existing resource group name.
 
@@ -1839,3 +1932,5 @@ sub az_group_exists {
     croak "Missing mandatory argument: 'resource_group'" unless $args{resource_group};
     return script_output("az group exists --resource-group $args{resource_group}", quiet => $args{quiet});
 }
+
+1;

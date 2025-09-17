@@ -14,8 +14,6 @@
 # - images can be deleted
 # Maintainer: QE-C team <qa-c@suse.de>
 
-use strict;
-use warnings;
 use Mojo::Base 'containers::basetest';
 use testapi;
 use serial_terminal 'select_serial_terminal';
@@ -60,7 +58,7 @@ sub registry_push_pull {
     assert_script_run $engine->runtime . " images | grep 'localhost:5000/$image'", 60;
 
     # podman artifact needs podman 5.4.0
-    if ($engine->runtime eq "podman" && is_tumbleweed) {
+    if ($engine->runtime eq "podman" && (is_tumbleweed || is_sle('>=16.0'))) {
         my $artifact = "localhost:5000/testing-artifact";
         assert_script_run "podman artifact add $artifact /etc/passwd";
         assert_script_run "podman artifact push $artifact";
@@ -71,31 +69,26 @@ sub registry_push_pull {
 }
 
 sub run {
-    my ($self) = @_;
+    my ($self, $args) = @_;
+    my $runtime = $args->{runtime};
+
     select_serial_terminal;
 
     # Install and check that it's running
     my $pkg = 'distribution-registry';
-    activate_containers_module if is_sle(">=15-SP4");
+    activate_containers_module if (is_sle(">=15-SP4") && (is_sle('<16')));
 
     zypper_call "se -v $pkg";
     zypper_call "in $pkg";
     systemctl '--now enable registry';
     systemctl 'status registry';
 
-    script_retry 'curl http://127.0.0.1:5000/v2/_catalog', delay => 3, retry => 10;
-    assert_script_run 'curl -s http://127.0.0.1:5000/v2/_catalog | grep repositories';
+    validate_script_output_retry("curl -s http://127.0.0.1:5000/v2/_catalog", sub { m/repositories/ }, retry => 3, delay => 5, timeout => 300);
 
-    # Run docker tests
-    my $docker = $self->containers_factory('docker');
+    my $engine = $self->containers_factory($runtime);
     my $image = 'registry.opensuse.org/opensuse/busybox';
-    registry_push_pull(image => $image, runtime => $docker);
-    $docker->cleanup_system_host();
-
-    # Run podman tests
-    my $podman = $self->containers_factory('podman');
-    registry_push_pull(image => $image, runtime => $podman);
-    $podman->cleanup_system_host();
+    registry_push_pull(image => $image, runtime => $engine);
+    $engine->cleanup_system_host();
 }
 
 1;

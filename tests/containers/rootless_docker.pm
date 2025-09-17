@@ -14,18 +14,15 @@
 #   * container is launched with keep-id of the user who run the container
 # Maintainer: QE-C team <qa-c@suse.de>
 
-use strict;
-use warnings;
 use Mojo::Base 'containers::basetest';
 use testapi;
-use serial_terminal 'select_serial_terminal';
+use serial_terminal;
 use utils;
 use containers::common;
 use containers::docker;
 use containers::container_images;
 use Utils::Architectures;
 use containers::common qw(install_docker_when_needed);
-use version_utils qw(is_sle);
 
 sub run {
     my ($self) = @_;
@@ -39,14 +36,11 @@ sub run {
     my $pkg_name = check_var("CONTAINERS_DOCKER_FLAVOUR", "stable") ? "docker-stable" : "docker";
     install_packages("$pkg_name-rootless-extras");
 
-    assert_script_run("echo 0 > /etc/docker/suse-secrets-enable") if is_sle;
-
     my $image = get_var("CONTAINER_IMAGE_TO_TEST", "registry.opensuse.org/opensuse/tumbleweed:latest");
 
     # NOTE: Remove this when 15-SP3 is EOL
     my $subuid_start = get_user_subuid($user);
     if ($subuid_start eq '') {
-        record_soft_failure 'bsc#1185342 - YaST does not set up subuids/-gids for users';
         $subuid_start = 200000;
         my $subuid_range = $subuid_start + 65535;
         assert_script_run "usermod --add-subuids $subuid_start-$subuid_range --add-subgids $subuid_start-$subuid_range $user";
@@ -59,7 +53,7 @@ sub run {
     # already exists owned by root
     assert_script_run 'rm -rf /tmp/script*';
     ensure_serialdev_permissions;
-    select_console "user-console";
+    select_user_serial_terminal;
 
     # https://docs.docker.com/engine/security/rootless/
     assert_script_run "dockerd-rootless-setuptool.sh install";
@@ -69,6 +63,9 @@ sub run {
     test_container_image(image => $image, runtime => $docker);
     build_and_run_image(base => $image, runtime => $docker);
     test_zypper_on_container($docker, $image);
+
+    # Like above, but the other way around: Delete the files left by the regular user.
+    assert_script_run 'rm -rf /tmp/script*';
 }
 
 sub get_user_subuid {
@@ -87,7 +84,6 @@ sub post_run_hook {
     my $self = shift;
     cleanup();
     select_serial_terminal();
-    script_run "rm -f /etc/docker/suse-secrets-enable" if is_sle;
     $self->SUPER::post_run_hook;
 }
 
@@ -95,7 +91,6 @@ sub post_fail_hook {
     my $self = shift;
     cleanup();
     select_serial_terminal();
-    script_run "rm -f /etc/docker/suse-secrets-enable" if is_sle;
     save_and_upload_log('cat /etc/{subuid,subgid}', "/tmp/permissions.txt");
     $self->SUPER::post_fail_hook;
 }

@@ -4,13 +4,11 @@
 # Summary: Destroy of qe-sap-deployment deployment
 # Maintainer: QE-SAP <qe-sap@suse.de>, Michele Pagot <michele.pagot@suse.com>
 
-use strict;
-use warnings;
 use Mojo::Base 'publiccloud::basetest';
 use testapi;
 use serial_terminal 'select_serial_terminal';
 use sles4sap::qesap::qesapdeployment;
-use sles4sap::qesap::qesap_aws;
+use sles4sap::qesap::aws;
 
 sub run {
     select_serial_terminal;

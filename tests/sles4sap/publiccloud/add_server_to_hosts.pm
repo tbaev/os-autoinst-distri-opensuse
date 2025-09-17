@@ -4,8 +4,6 @@
 # Summary: Deployment steps for qe-sap-deployment
 # Maintainer: QE-SAP <qe-sap@suse.de>
 
-use strict;
-use warnings;
 use base 'sles4sap_publiccloud_basetest';
 use testapi;
 
@@ -21,8 +19,9 @@ sub run {
         next if ($instance->{'instance_id'} !~ m/vmhana/);
         record_info("$instance");
 
+        my $repo_host = get_var('REPO_MIRROR_HOST', 'download.suse.de');
         my $ibsm_ip = get_required_var('IBSM_IP');
-        $instance->run_ssh_command(cmd => "echo \"$ibsm_ip download.suse.de\" | sudo tee -a /etc/hosts", username => 'cloudadmin');
+        $instance->run_ssh_command(cmd => "echo \"$ibsm_ip $repo_host\" | sudo tee -a /etc/hosts", username => 'cloudadmin');
         $instance->run_ssh_command(cmd => 'cat /etc/hosts', username => 'cloudadmin');
     }
 }

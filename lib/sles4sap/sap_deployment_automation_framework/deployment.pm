@@ -48,7 +48,6 @@ our @EXPORT = qw(
   sdaf_cleanup
   sdaf_execute_playbook
   ansible_execute_command
-  ansible_show_status
   playbook_settings
   sdaf_register_byos
   get_sdaf_instance_id
@@ -151,6 +150,7 @@ sub export_credentials {
         get_var('_SECRET_AZURE_SDAF_APP_PASSWORD') &&
         get_var('PUBLIC_CLOUD_AZURE_SUBSCRIPTION_ID') &&
         get_var('_SECRET_AZURE_SDAF_TENANT_ID')) {
+        record_info('Credentials', 'Credentials defined by OpenQA settings');
         $data = {
             client_id => get_required_var('_SECRET_AZURE_SDAF_APP_ID'),
             client_secret => get_required_var('_SECRET_AZURE_SDAF_APP_PASSWORD'),
@@ -159,6 +159,7 @@ sub export_credentials {
             subscription_id => get_required_var('PUBLIC_CLOUD_AZURE_SUBSCRIPTION_ID'),
         };
     } else {
+        record_info('Credentials', 'Fetching credentials from remote server');
         $data = get_credentials(url_suffix => 'azure.json');
     }
 
@@ -757,7 +758,7 @@ sub sdaf_execute_remover {
         upload_logs($output_log_file, log_name => $output_log_file);
 
         last unless $rc;
-        sleep 30;
+        sleep 120;
         record_info("SDAF destroy retry $attempt_no", "destroy of '$args{deployment_type}' exited with RC '$rc', retrying ...");
         $attempt_no++;
     }
@@ -908,93 +909,6 @@ sub get_sdaf_instance_id {
     return $instance_id;
 }
 
-=head2 ansible_show_status
-
-    ansible_show_status(scenarios=>['db_install', 'db_ha'] sdaf_config_root_dir=>'/some/path' [, sap_sid=>'CAT']);
-
-Display simple command outputs from all DB hosts using B<ansible> command.
-
-=over
-
-=item * B<sdaf_config_root_dir>: SDAF Config directory containing SUT ssh keys
-
-=item * B<sap_sid>: SAP system ID. Default 'SAP_SID'
-
-=item * B<scenarios>: ARRAYREF with list of installed components
-
-=back
-=cut
-
-sub ansible_show_status {
-    my (%args) = @_;
-    foreach ('sdaf_config_root_dir', 'scenarios') {
-        croak "Missing mandatory argument '$_'." unless $args{$_};
-    }
-
-    $args{sap_sid} //= get_required_var('SAP_SID');
-    my %common_args = (sdaf_config_root_dir => $args{sdaf_config_root_dir}, sap_sid => $args{sap_sid});
-    my $host_group = 'all';
-    my @reports;
-
-    # Show OS info
-    push @reports, {title => 'OS info', text => ansible_execute_command(command => 'cat /etc/os-release', host_group => 'all', %common_args)};
-
-    # Show Hana database related information
-    if (grep(/db_install/, @{$args{scenarios}})) {
-        $host_group = "$args{sap_sid}_DB";
-
-        push @reports, {title => 'DB processes', text => ansible_execute_command(command => 'ps -ef | grep hdb', host_group => $host_group, %common_args)};
-        push @reports, {title => 'HDB info', text => ansible_execute_command(command => 'sudo -u hdbadm /hana/shared/HDB/HDB00/HDB info', host_group => $host_group, %common_args)};
-    }
-
-    # Show cluster related information
-    if (grep(/ha/, @{$args{scenarios}})) {
-        $host_group = "$args{sap_sid}_DB";
-
-        push @reports, {title => 'DB cluster', text => ansible_execute_command(command => 'sudo crm status full', host_group => $host_group, %common_args)};
-        push @reports, {title => 'HanaSR status', text => ansible_execute_command(command => 'sudo SAPHanaSR-showAttr', host_group => $host_group, %common_args)};
-    }
-
-    # Show ENSA2 related information
-    my $sapcontrol_path = "/sapmnt/$args{sap_sid}/exe/uc/linuxx86_64";
-    my $sapcontrol_env = "sudo env LD_LIBRARY_PATH=$sapcontrol_path:\$LD_LIBRARY_PATH";
-    my $sapcontrol_cmd = "$sapcontrol_env $sapcontrol_path/sapcontrol";
-    my $instance_id = get_sdaf_instance_id(pattern => 'SCS');
-    my $function = '';
-    if (grep(/ensa/, @{$args{scenarios}})) {
-        # Get instance ID
-        $instance_id = get_sdaf_instance_id(pattern => 'SCS');
-        $host_group = "$args{sap_sid}_SCS";
-
-        push @reports, {title => 'ENSA2 cluster', text => ansible_execute_command(command => 'sudo crm status full', host_group => $host_group, %common_args)};
-        $function = 'HACheckConfig';
-        push @reports, {title => "ENSA2 $function", text => ansible_execute_command(command => "$sapcontrol_cmd -nr $instance_id -function $function", host_group => $host_group, %common_args)};
-        $function = 'HACheckFailoverConfig';
-        push @reports, {title => "ENSA2 $function", text => ansible_execute_command(command => "$sapcontrol_cmd -nr $instance_id -function $function", host_group => $host_group, %common_args)};
-    }
-
-    # Show NW processes for each type of instance
-    if (grep(/nw/, @{$args{scenarios}})) {
-        foreach my $pattern (qw(PAS ERS SCS)) {
-            my $pattern_lc = lc($pattern);
-            # Get instance ID
-            $instance_id = get_sdaf_instance_id(pattern => $pattern);
-            $host_group = "$args{sap_sid}_$pattern";
-
-            push @reports, {title => "NW $pattern processes", text => ansible_execute_command(command => 'ps -ef | grep sap', host_group => $host_group, %common_args)};
-            # Add 'proceed_on_failure => 1' for 'GetProcessList' as it returns 'rc=3' (RC 3 = all processes GREEN)
-            $function = 'GetProcessList';
-            push @reports, {title => "NW $pattern $function", text => ansible_execute_command(command => "$sapcontrol_cmd -nr $instance_id -function $function", host_group => $host_group, %common_args, proceed_on_failure => 1)};
-            $function = 'GetSystemInstanceList';
-            push @reports, {title => "NW $pattern $function", text => ansible_execute_command(command => "$sapcontrol_cmd -nr $instance_id -function $function", host_group => $host_group, %common_args)};
-        }
-    }
-
-    foreach (@reports) {
-        record_info($_->{title}, $_->{text});
-    }
-}
-
 =head2 ansible_execute_command
 
     ansible_execute_command(
@@ -1063,7 +977,7 @@ sub playbook_settings {
         # SAP Bill of Materials processing - this also mounts install media storage
         push @playbooks, {playbook_filename => 'playbook_03_bom_processing.yaml', timeout => 7200};
         # SAP HANA database installation
-        push @playbooks, {playbook_filename => 'playbook_04_00_00_db_install.yaml', timeout => 1800};
+        push @playbooks, {playbook_filename => 'playbook_04_00_00_db_install.yaml', timeout => 3600};
     }
 
     # playbooks required for all nw* scenarios
@@ -1077,7 +991,7 @@ sub playbook_settings {
     # Run HA related playbooks at the end as it can mix up node order ###
     if (grep /db_ha/, @{$args{components}}) {
         # SAP HANA high-availability configuration
-        push @playbooks, {playbook_filename => 'playbook_04_00_01_db_ha.yaml', timeout => 1800};
+        push @playbooks, {playbook_filename => 'playbook_04_00_01_db_ha.yaml', timeout => 3600};
     }
 
     # playbooks required for all nw* scenarios

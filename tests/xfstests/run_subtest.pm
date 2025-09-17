@@ -8,15 +8,14 @@
 # Maintainer: Yong Sun <yosun@suse.com>, An Long <lan@suse.com>
 
 use 5.018;
-use strict;
-use warnings;
 use base 'opensusebasetest';
 use File::Basename;
 use testapi;
 use utils;
-use Utils::Backends 'is_pvm';
+use Utils::Backends qw(is_pvm is_svirt);
+use Utils::Architectures qw(is_s390x);
 use serial_terminal 'select_serial_terminal';
-use power_action_utils qw(prepare_system_shutdown);
+use power_action_utils qw(prepare_system_shutdown assert_shutdown_and_restore_system);
 use filesystem_utils qw(format_partition generate_xfstests_list);
 use lockapi;
 use mmapi;
@@ -51,12 +50,10 @@ my $LOOP_DEVICE = get_var('XFSTESTS_LOOP_DEVICE');
 
 # Debug variables
 # - INJECT_INFO: inject a line or more line into xfstests subtests for debugging.
-# - BTRFS_DUMP: enable btrfs dump, value=<device name>. e.g /dev/loop0
 # - RAW_DUMP: set it a non-zero value to enable raw dump by dd the super block.
 # - XFSTESTS_DEBUG: enable collect more info by set 1 to files under /proc/sys/kernel/, more than 1 info split by space
 #     e.g. "hardlockup_panic hung_task_panic panic_on_io_nmi panic_on_oops panic_on_rcu_stall..."
 my $INJECT_INFO = get_var('INJECT_INFO', '');
-my $BTRFS_DUMP = get_var('BTRFS_DUMP', 0);
 my $RAW_DUMP = get_var('RAW_DUMP', 0);
 
 # Heartbeat mode variables
@@ -69,7 +66,7 @@ my $HB_DONE = '<d>';
 # - XFSTESTS_TIMEOUT: Set the sub-test timeout threshold
 my $TIMEOUT_NO_HEARTBEAT = get_var('XFSTESTS_TIMEOUT', 2000);
 
-my ($type, $status, $time);
+my ($type, $status, $time, $test_timeout);
 my $whitelist;
 my $whitelist_env = prepare_whitelist_environment();
 my $whitelist_url = get_var('XFSTESTS_KNOWN_ISSUES');
@@ -88,10 +85,11 @@ sub run {
     my $result_args;
     enter_cmd("echo $test > /dev/$serialdev");
     if ($enable_heartbeat == 0) {
-        $result_args = test_run_without_heartbeat($self, $test, $TIMEOUT_NO_HEARTBEAT, $FSTYPE, $BTRFS_DUMP, $RAW_DUMP, $SCRATCH_DEV, $SCRATCH_DEV_POOL, $INJECT_INFO, $LOOP_DEVICE, $ENABLE_KDUMP, $VIRTIO_CONSOLE, 0, $args->{my_instance});
+        $result_args = test_run_without_heartbeat($self, $test, $TIMEOUT_NO_HEARTBEAT, $FSTYPE, $RAW_DUMP, $SCRATCH_DEV, $SCRATCH_DEV_POOL, $INJECT_INFO, $LOOP_DEVICE, $ENABLE_KDUMP, $VIRTIO_CONSOLE, 0, $args->{my_instance});
         $status = $result_args->{status};
         $time = $result_args->{time};
         $status_log_content = $result_args->{output};
+        $test_timeout = $result_args->{timeout};
     }
     else {
         heartbeat_start;
@@ -100,7 +98,7 @@ sub run {
         if ($type eq $HB_DONE) {
             # Test finished without crashing SUT
             $status_log_content = log_add($STATUS_LOG, $test, $status, $time);
-            copy_all_log($category, $num, $FSTYPE, $BTRFS_DUMP, $RAW_DUMP, $SCRATCH_DEV, $SCRATCH_DEV_POOL) if ($status =~ /FAILED/);
+            copy_all_log($category, $num, $FSTYPE, $RAW_DUMP, $SCRATCH_DEV, $SCRATCH_DEV_POOL) if ($status =~ /FAILED/);
         }
         else {
             # Here script already know the SUT crashed/hanged.
@@ -139,15 +137,22 @@ sub run {
     bmwqemu::fctinfo("$generate_name");
     my $targs = OpenQA::Test::RunArgs->new();
     my $whitelist_entry;
-    $targs->{output} = script_output("if [ -f $test_path ]; then tail -n 200 $test_path | sed \"s/'//g\" | tr -cd '\\11\\12\\15\\40-\\176'; else echo 'No log in test path, find log in serial0.txt'; fi", 600);
+    my $output_message;
+    if ($test_timeout) {
+        $output_message = 'Test run timeout, it was terminated by wrapper. Find more info in serial0.txt';
+    }
+    else {
+        $output_message = 'No log in test path, find log in serial0.txt';
+    }
+    $targs->{output} = script_output("if [ -f $test_path ]; then tail -n 200 $test_path | sed \"s/'//g\" | tr -cd '\\11\\12\\15\\40-\\176'; else echo '$output_message'; fi", 600, type_command => 1, proceed_on_failure => 1);
     $targs->{name} = $test;
     $targs->{time} = $time;
     $targs->{status} = $status;
     if ($status =~ /FAILED|SKIPPED|SOFTFAILED/) {
         if ($status =~ /FAILED|SOFTFAILED/) {
-            $targs->{outbad} = script_output("if [ -f $test_path.out.bad ]; then tail -n 200 $test_path.out.bad | sed \"s/'//g\" | tr -cd '\\11\\12\\15\\40-\\176'; else echo '$test_path.out.bad not exist';fi", 600);
-            $targs->{fullog} = script_output("if [ -f $test_path.full ]; then tail -n 200 $test_path.full | sed \"s/'//g\" | tr -cd '\\11\\12\\15\\40-\\176'; else echo '$test_path.full not exist'; fi", 600);
-            $targs->{dmesg} = script_output("if [ -f $test_path.dmesg ]; then tail -n 200 $test_path.dmesg | sed \"s/'//g\" | tr -cd '\\11\\12\\15\\40-\\176'; fi", 600);
+            $targs->{outbad} = script_output("if [ -f $test_path.out.bad ]; then tail -n 200 $test_path.out.bad | sed \"s/'//g\" | tr -cd '\\11\\12\\15\\40-\\176'; else echo '$test_path.out.bad not exist';fi", 600, type_command => 1, proceed_on_failure => 1);
+            $targs->{fullog} = script_output("if [ -f $test_path.full ]; then tail -n 200 $test_path.full | sed \"s/'//g\" | tr -cd '\\11\\12\\15\\40-\\176'; else echo '$test_path.full not exist'; fi", 600, type_command => 1, proceed_on_failure => 1);
+            $targs->{dmesg} = script_output("if [ -f $test_path.dmesg ]; then tail -n 200 $test_path.dmesg | sed \"s/'//g\" | tr -cd '\\11\\12\\15\\40-\\176'; fi", 600, type_command => 1, proceed_on_failure => 1);
             if (exists($softfail_list{$generate_name})) {
                 $targs->{status} = 'SOFTFAILED';
                 $targs->{failinfo} = 'XFSTESTS_SOFTFAIL set in configuration';
@@ -180,6 +185,11 @@ sub run {
     }
     if ($is_last_one) {
         mutex_unlock 'last_subtest_run_finish';
+    }
+    # s390x will not load to new snapshot automatically
+    if ($test_timeout && is_s390x && is_svirt) {
+        assert_shutdown_and_restore_system;
+        reconnect_mgmt_console;
     }
 }
 

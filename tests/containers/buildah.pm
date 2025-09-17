@@ -14,8 +14,6 @@
 # - cleanup system (images, containers)
 # Maintainer: QE-C team <qa-c@suse.de>
 
-use strict;
-use warnings;
 use Mojo::Base qw(consoletest);
 use testapi;
 use serial_terminal qw(select_serial_terminal select_user_serial_terminal);
@@ -40,9 +38,9 @@ sub run_tests {
     # When trying to install packages inside the container in Docker, there's a
     # network failure
     if ($runtime eq 'podman') {
-        record_info('Test', "Install random package in the container");
-        assert_script_run("buildah run $container -- zypper in -y python3", timeout => 300);
-        assert_script_run("buildah run $container -- python3 --version");
+        record_info('Test', "Install arbitrary package in the container");
+        assert_script_run("buildah run $container -- zypper in -y perl", timeout => 600);
+        assert_script_run(qq{buildah run $container -- perl -e 'print("Hello World\\n");'});
     }
 
     record_info('Test', "Add environment variable to the container");

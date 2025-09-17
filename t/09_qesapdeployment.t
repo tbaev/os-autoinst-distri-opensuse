@@ -784,6 +784,7 @@ subtest '[qesap_cluster_logs]' => sub {
     $qesap->redefine(upload_logs => sub { push @save_file_calls, $_[0]; return; });
     $qesap->redefine(qesap_cluster_log_cmds => sub { return ({Cmd => 'crm status', Output => 'crm_status.txt'}); });
     $qesap->redefine(qesap_upload_crm_report => sub { my (%args) = @_; push @crm_report_calls, $args{host}; return 0; });
+    $qesap->redefine(qesap_save_y2logs => sub { return 0; });
     my $cloud_provider = 'NEMO';
     set_var('PUBLIC_CLOUD_PROVIDER', $cloud_provider);
 
@@ -817,6 +818,7 @@ subtest '[qesap_cluster_logs] multi log command' => sub {
     $qesap->redefine(upload_logs => sub { return; });
     $qesap->redefine(qesap_cluster_log_cmds => sub { return ({Cmd => 'crm status', Output => 'crm_status.txt', Logs => ['ignore_me.txt', 'ignore_me_too.txt']}); });
     $qesap->redefine(qesap_upload_crm_report => sub { return 0; });
+    $qesap->redefine(qesap_save_y2logs => sub { return 0; });
     my $cloud_provider = 'NEMO';
     set_var('PUBLIC_CLOUD_PROVIDER', $cloud_provider);
 
@@ -899,6 +901,26 @@ subtest '[qesap_supportconfig_logs]' => sub {
     ok((any { /.*\/var\/tmp.*vmhana01.*supportconfig/ } @calls), 'supportconfig log file has the vmhana01 node name in it');
     ok((any { /.*\/var\/tmp.*vmhana02.*supportconfig/ } @calls), 'supportconfig log file has the vmhana02 node name in it');
     ok($upload_log_called eq 1), 'upload_log called';
+};
+
+subtest '[qesap_save_y2logs]' => sub {
+    my $qesap = Test::MockModule->new('sles4sap::qesap::qesapdeployment', no_auto => 1);
+    my @calls;
+    my $upload_log_called = 0;
+
+    $qesap->redefine(qesap_ansible_cmd => sub {
+            my (%args) = @_;
+            push @calls, $args{cmd};
+            return 0; });
+    $qesap->redefine(qesap_ansible_fetch_file => sub { return 0; });
+    $qesap->redefine(upload_logs => sub { $upload_log_called = 1; return 0; });
+
+    qesap_save_y2logs(provider => 'SAND', host => 'boo');
+
+    note("\n  C-->  " . join("\n  C-->  ", @calls));
+    ok((any { /.*save_y2logs \/tmp\/boo-y2logs.*/ } @calls), 'save_y2logs is called');
+    ok((any { /.*chmod/ } @calls), 'chmod is called');
+    ok($upload_log_called eq 1, 'upload_log called');
 };
 
 subtest '[qesap_calculate_deployment_name]' => sub {
@@ -1149,28 +1171,6 @@ subtest '[qesap_prepare_env] AWS' => sub {
     ok($qesap_create_aws_credentials_called, '$qesap_create_aws_credentials called');
 };
 
-subtest '[qesap_is_job_finished]' => sub {
-    my $qesap = Test::MockModule->new('sles4sap::qesap::qesapdeployment', no_auto => 1);
-    my @results = ();
-    $qesap->redefine(script_output => sub {
-            if ($_[0] =~ /100000/) { return "not json"; }
-            if ($_[0] =~ /200000/) { return "{\"job\":{\"state\":\"donaldduck\"}}"; }
-            if ($_[0] =~ /300000/) { return "{\"job\":{\"state\":\"running\"}}"; }
-    });
-
-    $qesap->redefine(get_required_var => sub { return ''; });
-    $qesap->redefine(record_info => sub { note(join(' ', 'RECORD_INFO -->', @_)); });
-
-    push @results, qesap_is_job_finished(100000);
-    push @results, qesap_is_job_finished(200000);
-    push @results, qesap_is_job_finished(300000);
-
-
-    ok($results[0] == 0, "Consider 'running' state if the openqa job status response isn't JSON");
-    ok($results[1] == 1, "Considered 'finished' state if the openqa job status response exists and isn't 'running'");
-    ok($results[2] == 0, "Consider 'running' if the openqa job status response is 'running'");
-};
-
 subtest '[qesap_get_nodes_names]' => sub {
     my $qesap = Test::MockModule->new('sles4sap::qesap::qesapdeployment', no_auto => 1);
     my @calls;
@@ -1219,7 +1219,7 @@ subtest '[qesap_add_server_to_hosts]' => sub {
     ok((any { qr/sed.*\/etc\/hosts/ } @calls), 'AWS Region matches');
 };
 
-subtest '[qesap_terrafom_ansible_deploy_retry] no or unknown Ansible failures, no retry, error' => sub {
+subtest '[qesap_terraform_ansible_deploy_retry] no or unknown Ansible failures, no retry, error' => sub {
     # Simulate to call the qesap_terraform_ansible_deploy_retry but
     # error_detection does not find and known error in the log. It is something could
     # happen if this function is called after a failure of some kind error_detection
@@ -1232,13 +1232,13 @@ subtest '[qesap_terrafom_ansible_deploy_retry] no or unknown Ansible failures, n
     $qesap->redefine(qesap_execute => sub { $qesap_execute_calls++; return; });
     $qesap->redefine(record_info => sub { note(join(' ', 'RECORD_INFO -->', @_)); });
 
-    my $ret = qesap_terrafom_ansible_deploy_retry(error_log => 'CORAL', provider => 'NEMO');
+    my $ret = qesap_terraform_ansible_deploy_retry(error_log => 'CORAL', provider => 'NEMO');
 
-    ok $ret eq 1, "Return of qesap_terrafom_ansible_deploy_retry '$ret' is expected 1";
+    ok $ret eq 1, "Return of qesap_terraform_ansible_deploy_retry '$ret' is expected 1";
     ok $qesap_execute_calls eq 0, "qesap_execute() never called (qesap_execute_calls: $qesap_execute_calls expected 0)";
 };
 
-subtest '[qesap_terrafom_ansible_deploy_retry] no or unknown Ansible failures, no retry, error. More layers' => sub {
+subtest '[qesap_terraform_ansible_deploy_retry] no or unknown Ansible failures, no retry, error. More layers' => sub {
     # Like previous test but only mock testapi
     my $qesap = Test::MockModule->new('sles4sap::qesap::qesapdeployment', no_auto => 1);
     my $qesap_execute_calls = 0;
@@ -1255,14 +1255,14 @@ subtest '[qesap_terrafom_ansible_deploy_retry] no or unknown Ansible failures, n
     $qesap->redefine(qesap_execute => sub { $qesap_execute_calls++; return; });
     $qesap->redefine(record_info => sub { note(join(' ', 'RECORD_INFO -->', @_)); });
 
-    my $ret = qesap_terrafom_ansible_deploy_retry(error_log => 'CORAL', provider => 'NEMO');
+    my $ret = qesap_terraform_ansible_deploy_retry(error_log => 'CORAL', provider => 'NEMO');
 
     note("\n  C-->  " . join("\n  C-->  ", @calls));
-    ok $ret eq 1, "Return of qesap_terrafom_ansible_deploy_retry '$ret' is expected 1";
+    ok $ret eq 1, "Return of qesap_terraform_ansible_deploy_retry '$ret' is expected 1";
     ok $qesap_execute_calls eq 0, "qesap_execute() never called (qesap_execute_calls: $qesap_execute_calls expected 0)";
 };
 
-subtest '[qesap_terrafom_ansible_deploy_retry] generic Ansible failures, no retry' => sub {
+subtest '[qesap_terraform_ansible_deploy_retry] generic Ansible failures, no retry' => sub {
     my $qesap = Test::MockModule->new('sles4sap::qesap::qesapdeployment', no_auto => 1);
     my $qesap_execute_calls = 0;
 
@@ -1271,13 +1271,13 @@ subtest '[qesap_terrafom_ansible_deploy_retry] generic Ansible failures, no retr
     $qesap->redefine(qesap_execute => sub { $qesap_execute_calls++; return; });
     $qesap->redefine(record_info => sub { note(join(' ', 'RECORD_INFO -->', @_)); });
 
-    my $ret = qesap_terrafom_ansible_deploy_retry(error_log => 'CORAL', provider => 'NEMO');
+    my $ret = qesap_terraform_ansible_deploy_retry(error_log => 'CORAL', provider => 'NEMO');
 
-    ok $ret == 1, "Return of qesap_terrafom_ansible_deploy_retry '$ret' is expected 1";
+    ok $ret == 1, "Return of qesap_terraform_ansible_deploy_retry '$ret' is expected 1";
     ok $qesap_execute_calls eq 0, "qesap_execute() never called (qesap_execute_calls: $qesap_execute_calls expected 0)";
 };
 
-subtest '[qesap_terrafom_ansible_deploy_retry] no sudo password Ansible failures' => sub {
+subtest '[qesap_terraform_ansible_deploy_retry] no sudo password Ansible failures' => sub {
     my $qesap = Test::MockModule->new('sles4sap::qesap::qesapdeployment', no_auto => 1);
     my $qesap_execute_calls = 0;
 
@@ -1291,13 +1291,13 @@ subtest '[qesap_terrafom_ansible_deploy_retry] no sudo password Ansible failures
     });
     $qesap->redefine(record_info => sub { note(join(' ', 'RECORD_INFO -->', @_)); });
 
-    my $ret = qesap_terrafom_ansible_deploy_retry(error_log => 'CORAL', provider => 'NEMO');
+    my $ret = qesap_terraform_ansible_deploy_retry(error_log => 'CORAL', provider => 'NEMO');
 
-    ok $ret == 0, "Return of qesap_terrafom_ansible_deploy_retry '$ret' is expected 0";
+    ok $ret == 0, "Return of qesap_terraform_ansible_deploy_retry '$ret' is expected 0";
     ok $qesap_execute_calls eq 1, "qesap_execute() called once (qesap_execute_calls: $qesap_execute_calls expected 1)";
 };
 
-subtest '[qesap_terrafom_ansible_deploy_retry] reboot timeout Ansible failures' => sub {
+subtest '[qesap_terraform_ansible_deploy_retry] reboot timeout Ansible failures' => sub {
     my $qesap = Test::MockModule->new('sles4sap::qesap::qesapdeployment', no_auto => 1);
     my $qesap_execute_calls = 0;
 
@@ -1311,32 +1311,11 @@ subtest '[qesap_terrafom_ansible_deploy_retry] reboot timeout Ansible failures' 
     });
     $qesap->redefine(record_info => sub { note(join(' ', 'RECORD_INFO -->', @_)); });
 
-    my $ret = qesap_terrafom_ansible_deploy_retry(error_log => 'CORAL', provider => 'NEMO');
+    my $ret = qesap_terraform_ansible_deploy_retry(error_log => 'CORAL', provider => 'NEMO');
 
-    ok $ret == 0, "Return of qesap_terrafom_ansible_deploy_retry '$ret' is expected 0";
+    ok $ret == 0, "Return of qesap_terraform_ansible_deploy_retry '$ret' is expected 0";
     # 3 = "terraform -d" + "terraform" + "ansible"
     ok $qesap_execute_calls eq 3, "qesap_execute() never called (qesap_execute_calls: $qesap_execute_calls expected 3)";
-};
-
-subtest '[qesap_calculate_address_range]' => sub {
-    my %result_1 = qesap_calculate_address_range(slot => 1);
-    my %result_2 = qesap_calculate_address_range(slot => 2);
-    my %result_64 = qesap_calculate_address_range(slot => 64);
-    my %result_65 = qesap_calculate_address_range(slot => 65);
-    my %result_8192 = qesap_calculate_address_range(slot => 8192);
-
-    is($result_1{main_address_range}, "10.0.0.0/21", 'result_1 main_address_range is correct');
-    is($result_1{subnet_address_range}, "10.0.0.0/24", 'result_1 subnet_address_range is correct');
-    is($result_2{main_address_range}, "10.0.8.0/21", 'result_2 main_address_range is correct');
-    is($result_2{subnet_address_range}, "10.0.8.0/24", 'result_2 subnet_address_range is correct');
-    is($result_64{main_address_range}, "10.1.248.0/21", 'result_64 main_address_range is correct');
-    is($result_64{subnet_address_range}, "10.1.248.0/24", 'result_64 subnet_address_range is correct');
-    is($result_65{main_address_range}, "10.2.0.0/21", 'result_65 main_address_range is correct');
-    is($result_65{subnet_address_range}, "10.2.0.0/24", 'result_65 subnet_address_range is correct');
-    is($result_8192{main_address_range}, "10.255.248.0/21", 'result_8192 main_address_range is correct');
-    is($result_8192{subnet_address_range}, "10.255.248.0/24", 'result_8192 subnet_address_range is correct');
-    dies_ok { qesap_calculate_address_range(slot => 0); } "Expected die for slot < 1";
-    dies_ok { qesap_calculate_address_range(slot => 8193); } "Expected die for slot > 8192";
 };
 
 done_testing;

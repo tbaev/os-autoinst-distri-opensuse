@@ -7,12 +7,10 @@
 # Maintainer: Fabian Vogt <fvogt@suse.de>
 
 use base "consoletest";
-use strict;
-use warnings;
 use testapi;
 use version_utils qw(is_microos is_sle_micro is_jeos is_leap_micro);
 use Utils::Backends 'is_pvm';
-use Utils::Architectures qw(is_aarch64);
+use Utils::Architectures qw(is_aarch64 is_ppc64le);
 
 sub run {
     select_console 'root-console';
@@ -37,10 +35,12 @@ sub run {
     # 0 sectors is default and expected value in most of the images
     my $left_sectors = 0;
     if ((is_sle_micro("6.2+") || is_leap_micro("6.2+")) && is_aarch64 && !(get_var('FLAVOR', '') =~ /qcow/i) && !check_var('FROM_VERSION', '6.1')) {
+        $left_sectors = 6144;
+    } elsif ((is_sle_micro("=6.1") || is_leap_micro("=6.1") || check_var('FROM_VERSION', '6.1')) && is_aarch64 && (get_var('FLAVOR', '') =~ /selfinstall/i)) {
         $left_sectors = 4062;
     } elsif ((is_sle_micro("5.4+") || is_leap_micro("5.4+")) && is_aarch64 && get_var('FLAVOR', '') !~ m/qcow|SelfInstall/) {
         $left_sectors = 2048;
-    } elsif (is_sle_micro("6.0+") && get_required_var('FLAVOR') =~ /ppc-4096/) {
+    } elsif ((is_sle_micro("6.0+") && get_required_var('FLAVOR') =~ /ppc-4096/) || is_jeos && is_ppc64le) {
         $left_sectors = 1792;
     }
 

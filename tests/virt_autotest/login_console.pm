@@ -8,8 +8,6 @@
 
 package login_console;
 use base 'y2_installbase';
-use strict;
-use warnings;
 use File::Basename;
 use testapi;
 use Utils::Architectures;
@@ -272,9 +270,11 @@ sub run {
     $self->login_to_console;
 
     config_ssh_client if get_var('VIRT_AUTOTEST') and !is_agama and !get_var('AUTOYAST') and !is_s390x;
-    # Provide a screenshot to check if the kernel parameters are correct before tests begin
-    script_run("cat /proc/cmdline") if !is_s390x;
-    save_screenshot;
+    # To check if the environment are correct before tests begin
+    unless (is_s390x) {
+        record_info('Kernel parameters', script_output('cat /proc/cmdline'));
+        record_info('NIC', script_output('ip a'));
+    }
 }
 
 sub post_fail_hook {

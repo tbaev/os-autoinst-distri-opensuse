@@ -7,9 +7,7 @@
 # Summary: Test haproxy resource agent
 # Maintainer: QE-SAP <qe-sap@suse.de>
 
-use base 'opensusebasetest';
-use strict;
-use warnings;
+use base 'haclusterbasetest';
 use testapi;
 use lockapi;
 use utils qw(zypper_call systemctl);

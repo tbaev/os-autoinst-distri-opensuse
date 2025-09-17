@@ -40,16 +40,15 @@ sub is_regproxy_required {
 
 sub load_config_tests {
     loadtest 'transactional/tdup' if get_var('TDUP');
-    loadtest 'transactional/host_config' unless is_dvd;
     loadtest 'rt/rt_is_realtime' if is_rt;
     loadtest 'transactional/enable_selinux' if (get_var('ENABLE_SELINUX') && is_image);
     loadtest 'console/suseconnect_scc' if (get_var('SCC_REGISTER') && !is_dvd);
     loadtest 'transactional/install_updates' if (is_sle_micro && is_released);
-    loadtest 'transactional/install_k3s' if (is_sle_micro('6.0+') && (is_x86_64 || is_aarch64));
+    loadtest 'containers/k3s_helm_install' if (get_var('CONTAINER_UPDATE_HOST') && is_sle_micro('6.0+') && (is_x86_64 || is_aarch64));
+    loadtest 'containers/bci_prepare' if (get_var('CONTAINER_UPDATE_HOST') && get_var('BCI_PREPARE'));
 }
 
 sub load_boot_from_disk_tests {
-    return if is_ppc64le && get_var('MACHINE') !~ /ppc64le-emu/i && !(is_sle_micro('=5.5') && check_var('FLAVOR', 'Container-Image-Updates'));
     # add additional image handling module for svirt workers
     if (is_s390x()) {
         loadtest 'installation/bootloader_start';
@@ -79,6 +78,7 @@ sub load_boot_from_disk_tests {
     }
 
     loadtest 'installation/system_workarounds' if (is_aarch64 && is_microos);
+    loadtest 'transactional/host_config';
     replace_opensuse_repos_tests if is_repo_replacement_required;
 }
 
@@ -159,6 +159,7 @@ sub load_selfinstall_boot_tests {
     if (check_var('FIRST_BOOT_CONFIG', 'wizard')) {
         loadtest 'jeos/firstrun';
     }
+    loadtest 'transactional/host_config';
     replace_opensuse_repos_tests if is_repo_replacement_required;
 }
 
@@ -190,7 +191,8 @@ sub load_remote_controller_tests {
     loadtest 'installation/user_settings_root';
     loadtest 'installation/resolve_dependency_issues';
     loadtest 'installation/installation_overview';
-    loadtest 'installation/disable_grub_timeout';
+    loadtest 'installation/disable_grub_timeout' if is_bootloader_grub2;
+    loadtest 'installation/configure_bls' if is_bootloader_sdboot || is_bootloader_grub2_bls;
     loadtest 'installation/start_install';
     loadtest 'installation/await_install';
     loadtest 'installation/reboot_after_installation';
@@ -248,7 +250,7 @@ sub load_qemu_tests {
 }
 
 sub load_fips_tests {
-    loadtest 'transactional/enable_fips' if get_var('BOOT_HDD_IMAGE');
+    loadtest 'fips/fips_setup' if get_var('BOOT_HDD_IMAGE');
     loadtest 'fips/libica' if is_s390x && is_sle_micro('5.4+');
     loadtest 'fips/openssl/openssl_fips_alglist';
     loadtest 'fips/openssl/openssl_fips_cipher';
@@ -315,7 +317,7 @@ sub load_slem_on_pc_tests {
         loadtest("publiccloud/registration", run_args => $args);
         # 2 next modules of pubcloud needed for sle-micro incidents/repos verification
         if (get_var('PUBLIC_CLOUD_QAM', 0)) {
-            loadtest("publiccloud/transfer_repos", run_args => $args);
+            loadtest("publiccloud/transfer_repos", run_args => $args) unless (check_var('PUBLIC_CLOUD_SKIP_MU', 1));
             loadtest("publiccloud/patch_and_reboot", run_args => $args);
         }
         if (get_var('PUBLIC_CLOUD_LTP', 0)) {
@@ -348,7 +350,6 @@ sub load_slem_on_pc_tests {
 sub load_xfstests_tests {
     if (check_var('XFSTESTS', 'installation')) {
         load_boot_from_disk_tests;
-        loadtest 'transactional/host_config';
         loadtest 'console/suseconnect_scc';
         loadtest 'xfstests/install';
         unless (check_var('NO_KDUMP', '1')) {

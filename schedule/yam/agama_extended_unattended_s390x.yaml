@@ -10,3 +10,7 @@ schedule:
   - installation/first_boot
   - yam/validate/validate_packages
   - yam/validate/validate_post_partitioning
+  - yam/validate/validate_deployed_files
+  - yam/validate/validate_systemd_timers
+  - console/validate_repos
+  - yam/validate/validate_extra_kernel_params

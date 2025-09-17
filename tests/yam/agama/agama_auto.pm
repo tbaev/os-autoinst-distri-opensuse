@@ -6,12 +6,10 @@
 # Maintainer: QE YaST and Migration (QE Yam) <qe-yam at suse de>
 
 use base Yam::Agama::agama_base;
-use strict;
-use warnings;
 
 use testapi;
 use Utils::Architectures qw(is_s390x is_ppc64le);
-use Utils::Backends qw(is_svirt is_hyperv);
+use Utils::Backends qw(is_pvm is_svirt is_hyperv);
 use power_action_utils 'power_action';
 use version_utils qw(is_vmware is_leap);
 
@@ -22,7 +20,7 @@ sub run {
 
     $self->upload_agama_logs() unless is_hyperv();
 
-    (is_s390x() || is_ppc64le() || is_vmware()) ?
+    (is_s390x() || (is_ppc64le() && check_var("DESKTOP", "textmode")) || is_pvm() || is_vmware()) ?
       # reboot via console
       power_action('reboot', keepconsole => 1, first_reboot => 1) :
       # graphical reboot

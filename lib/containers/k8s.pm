@@ -52,7 +52,7 @@ sub check_k3s {
 }
 
 sub ensure_k3s_start {
-    systemctl('start k3s');
+    systemctl('start k3s', timeout => 180);
     systemctl('is-active k3s');
 }
 
@@ -114,7 +114,8 @@ sub install_k3s {
             zypper_call('in k3s-selinux');
             record_soft_failure("gh#k3s-io/k3s#10876 - Support selinux on Tumbleweed");
         }
-        script_retry("curl -sfL https://get.k3s.io  -o install_k3s.sh", timeout => 180, delay => 60, retry => 3);
+        my $curl_opts = "-sfL --retry 3 --retry-delay 60 --retry-max-time 180";
+        assert_script_run("curl $curl_opts https://get.k3s.io -o install_k3s.sh");
         assert_script_run("sh install_k3s.sh $disables", timeout => 300);
         script_run("rm -f install_k3s.sh");
         zypper_call('in apparmor-parser') if is_sle('<15-SP4', get_var('HOST_VERSION', get_required_var('VERSION')));
@@ -155,10 +156,7 @@ Installs kubectl from the respositories
 =cut
 
 sub install_kubectl {
-    if (script_run("which kubectl") == 0) {
-        record_info('kubectl preinstalled', script_output('kubectl version --client'));
-        return;
-    }
+    return if (script_run("which kubectl") == 0);
 
     # kubectl is in the container module
     add_suseconnect_product(get_addon_fullname('contm')) if (is_sle("<16"));
@@ -169,11 +167,22 @@ sub install_kubectl {
 }
 
 =head2 install_helm
-Installs helm from our repositories
+Installs helm from our upstream or repositories
 =cut
 
 sub install_helm {
-    zypper_call("in helm");
+    return if (script_run("which helm") == 0);
+
+    if (get_var('HELM_INSTALL_UPSTREAM')) {
+        assert_script_run("curl -fsSL -o get_helm.sh https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3");
+        assert_script_run("chmod 700 get_helm.sh");
+        assert_script_run("./get_helm.sh");
+    } elsif (is_transactional) {
+        trup_call("pkg install helm");
+        check_reboot_changes;
+    } else {
+        zypper_call("in helm");
+    }
     record_info('helm', script_output("helm version"));
 }
 

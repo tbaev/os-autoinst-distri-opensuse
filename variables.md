@@ -34,9 +34,7 @@ BCI_TEST_ENVS | string | | The list of environments to be tested, e.g. `base,ini
 BCI_TESTS_REPO | string | https://github.com/SUSE/BCI-tests.git | If set, use this instead of the standart BCI-Test repo (see default). Uses the same syntax as CASE_DIR, so to use branch `branch123` on that repo use e.g. https://github.com/SUSE/BCI-tests#branch123
 BCI_TIMEOUT | string | | Timeout given to the command to test each environment. Used by `bci_test.pm`.
 BCI_TARGET | string | ibs-cr | Container project to be tested. `ibs-cr` is the CR project, `ibs` is the released images project
-BCI_SKIP | boolean | false | Switch to disable BCI test runs. Necessary for fine-granular test disablement
 BCI_PREPARE | boolean | false | Launch the bci_prepare step again. Useful to re-initialize the BCI-Test repo when using a different BCI_TESTS_REPO
-BCI_VIRTUALENV | boolean | false | Use a virtualenv for pip dependencies in BCI tests
 BCI_OS_VERSION | string | | Set the environment variable OS_VERSION to this value, if present
 BOOTLOADER | string | grub2 | Which bootloader is used by the image or will be selected during installation, e.g. `grub2`, `grub2-bls`, `systemd-boot`
 BTRFS | boolean | false | Indicates btrfs filesystem. Deprecated, use FILESYSTEM instead.
@@ -101,6 +99,8 @@ HPC_WAREWULF_CONTAINER | string | | Set the container meant for warewulf test su
 HPC_WAREWULF_CONTAINER_NAME | string | The OS name which is expected to run from HPC_WAREWULF_CONTAINER.
 HPC_WAREWULF_CONTAINER_USERNAME | string | Defining username enables authentication for containers, needs valid HPC subscription on SCC for containers from registry.suse.com. If you want use default HPC subscription, just set same value as in SCC_EMAIL
 _SECRET_HPC_WAREWULF_CONTAINER_PASSWORD | string | Password for container, needs valid HPC subscription on SCC for containers from registry.suse.com. If not specified it will use code from SCC_REGCODE_HPC
+INSTALL_HELM | boolean | | If set, install HELM
+INSTALL_K3S | boolean | | If set, install K3S
 INSTALL_KEYBOARD_LAYOUT | string | | Specify one of the supported keyboard layout to switch to during installation or to be used in autoyast scenarios e.g.: cz, fr
 INSTALL_SOURCE | string | | Specify network protocol to be used as installation source e.g. MIRROR_HTTP
 INSTALLATION_VALIDATION | string | | Comma separated list of modules to be used for installed system validation, should be used in combination with INSTALLONLY, to schedule only relevant test modules.
@@ -366,18 +366,19 @@ PUBLIC_CLOUD_IMAGE_PROJECT | string | "" | Google Compute Engine image project
 PUBLIC_CLOUD_IMAGE_URI | string | "" | The URI of the image to be used. Use 'auto' if you want the URI to be calculated.
 PUBLIC_CLOUD_IMG_PROOF_EXCLUDE | string | "" | Tests to be excluded by img-proof.
 PUBLIC_CLOUD_IMG_PROOF_TESTS | string | "test-sles" | Tests run by img-proof.
-PUBLIC_CLOUD_INFRA | boolean | false | Would trigger special flow in [check_registercloudguest.pm](tests/publiccloud/check_registercloudguest.pm) needed for run test against special test infra (DO NOT use the variable if you don't know what is about)
-PUBLIC_CLOUD_INFRA_RMT_V4 | string | "" | Defines IPv4 registration server in test infra. Must be used together with PUBLIC_CLOUD_INFRA. (DO NOT use the variable if you don't know what is about)
-PUBLIC_CLOUD_INFRA_RMT_V6 | string | "" | Defines IPv6 registration server in test infra. Must be used together with PUBLIC_CLOUD_INFRA. (DO NOT use the variable if you don't know what is about)
 PUBLIC_CLOUD_INSTANCE_IP | string | "" | If defined, no instance will be created and this IP will be used to connect to
 PUBLIC_CLOUD_INSTANCE_TYPE | string | "" | Specify the instance type. Which instance types exists depends on the CSP. (default-azure: Standard_A2, default-ec2: t3a.large )
 PUBLIC_CLOUD_K8S_CLUSTER | string | "" | Name for the kubernetes cluster.
 PUBLIC_CLOUD_KEEP_IMG | boolean | false | If set, the uploaded image will be tagged with `pcw_ignore=1`
 PUBLIC_CLOUD_LTP | boolean | false | If set, the run_ltp test module is added to the job.
+PUBLIC_CLOUD_LTP_GIT_FULL_BUILD | boolean | false | If set, ltp is built from github source rather than ltp repo installation
+PUBLIC_CLOUD_LTP_GIT_BUILD | boolean | false | If set, ltp is built partially from github source on top of ltp repo installation
+PUBLIC_CLOUD_LTP_BUILD_MODULES | boolean | false | If set, ltp is built partially from github source on top of ltp repo installation through modules-install
 PUBLIC_CLOUD_MAX_INSTANCES | integer | 1 | Allows the test to call "create_instance" subroutine within lib/publiccloud/provider.md a limited amount of times. If set to 0 or undef, it allows an unlimited amount of calls.
 PUBLIC_CLOUD_NAMESPACE | string | "" | The Public Cloud Namespace name that will be used to compose the full credentials URL together with `PUBLIC_CLOUD_CREDENTIALS_URL`.
 PUBLIC_CLOUD_NEW_INSTANCE_TYPE | string | "t3a.large" | Specify the new instance type to check bsc#1205002 in EC2
 PUBLIC_CLOUD_NO_TEARDOWN | boolean | false | Do not tear the instance down.
+PUBLIC_CLOUD_FUNCTIONAL | boolean | false | Schedule the functional test suite.
 PUBLIC_CLOUD_NVIDIA | boolean | 0 | If enabled, nvidia module would be scheduled. This variable should be enabled only sle15SP4 and above.
 PUBLIC_CLOUD_PERF_COLLECT | boolean | 1 | To enable `boottime` measures collection, at end of `create_instance` routine.
 PUBLIC_CLOUD_PERF_DB | string | "perf_2" | defines the bucket in which the performance metrics are stored on PUBLIC_CLOUD_PERF_DB_URI
@@ -398,7 +399,7 @@ PUBLIC_CLOUD_RESOURCE_GROUP | string | "qesaposd" | Allows to specify resource g
 PUBLIC_CLOUD_RESOURCE_NAME | string | "openqa-vm" | The name we use when creating our VM.
 PUBLIC_CLOUD_ROOT_DISK_SIZE | int |  | Set size of system disk in GiB for public cloud instance. Default size is 30 for Azure and 20 for GCE and EC2 
 PUBLIC_CLOUD_SCC_ENDPOINT | string | "registercloudguest" | Name of binary which will be used to register image . Except default value only possible value is "SUSEConnect" anything else will lead to test failure!
-PUBLIC_CLOUD_SKIP_MU | boolean | false | Debug variable used to run test without maintenance updates repository being applied.
+PUBLIC_CLOUD_SKIP_MU | boolean | false | Run tests without downloading/applying maintenance updates.
 PUBLIC_CLOUD_SLES4SAP | boolean | false | If set, sles4sap test module is added to the job.
 PUBLIC_CLOUD_STORAGE_ACCOUNT | string | "" | Storage account used e.g. for custom disk and container images
 PUBLIC_CLOUD_TERRAFORM_DIR | string | "/root/terraform" | Override default root path to terraform directory
@@ -411,6 +412,9 @@ PUBLIC_CLOUD_TTL_OFFSET | integer | 300 | This number + MAX_JOB_TIME equals the 
 PUBLIC_CLOUD_UPLOAD_IMG | boolean | false | If set, `publiccloud/upload_image` test module is added to the job.
 PUBLIC_CLOUD_USER | string | "" | The public cloud instance system user.
 PUBLIC_CLOUD_XEN | boolean | false | Indicates if this is a Xen test run.
+SCC_REGISTRY | string | "" | Registry which requires SCC login
+SCC_PROXY_USERNAME | string | "" | Credentials username for registry which requires SCC login
+SCC_PROXY_PASSWORD | string | "" | Credentials password for registry which requires SCC login
 TERRAFORM_VERSION | string | "1.5.7" | Version of terraform to include into PC Tools image
 TERRAFORM_TIMEOUT | integer | 1800 | Set timeout for terraform actions
 TERRAFORM_VM_CREATE_TIMEOUT | string | "20m" | Terraform timeout for creating the virtual machine resource.
@@ -481,7 +485,7 @@ Variable        | Type      | Default value | Details
 XFSTEST_MKFS_OPTION | string | | BTRFS only, value=<options-in-mkfs>. Set the options in mkfs.btrfs. And also set it in xfstests runtime option BTRFS_MKFS_OPTIONS.
 XFSTESTS_LOGDEV | boolean | 0 | XFS only, value=0/1. enable log device in testing xfs
 XFSTESTS_XFS_REPAIR | boolean | 0 | XFS only, value=0/1. enable TEST_XFS_REPAIR_REBUILD=1 in xfstests log file local.config
-XFSTESTS_NFS_VERSION | string | 4.1 | NFS only, version of test target NFS
+XFSTESTS_NFS_VERSION | string | 4.1 | NFS only, version of test target NFS. What's special is that set it with TLS-<nfsversion> will enable NFS over kTLS. And set it with krb5[pi]-<nfsversion> will enable NFS with kerberos5 mount option during tests
 XFSTESTS_NFS_SERVER | boolean | | NFS multimation test only, mandatory. To tag this test job for NFS server in a NFS multimachine test. NFS test in a multimachine test either a client or a server.
 NFS_GRACE_TIME | integer | 15 | NFS only, set the nlm_grace_period in /etc/modprobe.d/lockd.conf used in NFS test.
 PARALLEL_WITH | string | | NFS multimation test only, value=<set-the-parent-job-name>. To set the NFS server job name in NFS client job in a NFS multimachine test. e.g. xfstests_nfs4.1-server
@@ -493,7 +497,6 @@ Debug setting: advance setting to debugging issues, may cause test fail
 Variable        | Type      | Default value | Details
 ---             | ---       | ---           | ---
 XFSTESTS_DEBUG | string | | set it to enable debug tools under /proc/sys/kernel/. The value of XFSTESTS_DEBUG could be one or more parameters in the following: [hardlockup_panic hung_task_panic panic_on_io_nmi panic_on_oops panic_on_rcu_stall...] Collect more than 1 value at a time could use <space> to split it. e.g. XFSTESTS_DEBUG='hardlockup_panic panic_on_oops'. BTW, the softlockup_all_cpu_backtrace and softlockup_panic are default enabled
-BTRFS_DUMP | boolean | 0 | set BTRFS_DUMP=<device name> to collect btrfs dump image. It uses btrfs-image create/restore an image of the filesystem. e.g BTRFS_DUMP=/dev/loop0
 RAW_DUMP | boolean | 0 | set RAW_DUMP=1 to collect raw dump. It uses dd to collect start 512k info to dump the superblock of SCRATCH_DEV or SCRATCH_DEV_POOL
 INJECT_INFO | string | | Add 1 or several lines of code into xfstests level test script(not in openqa script). To add some debug or log collect info. This code will be used by the test wrapper, it will influence all subtests in this test, so better to only use it in debug and set XFSTESTS_RANGES to the subtest you want to. It contains 2 parameters split by space, the format: '<line-number><space><code>'. Beware the output may not match after injection, and better not to add space in the <code> part to avoid mistakes. e.g. INJECT_INFO='49 free' (to check memory in test code line 49)
 INJECT_INFO='<line-number> xtrace | string | | A special inject code is to set xtrace to debug shell script. Set INJECT_INFO='<line-number> xtrace' to openqa configure to enable it and start to record command start after injecting line <line-number>, and redirect debug info to /opt/log/xxx_xtrace.log
@@ -514,3 +517,11 @@ AGAMA | boolean | 0 | Agama installation support
 AGAMA_LIVE_ISO_URL | string | | The url of agama live iso to pass as kernel's command-line parameter. Example of usage "root=live:http://agama.iso"
 INST_AUTO | string | | The auto-installation is started by passing `inst.auto=<url>` on the kernel's command line
 INST_INSTALL_URL | string | | This will support using 'inst.install_url' boot parameter for overriding the default installation repositories. You can use multiple URLs separated by comma: inst.install_url=https://example.com/1,https://example.com/2
+
+### Remote desktop specific variables
+Following variables are relevant for remote desktop testing
+But "x11_helm_server" and "x11_helm_client" are used to test deploy X11, pulseaudio, firefox kiosk with Kubernetes Using Helm
+
+Variable        | Type      | Default value | Details
+---             | ---       | ---           | ---
+REMOTE_DESKTOP_TYPE | string | | This variable mainly used for remote desktop testing or other testing that uses multi machines.

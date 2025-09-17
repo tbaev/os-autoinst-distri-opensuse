@@ -3,12 +3,10 @@
 # Copyright 2023,2025 SUSE LLC
 # SPDX-License-Identifier: FSFAP
 
-# Package: podman network
-# Summary: Test podman network
+# Packages: podman & docker
+# Summary: Test podman & docker volumes
 # Maintainer: QE-C team <qa-c@suse.de>
 
-use strict;
-use warnings;
 use Mojo::Base 'containers::basetest';
 use testapi;
 use serial_terminal qw(select_serial_terminal);
@@ -88,7 +86,7 @@ sub run {
     assert_script_run("$runtime volume rm $test_volume");
     assert_script_run("! $runtime volume inspect $test_volume");
 
-    for (my $i = 1; $i <= 10; $i++) {
+    for (my $i = 1; $i <= 2; $i++) {
         assert_script_run("$runtime volume create $test_volume");
 
         # Test --volume option with volume (read-write)

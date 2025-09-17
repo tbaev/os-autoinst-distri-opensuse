@@ -9,9 +9,7 @@
 use base 'publiccloud::basetest';
 use serial_terminal 'select_serial_terminal';
 use registration;
-use warnings;
 use testapi;
-use strict;
 use utils;
 use version_utils;
 use publiccloud::utils;
@@ -26,6 +24,12 @@ sub run {
     # Debug
     $instance->ssh_script_run('systemctl --no-pager list-units');
 
+    # Check if there are any failed services
+    my $failed_services = $instance->ssh_script_output('systemctl --failed');
+    unless ($failed_services =~ /0 loaded units listed/) {
+        record_info("Failing services!", $failed_services);
+        die("There are some failed services!");
+    }
     # waagent, cloud-init, google agents not available in Micro
     unless (is_sle_micro) {
         if (is_azure) {

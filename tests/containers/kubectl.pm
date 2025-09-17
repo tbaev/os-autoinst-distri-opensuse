@@ -8,8 +8,6 @@
 # Maintainer: QE-C team <qa-c@suse.de>
 
 use base 'consoletest';
-use strict;
-use warnings;
 use testapi;
 use serial_terminal 'select_serial_terminal';
 use utils;
@@ -28,13 +26,7 @@ sub run {
     my $version = script_output("kubectl version --client --output=json");
     record_info("kubectl", $version);
     if ($version !~ /v\Q$k8s_version\E/) {
-        # NOTE: Remove when bsc is resolved
-        if ($k8s_version eq "1.23" || $k8s_version eq "1.26") {
-            record_soft_failure('bsc#1245087 - Installation of kubernetes-client 1.23 & 1.26 installs next available version instead');
-            return;
-        } else {
-            die "Invalid version";
-        }
+        die "Invalid kubectl version";
     }
 
     # Prepare the webserver testdata

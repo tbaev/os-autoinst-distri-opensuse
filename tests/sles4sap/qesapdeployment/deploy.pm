@@ -4,11 +4,10 @@
 # Summary: Deployment steps for qe-sap-deployment
 # Maintainer: QE-SAP <qe-sap@suse.de>, Michele Pagot <michele.pagot@suse.com>
 
-use strict;
-use warnings;
 use Mojo::Base 'publiccloud::basetest';
 use testapi;
 use sles4sap::qesap::qesapdeployment;
+use sles4sap::qesap::azure;
 
 sub run {
     my ($self) = @_;
@@ -61,7 +60,7 @@ sub run {
     }
     if ($ret[0]) {
         record_info("Retry to deploy terraform + ansible");
-        if (qesap_terrafom_ansible_deploy_retry(error_log => $ret[1], provider => $provider)) {
+        if (qesap_terraform_ansible_deploy_retry(error_log => $ret[1], provider => $provider)) {
             die "Retry failed, original ansible return: $ret[0]";
         }
     }

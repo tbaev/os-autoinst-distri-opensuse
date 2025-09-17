@@ -1,4 +1,4 @@
-# Copyright 2015-2022 SUSE LLC
+# Copyright 2015-2025 SUSE LLC
 # SPDX-License-Identifier: GPL-2.0-or-later
 
 package utils;
@@ -1995,7 +1995,8 @@ sub svirt_host_basedir {
 
  script_retry($cmd, [expect => $expect], [retry => $retry], [delay => $delay], [timeout => $timeout], [die => $die]);
 
-Repeat command until expected result or timeout.
+Repeat a command until the expected result is found or the overall timeout is
+hit.
 
 C<$expect> refers to the expected command exit code and defaults to C<0>.
 
@@ -2005,7 +2006,7 @@ C<$delay> is the time between retries and defaults to C<30>.
 
 C<$fail_message> is an optional error message in case of failure. Defaults to "Waiting for Godot".
 
-The command must return within C<$timeout> seconds (default: 25).
+The command must return within C<$timeout> seconds (default: 30).
 
 If the command doesn't return C<$expect> after C<$retry> retries,
 this function will die, if C<$die> is set.
@@ -2025,19 +2026,18 @@ sub script_retry {
     my $option = $args{option} // '';
     my $die = $args{die} // 1;
     my $fail_msg = $args{fail_message} // "Waiting for Godot: $cmd";
-
-    my $ret;
-
-    my $exec = "timeout $option $timeout $cmd";
+    my $negate;
     # Exclamation mark needs to be moved before the timeout command, if present
     if (substr($cmd, 0, 1) eq "!") {
         $cmd = substr($cmd, 1);
         $cmd =~ s/^\s+//;    # left trim spaces after the exclamation mark
-        $exec = "! timeout $option $timeout $cmd";
+        $negate = '!';
     }
+    my $exec = join ' ', grep { defined && length } ($negate, 'timeout -k 5', $option, $timeout, $cmd);
+    my $ret;
     for (1 .. $retry) {
         # timeout for script_run must be larger than for the 'timeout ...' command
-        $ret = script_run($exec, ($timeout + 3));
+        $ret = script_run($exec, ($timeout + 10));
         last if defined($ret) && $ret == $ecode;
 
         die($fail_msg) if $retry == $_ && $die == 1;
@@ -2417,16 +2417,19 @@ This functions checks if ca-certificates-suse is installed and if it is not it a
 sub ensure_ca_certificates_suse_installed {
     return unless is_sle || is_sle_micro;
     if (script_run('rpm -qi ca-certificates-suse') == 1) {
-        my $host_version = get_var("HOST_VERSION") ? 'HOST_VERSION' : 'VERSION';
-        my $distversion = 'SLE_' . get_required_var($host_version) =~ s/-SP/_SP/r;    # 15 -> 15, 15-SP1 -> 15_SP1
-        my $exit = script_run("curl -fkIL http://download.suse.de/ibs/SUSE:/CA/$distversion/SUSE:CA.repo >/dev/null 2>&1");
-        $distversion = 'SLE-Factory' if ($exit != 0);
-        diag "CA folder: $distversion";
-        zypper_call("ar --refresh http://download.suse.de/ibs/SUSE:/CA/$distversion/SUSE:CA.repo");
+        my $version = "openSUSE_Tumbleweed";
+        # Given that our primary need was simply to install certificates, we decided to abandon
+        # the complex logic that determined which package version to select for each run.
+        # Our new approach is to install the TW package universally. Regrettably,
+        # this has presented a challenge with SLE 12 SP5, as the TW package utilizes an unsupported compression method.
+        # For more details, please see https://forums.opensuse.org/t/error-rpm-failed-error-unpacking-of-archive-failed-cpio-bad-magic/142434
+        $version = "SLE_12_SP5" if (is_sle('=12-SP5'));
+        zypper_call("ar --refresh https://download.opensuse.org/repositories/SUSE:/CA/$version/SUSE:CA.repo");
         if (is_sle_micro) {
+            transactional::trup_call("--continue run zypper --gpg-auto-import-keys refresh");
             transactional::trup_call('--continue pkg install ca-certificates-suse');
         } else {
-            zypper_call("in ca-certificates-suse");
+            zypper_call("--gpg-auto-import-keys in ca-certificates-suse");
         }
     }
 }

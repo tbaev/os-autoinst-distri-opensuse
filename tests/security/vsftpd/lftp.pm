@@ -6,8 +6,6 @@
 # Tags: poo#108614, tc#1769978
 
 use base 'opensusebasetest';
-use strict;
-use warnings;
 use testapi;
 use utils;
 use serial_terminal qw(select_serial_terminal);
@@ -61,7 +59,7 @@ sub run {
         queue rmdir test
         bye
     };
-    assert_script_run("echo '$lftp_script_file' > lftp_script_file.txt");
+    script_output("echo '$lftp_script_file' > lftp_script_file.txt");
     # run lftp in batch mode
     assert_script_run("lftp -f lftp_script_file.txt");
 

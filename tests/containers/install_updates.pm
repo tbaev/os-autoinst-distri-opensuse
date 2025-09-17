@@ -7,8 +7,6 @@
 # Maintainer: QE-C team <qa-c@suse.de>
 
 
-use strict;
-use warnings;
 use Mojo::Base qw(consoletest);
 use testapi;
 use utils;
@@ -25,10 +23,6 @@ sub run {
     if ($host_distri =~ /sles|opensuse/) {
         zypper_call("--quiet up", timeout => $update_timeout);
         ensure_ca_certificates_suse_installed() if is_sle();
-        if (script_run('rpm -q tar') && $version =~ '16') {
-            record_soft_failure('bsc#1238784 - tar packet not installed by default');
-            zypper_call('in tar');
-        }
     } elsif ($host_distri eq 'ubuntu') {
         # Sometimes, the host doesn't get an IP automatically via dhcp, we need force it just in case
         assert_script_run("dhclient -v");
