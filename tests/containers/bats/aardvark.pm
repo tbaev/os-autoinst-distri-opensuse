@@ -16,6 +16,8 @@ use version_utils qw(is_sle);
 my $aardvark = "";
 
 sub run_tests {
+    return 0 if check_var("BATS_IGNORE", "all");
+
     my $netavark = script_output "rpm -ql netavark | grep podman/netavark";
 
     my %env = (
@@ -33,9 +35,9 @@ sub run {
     select_serial_terminal;
 
     # Install tests dependencies
-    my @pkgs = qw(aardvark-dns firewalld iproute2 jq netavark podman socat);
+    my @pkgs = qw(aardvark-dns firewalld iproute2 netavark podman socat);
     push @pkgs, is_sle("<16") ? qw(dbus-1) : qw(dbus-1-daemon);
-    $self->bats_setup(@pkgs);
+    $self->setup_pkgs(@pkgs);
 
     $aardvark = script_output "rpm -ql aardvark-dns | grep podman/aardvark-dns";
     record_info("aardvark-dns version", script_output("$aardvark --version"));
@@ -43,7 +45,7 @@ sub run {
 
     # Download aardvark sources
     my $aardvark_version = script_output "$aardvark --version | awk '{ print \$2 }'";
-    patch_sources "aardvark-dns", "v$aardvark_version", "test", bats_patches();
+    patch_sources "aardvark-dns", "v$aardvark_version", "test";
 
     my $errors = run_tests;
     die "ardvark-dns tests failed" if ($errors);

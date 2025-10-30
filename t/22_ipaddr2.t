@@ -885,7 +885,7 @@ subtest '[ipaddr2_scc_register] scc_endpoint' => sub {
     ok((none { /SUSEConnect.*force.*1234567890/ } @calls), 'SUSEConnect register does not have force-new');
 };
 
-subtest '[ipaddr2_cloudinit_logs]' => sub {
+subtest '[ipaddr2_logs_cloudinit]' => sub {
     my $ipaddr2 = Test::MockModule->new('sles4sap::ipaddr2', no_auto => 1);
     $ipaddr2->redefine(ipaddr2_bastion_pubip => sub { return '1.2.3.4'; });
     my @calls;
@@ -896,7 +896,7 @@ subtest '[ipaddr2_cloudinit_logs]' => sub {
             return;
     });
 
-    ipaddr2_cloudinit_logs();
+    ipaddr2_logs_cloudinit();
 
     for my $call_idx (0 .. $#calls) {
         note($calls[$call_idx][0] . " C-->  $calls[$call_idx][1]   $calls[$call_idx][2]");
@@ -1129,6 +1129,7 @@ subtest '[ipaddr2_repos_add_server_to_hosts]' => sub {
     $ipaddr2->redefine(ipaddr2_bastion_pubip => sub { return '1.2.3.4'; });
 
     ipaddr2_repos_add_server_to_hosts(ibsm_ip => 7.6.5.4, incident_repos => 'AAAA,BBBB');
+
     note("\n  -->  " . join("\n  -->  ", @calls));
     ok((any { /ssh.*41.*download.suse.de.*\/etc\/hosts/ } @calls), "Node 1 /etc/hosts");
     ok((any { /ssh.*42.*download.suse.de.*\/etc\/hosts/ } @calls), "Node 2 /etc/hosts");
@@ -1143,7 +1144,7 @@ subtest '[ipaddr2_cleanup]' => sub {
     my $deployment_logs_called = 0;
     $ipaddr2->redefine(ipaddr2_deployment_logs => sub { $deployment_logs_called = 1; });
     my $cloudinit_logs_called = 0;
-    $ipaddr2->redefine(ipaddr2_cloudinit_logs => sub { $cloudinit_logs_called = 1; });
+    $ipaddr2->redefine(ipaddr2_logs_cloudinit => sub { $cloudinit_logs_called = 1; });
     my $infra_destroy_called = 0;
     $ipaddr2->redefine(ipaddr2_infra_destroy => sub { $infra_destroy_called = 1; });
 
@@ -1159,7 +1160,7 @@ subtest '[ipaddr2_cleanup] deployment_logs' => sub {
     my $deployment_logs_called = 0;
     $ipaddr2->redefine(ipaddr2_deployment_logs => sub { $deployment_logs_called = 1; });
     my $cloudinit_logs_called = 0;
-    $ipaddr2->redefine(ipaddr2_cloudinit_logs => sub { $cloudinit_logs_called = 1; });
+    $ipaddr2->redefine(ipaddr2_logs_cloudinit => sub { $cloudinit_logs_called = 1; });
     my $infra_destroy_called = 0;
     $ipaddr2->redefine(ipaddr2_infra_destroy => sub { $infra_destroy_called = 1; });
 
@@ -1175,7 +1176,7 @@ subtest '[ipaddr2_cleanup] ibsm_rg' => sub {
     my $deployment_logs_called = 0;
     $ipaddr2->redefine(ipaddr2_deployment_logs => sub { $deployment_logs_called = 1; });
     my $cloudinit_logs_called = 0;
-    $ipaddr2->redefine(ipaddr2_cloudinit_logs => sub { $cloudinit_logs_called = 1; });
+    $ipaddr2->redefine(ipaddr2_logs_cloudinit => sub { $cloudinit_logs_called = 1; });
     my $infra_destroy_called = 0;
     $ipaddr2->redefine(ipaddr2_infra_destroy => sub { $infra_destroy_called = 1; });
     $ipaddr2->redefine(ipaddr2_azure_resource_group => sub { return 'Fermi'; });
@@ -1204,5 +1205,143 @@ subtest '[ipaddr2_cleanup] ipaddr2_deployment_logs' => sub {
     ok(($called eq 1), "az_vm_diagnostic_log_get called");
 };
 
+subtest '[ipaddr2_logs_collect]' => sub {
+    my $ipaddr2 = Test::MockModule->new('sles4sap::ipaddr2', no_auto => 1);
+    $ipaddr2->redefine(ipaddr2_bastion_pubip => sub { return '1.2.3.4'; });
+    my @ssh_calls;
+    $ipaddr2->redefine(ipaddr2_ssh_internal => sub {
+            my (%args) = @_;
+            push @ssh_calls, "VM$args{id}: $args{cmd}";
+            return;
+    });
+    my @upload_calls;
+    $ipaddr2->redefine(upload_logs => sub {
+            push @upload_calls, $_[0];
+            return;
+    });
+    $ipaddr2->redefine(record_info => sub { note(join(' ', 'RECORD_INFO -->', @_)); });
+    my @calls;
+    $ipaddr2->redefine(script_run => sub { push @calls, $_[0]; return 0; });
+    $ipaddr2->redefine(assert_script_run => sub { push @calls, $_[0]; return; });
+
+    ipaddr2_logs_collect();
+
+    note("\n  SSH CALLS -->  " . join("\n  SSH CALLS -->  ", @ssh_calls));
+    note("\n  UPLOAD CALLS -->  " . join("\n  UPLOAD CALLS -->  ", @upload_calls));
+    note("\n  -->  " . join("\n  -->  ", @calls));
+
+    is(scalar @ssh_calls, 6, "ipaddr2_ssh_internal called 6 times (3 log files * 2 VM)");
+    is(scalar @upload_calls, 10, "upload_logs called 8 times (4 log files * 2 VM + 2 ssh local logs)");
+
+    ok((any { /crm report/ } @ssh_calls), "crm report command called");
+    ok((any { /save_y2logs/ } @ssh_calls), "YaST2 logs collected");
+    ok((any { /supportconfig/ } @ssh_calls), "supportconfig command called");
+
+    ok((any { /cloudregister/ } @upload_calls), "cloudregister log uploaded");
+    ok((any { /crm_report_.*gz/ } @upload_calls), "crm_report.tar.gz uploaded");
+    ok((any { /y2logs/ } @upload_calls), "y2logs uploaded");
+    ok((any { /supportconfig.*/ } @upload_calls), "supportconfig uploaded");
+};
+
+subtest '[ipaddr2_ssh_intrusion_detection]' => sub {
+    my $ipaddr2 = Test::MockModule->new('sles4sap::ipaddr2');
+
+    my @calls;
+    my $fake_log = <<'LOG';
+2025-09-02T11:59:20.291296+0000 vmhana02 sshd[143121]: Connection closed by authenticating user root 1.2.3.4 port 42 [preauth]
+2025-09-02T12:04:21.002220+0000 vmhana02 sshd[160619]: Connection closed by invalid user debian 1.2.3.4 port 42 [preauth]
+2025-09-02T12:04:23.503717+0000 vmhana02 sshd[160801]: Connection closed by invalid user debian 1.2.3.4 port 42 [preauth]
+LOG
+
+    $ipaddr2->redefine(ipaddr2_ssh_internal_output => sub {
+            my (%args) = @_;
+            push @calls, ["VM$args{id}", $args{cmd}, "OUT-->  $fake_log"];
+            return $fake_log;
+    });
+
+    $ipaddr2->redefine(script_output => sub {
+            push @calls, ["BASTION", $_[0], "OUT-->  $fake_log"];
+            return $fake_log;
+    });
+
+    $ipaddr2->redefine(ipaddr2_get_internal_vm_name => sub {
+            my (%args) = @_;
+            return 'UT-VM-' . $args{id}; });
+    #$ipaddr2->mock('ipaddr2_get_internal_vm_private_ip', sub { '192.168.1.1' });
+    $ipaddr2->redefine(record_info => sub { note(join(' ', 'RECORD_INFO -->', @_)); });
+
+    my $ret = ipaddr2_ssh_intrusion_detection(bastion_ip => '1.2.3.4');
+
+    for my $call_idx (0 .. $#calls) {
+        note($calls[$call_idx][0] . " C-->  $calls[$call_idx][1]");
+    }
+    ok(($ret != 0), "Ret:$ret expected to be different from 0");
+};
+
+subtest '[ipaddr2_ssh_intrusion_detection] all authorized connections from openQA' => sub {
+    my $ipaddr2 = Test::MockModule->new('sles4sap::ipaddr2');
+
+    my @calls;
+    my $fake_log = <<'LOG';
+Oct 16 10:14:48 ip2t-vm-bastion sshd[5397]: Connection closed by 1.2.3.4 port 42
+Oct 16 10:16:10 ip2t-vm-bastion sshd[5906]: Connection closed by 1.2.3.4 port 42
+Oct 16 10:17:48 ip2t-vm-bastion sshd[6343]: Connection closed by 1.2.3.4 port 42
+Oct 16 10:18:57 ip2t-vm-bastion sshd[6836]: Connection closed by 1.2.3.4 port 42
+Oct 16 10:20:35 ip2t-vm-bastion sshd[7364]: Connection closed by 1.2.3.4 port 42
+LOG
+
+    $ipaddr2->redefine(ipaddr2_ssh_internal_output => sub {
+            my (%args) = @_;
+            push @calls, ["VM$args{id}", $args{cmd}, "OUT-->  $fake_log"];
+            return $fake_log;
+    });
+
+    $ipaddr2->redefine(script_output => sub {
+            push @calls, ["BASTION", $_[0], "OUT-->  $fake_log"];
+            return $fake_log;
+    });
+
+    $ipaddr2->redefine(ipaddr2_get_internal_vm_name => sub {
+            my (%args) = @_;
+            return 'UT-VM-' . $args{id}; });
+    #$ipaddr2->mock('ipaddr2_get_internal_vm_private_ip', sub { '192.168.1.1' });
+    $ipaddr2->redefine(record_info => sub { note(join(' ', 'RECORD_INFO -->', @_)); });
+
+    my $ret = ipaddr2_ssh_intrusion_detection(bastion_ip => '1.2.3.4');
+
+    for my $call_idx (0 .. $#calls) {
+        note($calls[$call_idx][0] . " C-->  $calls[$call_idx][1]");
+    }
+    ok(($ret == 0), "Ret:$ret expected to be 0");
+};
+
+subtest '[ipaddr2_ssh_intrusion_detection] no lines in the journal' => sub {
+    my $ipaddr2 = Test::MockModule->new('sles4sap::ipaddr2');
+
+    my @calls;
+    $ipaddr2->redefine(ipaddr2_ssh_internal_output => sub {
+            my (%args) = @_;
+            push @calls, ["VM$args{id}", $args{cmd}, "OUT-->  ''"];
+            return "";
+    });
+
+    $ipaddr2->redefine(script_output => sub {
+            push @calls, ["BASTION", $_[0], "OUT-->  ''"];
+            return "";
+    });
+
+    $ipaddr2->redefine(ipaddr2_get_internal_vm_name => sub {
+            my (%args) = @_;
+            return 'UT-VM-' . $args{id}; });
+    #$ipaddr2->mock('ipaddr2_get_internal_vm_private_ip', sub { '192.168.1.1' });
+    $ipaddr2->redefine(record_info => sub { note(join(' ', 'RECORD_INFO -->', @_)); });
+
+    my $ret = ipaddr2_ssh_intrusion_detection(bastion_ip => '1.2.3.4');
+
+    for my $call_idx (0 .. $#calls) {
+        note($calls[$call_idx][0] . " C-->  $calls[$call_idx][1]");
+    }
+    ok(($ret == 0), "Ret:$ret expected to be 0");
+};
 
 done_testing;

@@ -6,7 +6,7 @@
 
 use Mojo::Base 'publiccloud::basetest';
 use publiccloud::azure_client;
-use publiccloud::utils qw(get_ssh_private_key_path);
+use publiccloud::utils qw(get_ssh_private_key_path detect_worker_ip);
 use testapi;
 use serial_terminal 'select_serial_terminal';
 use registration qw(get_addon_fullname scc_version %ADDONS_REGCODE);
@@ -16,6 +16,12 @@ use sles4sap::ibsm;
 
 sub run {
     my ($self) = @_;
+    # Workaround for 'TEAM-10520 - Console redirection timing out sporadically'.
+    # Preselect 'log-console' to login earlier before doing deployment.
+    # This will avoid sporadic issue of 'backend got TERM' when doing select_console('log-console') at the first time after deployment.
+    # After deployment if 'backend got TERM' happened test case will exceed MAX_JOB_TIME and 'post_fail_hook' will not be invoked.
+    record_info('Workaround: TEAM-10520');
+    select_console('log-console');
     select_serial_terminal;
 
     # Init all the PC gears (ssh keys)
@@ -41,7 +47,6 @@ sub run {
         $variables{OS_VER} = get_var('QESAPDEPLOY_CLUSTER_OS_VER');
     }
     elsif ($provider_setting eq 'AZURE') {
-        $variables{STORAGE_ACCOUNT_NAME} = get_required_var('STORAGE_ACCOUNT_NAME');
         $variables{OS_URI} = $provider->get_blob_uri(get_required_var('PUBLIC_CLOUD_IMAGE_LOCATION'));
     }
     else
@@ -49,6 +54,9 @@ sub run {
         $variables{OS_VER} = $provider->get_image_id();
     }
     $variables{OS_OWNER} = get_var('QESAPDEPLOY_CLUSTER_OS_OWNER', 'amazon') if ($provider_setting eq 'EC2');
+
+    my $worker_ip = qesap_create_cidr_from_ip(ip => detect_worker_ip(proceed_on_failure => 1), proceed_on_failure => 1);
+    $variables{WORKER_IP} = $worker_ip || '';
 
     $variables{USE_SAPCONF} = get_var('QESAPDEPLOY_USE_SAPCONF', 'false');
     $variables{USE_SR_ANGI} = get_var('QESAPDEPLOY_USE_SAP_HANA_SR_ANGI', 'false');
@@ -80,7 +88,7 @@ sub run {
     $variables{SCC_LTSS_REGCODE} = get_var('SCC_REGCODE_LTSS', '');
     $variables{SCC_LTSS_MODULE} = get_var('QESAPDEPLOY_SCC_LTSS_MODULE', '');
 
-    $variables{GOOGLE_PROJECT} = get_var('QESAPDEPLOY_GOOGLE_PROJECT', 'ei-sle-qa-sap-8469') if ($provider_setting eq 'GCE');
+    $variables{GOOGLE_PROJECT} = get_required_var('QESAPDEPLOY_GOOGLE_PROJECT') if ($provider_setting eq 'GCE');
     $variables{HANA_INSTANCE_TYPE} = get_var('QESAPDEPLOY_HANA_INSTANCE_TYPE', 'r6i.xlarge') if ($provider_setting eq 'EC2');
 
     $variables{HANA_ACCOUNT} = get_required_var('QESAPDEPLOY_HANA_ACCOUNT');
@@ -111,7 +119,7 @@ sub run {
         }
     }
 
-    $variables{ANSIBLE_ROLES} = qesap_get_ansible_roles_dir();
+    $variables{ANSIBLE_ROLES} = qesap_ansible_get_roles_dir();
     $variables{HANA_INSTALL_MODE} = get_var('QESAPDEPLOY_HANA_INSTALL_MODE', 'standard');
 
     # Default to empty string is intentional:
@@ -127,11 +135,13 @@ sub run {
         $variables{IBSM_VPC_NAME} = get_var('QESAPDEPLOY_IBSM_VPC_NAME', '');
         $variables{IBSM_SUBNET_NAME} = get_var('QESAPDEPLOY_IBSM_SUBNET_NAME', '');
         $variables{IBSM_SUBNET_REGION} = get_var('QESAPDEPLOY_IBSM_SUBNET_REGION', '');
+        $variables{IBSM_NCC_HUB} = get_var('QESAPDEPLOY_IBSM_NCC_HUB', '');
     }
 
     if (($provider_setting eq 'AZURE' && get_var('QESAPDEPLOY_IBSM_VNET') && get_var('QESAPDEPLOY_IBSM_RG')) ||
         ($provider_setting eq 'EC2' && get_var('QESAPDEPLOY_IBSM_PRJ_TAG')) ||
-        ($provider_setting eq 'GCE' && get_var('QESAPDEPLOY_IBSM_VPC_NAME') && get_var('QESAPDEPLOY_IBSM_SUBNET_NAME') && get_var('QESAPDEPLOY_IBSM_SUBNET_REGION'))
+        ($provider_setting eq 'GCE' && get_var('QESAPDEPLOY_IBSM_VPC_NAME') && get_var('QESAPDEPLOY_IBSM_SUBNET_NAME') && get_var('QESAPDEPLOY_IBSM_SUBNET_REGION')) ||
+        ($provider_setting eq 'GCE' && get_var('QESAPDEPLOY_IBSM_NCC_HUB'))
     ) {
         $variables{IBSM_IP} = get_required_var('QESAPDEPLOY_IBSM_IP');
         $variables{DOWNLOAD_HOSTNAME} = get_required_var('QESAPDEPLOY_DOWNLOAD_HOSTNAME');

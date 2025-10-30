@@ -10,6 +10,9 @@ This directory contains [BATS framework](https://github.com/bats-core/bats-core)
 | [podman](podman.pm) | https://github.com/containers/podman/tree/main/test/system |
 | [runc](runc.pm) | https://github.com/opencontainers/runc/tree/main/tests/integration |
 | [skopeo](skopeo.pm) | https://github.com/containers/skopeo/tree/main/systemtest |
+| [umoci](umoci.pm) | https://github.com/opencontainers/umoci/tree/main/test |
+
+Note: For buildah we also run the [conformance tests](https://github.com/containers/buildah/blob/main/tests/conformance/README.md)
 
 Library code is found in [lib/containers/bats.pm](../../../lib/containers/bats.pm)
 
@@ -17,36 +20,35 @@ The tests rely on some variables:
 
 | variable | description |
 | --- | --- |
-| `BATS_PACKAGE` | `aardvark-dns` `buildah` `conmon` `netavark` `podman` `runc` `skopeo` |
-| `BATS_TEST_PACKAGES` | List of optional package URL's |
-| `BATS_TEST_REPOS` | List of optional test repositories |
-| `BATS_TESTS` | Run only the specified tests |
+| `BATS_PACKAGE` | `aardvark-dns` `buildah` `conmon` `netavark` `podman` `runc` `skopeo` `umoci` |
 | `BATS_VERSION` | Version of [bats](https://github.com/bats-core/bats-core) to use |
-| `BUILDAH_STORAGE_DRIVER` | Storage driver used for buildah: `vfs` or `overlay` |
-| `ENABLE_SELINUX` | Set to `0` to put SELinux in permissive mode |
 | `GITHUB_PATCHES` | List of github PR id's containing upstream test patches |
 | `GITHUB_REPO` | Repo & branch in the form `[<GITHUB_ORG>]#<BRANCH>` |
 | `OCI_RUNTIME` | OCI runtime to use: `runc` or `crun` |
+| `RUN_TESTS` | Run only the specified tests |
+| `SELINUX_ENFORCE` | Set to `0` to put SELinux in permissive mode |
+| `TEST_PACKAGES` | List of optional package URL's |
+| `TEST_REPOS` | List of optional test repositories |
 
 NOTES
-- `BATS_TEST_PACKAGES` may be used to test candidate kernels (KOTD, PTF, etc) and other packages.
-- `BATS_TEST_REPOS` may be used to test candidate packages outside the usual maintenance workflow.
 - `GITHUB_REPO` can be `SUSE#branch` or a tag `v1.2.3`
 - `GITHUB_PATCHES` can contain full URL's like `https://github.com/containers/podman/pull/25918.patch`
+- `TEST_PACKAGES` may be used to test candidate kernels (KOTD, PTF, etc) and other packages.
+- `TEST_REPOS` may be used to test candidate packages outside the usual maintenance workflow.
 
 ### Summary of the `BATS_IGNORE` variables
 
-These are defined in [skip.yaml](data/containers/bats/skip.yaml)
+These are defined in [patches.yaml](../../../data/containers/patches.yaml)
 
-| variable | description | aardvark | buildah | conmon | netavark | podman | runc | skopeo |
-|---|---|:---:|:---:|:---:|:---:|:---:|:---:|:---:|
-| `BATS_IGNORE` | Skip tests on ALL scenarios              |✅|✅|✅|✅|✅|✅|✅|
-| `BATS_IGNORE_ROOT` | Skip tests for root user            |  |✅|✅|  |✅|✅|✅|
-| `BATS_IGNORE_USER` | Skip tests for rootless             |  |✅|✅|  |✅|✅|✅|
-| `BATS_IGNORE_ROOT_LOCAL` | Skip tests for root / local   |  |  |  |  |✅|  |  |
-| `BATS_IGNORE_ROOT_REMOTE` | Skip tests for root / remote |  |  |  |  |✅|  |  |
-| `BATS_IGNORE_USER_LOCAL` | Skip tests for user / local   |  |  |  |  |✅|  |  |
-| `BATS_IGNORE_USER_REMOTE` | Skip tests for user / remote |  |  |  |  |✅|  |  |
+| variable | description | aardvark | buildah | conmon | netavark | podman | runc | skopeo | umoci |
+|---|---|:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|
+| `BATS_IGNORE` | Skip tests on ALL scenarios              |✅|✅|✅|✅|✅|✅|✅|✅|
+| `BATS_IGNORE_ROOT` | Skip tests for root user            |  |✅|✅|  |✅|✅|✅|✅|
+| `BATS_IGNORE_USER` | Skip tests for rootless             |  |✅|✅|  |✅|✅|✅|✅|
+| `BATS_IGNORE_ROOT_LOCAL` | Skip tests for root / local   |  |  |  |  |✅|  |  |  |
+| `BATS_IGNORE_ROOT_REMOTE` | Skip tests for root / remote |  |  |  |  |✅|  |  |  |
+| `BATS_IGNORE_USER_LOCAL` | Skip tests for user / local   |  |  |  |  |✅|  |  |  |
+| `BATS_IGNORE_USER_REMOTE` | Skip tests for user / remote |  |  |  |  |✅|  |  |  |
 
 NOTES
  - The special value `all` may be used to skip all tests.
@@ -55,7 +57,7 @@ NOTES
 ## Workflow
 
 - To debug SELinux issues you may check the audit log & clone a job with `ENABLE_SELINUX=0`
-- To debug individual tests you may clone a job with `BATS_TESTS`
+- To debug individual tests you may clone a job with `RUN_TESTS`
 - You can also test individual tests from the latest version in the `main` branch with `BATS_URL=main`
 - The BATS output is collected in the log files with the `.tap.txt` extension
 - The commands are collected in a log file ending with `-commands.txt`
@@ -88,27 +90,27 @@ Please add this warning on each bug report you open when adding instructions on 
 
 With runc as `OCI_RUNTIME`
 
-| Product / Package     | aardvark-dns       | buildah          | conmon             | netavark           | podman             | runc               | skopeo |
-|:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|
-| openSUSE Tumbleweed   | [![tw_al]][tw_a]   | [![tw_bl]][tw_b] | [![tw_cl]][tw_c]   | [![tw_nl]][tw_n]   | [![tw_pl]][tw_p]   | [![tw_rl]][tw_r]   | [![tw_sl]][tw_s]   |
-| openSUSE TW (aarch64) | [![twa_al]][twa_a] |                  | [![twa_cl]][twa_c] | [![twa_nl]][twa_n] | [![twa_pl]][twa_p] | [![twa_rl]][twa_r] | [![twa_sl]][twa_s] |
-| openSUSE TW (ppc64le) | [![twp_al]][twp_a] |                  | [![twp_cl]][twp_c] | [![twp_nl]][twp_n] | [![twp_pl]][twp_p] | [![twp_rl]][twp_r] | [![twp_sl]][twp_s] |
-| SLES 16.0             | [![logo]][s16_a]   | [![logo]][s16_b] | [![logo]][s16_c]   | [![logo]][s16_n]   | [![logo]][s16_p]   | [![logo]][s16_r]   | [![logo]][s16_s]   |
-| SLES 16.0 (aarch64)   | [![logo]][s16a_a]  |                  | [![logo]][s16a_c]  | [![logo]][s16a_n]  | [![logo]][s16a_p]  | [![logo]][s16a_r]  | [![logo]][s16a_s]  |
-| SLES 16.0 (ppc64le)   | [![logo]][s16p_a]  |                  | [![logo]][s16p_c]  | [![logo]][s16p_n]  | [![logo]][s16p_p]  | [![logo]][s16p_r]  | [![logo]][s16p_s]  |
-| SLES 16.0 (s390x)     | [![logo]][s16s_a]  |                  | [![logo]][s16s_c]  | [![logo]][s16s_n]  | [![logo]][s16s_p]  | [![logo]][s16s_r]  | [![logo]][s16s_s]  |
-| SLES 15 SP7           | [![logo]][sp7_a]   | [![logo]][sp7_b] |                    | [![logo]][sp7_n]   | [![logo]][sp7_p]   | [![logo]][sp7_r]   | [![logo]][sp7_s]   |
-| SLES 15 SP7 (aarch64) | [![logo]][sp7a_a]  |                  |                    | [![logo]][sp7a_n]  | [![logo]][sp7a_p]  | [![logo]][sp7a_r]  | [![logo]][sp7a_s]  |
-| SLES 15 SP7 (s390x)   |                    |                  |                    |                    |                    | [![logo]][sp7s_r]  | [![logo]][sp7s_s]  |
-| SLES 15 SP6           | [![logo]][sp6_a]   | [![logo]][sp6_b] |                    | [![logo]][sp6_n]   | [![logo]][sp6_p]   | [![logo]][sp6_r]   | [![logo]][sp6_s]   |
-| SLES 15 SP6 (aarch64) | [![logo]][sp6a_a]  |                  |                    | [![logo]][sp6a_n]  | [![logo]][sp6a_p]  | [![logo]][sp6a_r]  | [![logo]][sp6a_s]  |
-| SLES 15 SP6 (s390x)   |                    |                  |                    |                    |                    | [![logo]][sp6s_r]  | [![logo]][sp6s_s]  |
-| SLES 15 SP5           |                    | [![logo]][sp5_b] |                    |                    |                    | [![logo]][sp5_r]   | [![logo]][sp5_s]   |
-| SLES 15 SP5 (aarch64) |                    |                  |                    |                    |                    | [![logo]][sp5a_r]  | [![logo]][sp5a_s]  |
-| SLES 15 SP5 (s390x)   |                    |                  |                    |                    |                    | [![logo]][sp5s_r]  | [![logo]][sp5s_s]  |
-| SLES 15 SP4           |                    | [![logo]][sp4_b] |                    |                    |                    | [![logo]][sp4_r]   | [![logo]][sp4_s]   |
-| SLES 15 SP4 (aarch64) |                    |                  |                    |                    |                    | [![logo]][sp4a_r]  | [![logo]][sp4a_s]  |
-| SLES 15 SP4 (s390x)   |                    |                  |                    |                    |                    | [![logo]][sp4s_r]  | [![logo]][sp4s_s]  |
+| Product / Package     | aardvark-dns       | buildah          | conmon             | netavark           | podman             | runc               | skopeo             | umoci |
+|:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|
+| openSUSE Tumbleweed   | [![tw_al]][tw_a]   | [![tw_bl]][tw_b] | [![tw_cl]][tw_c]   | [![tw_nl]][tw_n]   | [![tw_pl]][tw_p]   | [![tw_rl]][tw_r]   | [![tw_sl]][tw_s]   | [![tw_ul]][tw_u] |
+| openSUSE TW (aarch64) | [![twa_al]][twa_a] |                  |                    | [![twa_nl]][twa_n] | [![twa_pl]][twa_p] | [![twa_rl]][twa_r] | [![twa_sl]][twa_s] | |
+| openSUSE TW (ppc64le) | [![twp_al]][twp_a] |                  |                    | [![twp_nl]][twp_n] | [![twp_pl]][twp_p] | [![twp_rl]][twp_r] | [![twp_sl]][twp_s] | |
+| SLES 16.0             | [![logo]][s16_a]   | [![logo]][s16_b] | [![logo]][s16_c]   | [![logo]][s16_n]   | [![logo]][s16_p]   | [![logo]][s16_r]   | [![logo]][s16_s]   | |
+| SLES 16.0 (aarch64)   | [![logo]][s16a_a]  |                  |                    | [![logo]][s16a_n]  | [![logo]][s16a_p]  | [![logo]][s16a_r]  | [![logo]][s16a_s]  | |
+| SLES 16.0 (ppc64le)   | [![logo]][s16p_a]  |                  |                    | [![logo]][s16p_n]  | [![logo]][s16p_p]  | [![logo]][s16p_r]  | [![logo]][s16p_s]  | |
+| SLES 16.0 (s390x)     | [![logo]][s16s_a]  |                  |                    | [![logo]][s16s_n]  | [![logo]][s16s_p]  | [![logo]][s16s_r]  | [![logo]][s16s_s]  | |
+| SLES 15 SP7           | [![logo]][sp7_a]   | [![logo]][sp7_b] |                    | [![logo]][sp7_n]   | [![logo]][sp7_p]   | [![logo]][sp7_r]   | [![logo]][sp7_s]   | |
+| SLES 15 SP7 (aarch64) | [![logo]][sp7a_a]  |                  |                    | [![logo]][sp7a_n]  | [![logo]][sp7a_p]  | [![logo]][sp7a_r]  | [![logo]][sp7a_s]  | |
+| SLES 15 SP7 (s390x)   |                    |                  |                    |                    |                    | [![logo]][sp7s_r]  | [![logo]][sp7s_s]  | |
+| SLES 15 SP6           | [![logo]][sp6_a]   | [![logo]][sp6_b] |                    | [![logo]][sp6_n]   | [![logo]][sp6_p]   | [![logo]][sp6_r]   | [![logo]][sp6_s]   | |
+| SLES 15 SP6 (aarch64) | [![logo]][sp6a_a]  |                  |                    | [![logo]][sp6a_n]  | [![logo]][sp6a_p]  | [![logo]][sp6a_r]  | [![logo]][sp6a_s]  | |
+| SLES 15 SP6 (s390x)   |                    |                  |                    |                    |                    | [![logo]][sp6s_r]  | [![logo]][sp6s_s]  | |
+| SLES 15 SP5           |                    | [![logo]][sp5_b] |                    |                    |                    | [![logo]][sp5_r]   | [![logo]][sp5_s]   | |
+| SLES 15 SP5 (aarch64) |                    |                  |                    |                    |                    | [![logo]][sp5a_r]  | [![logo]][sp5a_s]  | |
+| SLES 15 SP5 (s390x)   |                    |                  |                    |                    |                    | [![logo]][sp5s_r]  | [![logo]][sp5s_s]  | |
+| SLES 15 SP4           |                    | [![logo]][sp4_b] |                    |                    |                    | [![logo]][sp4_r]   | [![logo]][sp4_s]   | |
+| SLES 15 SP4 (aarch64) |                    |                  |                    |                    |                    | [![logo]][sp4a_r]  | [![logo]][sp4a_s]  | |
+| SLES 15 SP4 (s390x)   |                    |                  |                    |                    |                    | [![logo]][sp4s_r]  | [![logo]][sp4s_s]  | |
 
 openSUSE Tumbleweed with crun as `OCI_RUNTIME`
 
@@ -143,11 +145,11 @@ openSUSE Tumbleweed with crun as `OCI_RUNTIME`
 [tw_r]: https://openqa.opensuse.org/tests/latest?distri=opensuse&flavor=DVD&version=Tumbleweed&arch=x86_64&test=container_host_runc_testsuite
 [tw_sl]: https://openqa.opensuse.org/tests/latest/badge?distri=opensuse&flavor=DVD&version=Tumbleweed&arch=x86_64&test=container_host_skopeo_testsuite
 [tw_s]: https://openqa.opensuse.org/tests/latest?distri=opensuse&flavor=DVD&version=Tumbleweed&arch=x86_64&test=container_host_skopeo_testsuite
+[tw_ul]: https://openqa.opensuse.org/tests/latest/badge?distri=opensuse&flavor=DVD&version=Tumbleweed&arch=x86_64&test=container_host_umoci_testsuite
+[tw_u]: https://openqa.opensuse.org/tests/latest?distri=opensuse&flavor=DVD&version=Tumbleweed&arch=x86_64&test=container_host_umoci_testsuite
 
 [twa_al]: https://openqa.opensuse.org/tests/latest/badge?distri=opensuse&flavor=DVD&version=Tumbleweed&arch=aarch64&test=container_host_aardvark_testsuite
 [twa_a]: https://openqa.opensuse.org/tests/latest?distri=opensuse&flavor=DVD&version=Tumbleweed&arch=aarch64&test=container_host_aardvark_testsuite
-[twa_cl]: https://openqa.opensuse.org/tests/latest/badge?distri=opensuse&flavor=DVD&version=Tumbleweed&arch=aarch64&test=container_host_conmon_testsuite
-[twa_c]: https://openqa.opensuse.org/tests/latest?distri=opensuse&flavor=DVD&version=Tumbleweed&arch=aarch64&test=container_host_conmon_testsuite
 [twa_nl]: https://openqa.opensuse.org/tests/latest/badge?distri=opensuse&flavor=DVD&version=Tumbleweed&arch=aarch64&test=container_host_netavark_testsuite
 [twa_n]: https://openqa.opensuse.org/tests/latest?distri=opensuse&flavor=DVD&version=Tumbleweed&arch=aarch64&test=container_host_netavark_testsuite
 [twa_pl]: https://openqa.opensuse.org/tests/latest/badge?distri=opensuse&flavor=DVD&version=Tumbleweed&arch=aarch64&test=container_host_podman_testsuite
@@ -159,8 +161,6 @@ openSUSE Tumbleweed with crun as `OCI_RUNTIME`
 
 [twp_al]: https://openqa.opensuse.org/tests/latest/badge?distri=opensuse&flavor=DVD&version=Tumbleweed&arch=ppc64le&test=container_host_aardvark_testsuite
 [twp_a]: https://openqa.opensuse.org/tests/latest?distri=opensuse&flavor=DVD&version=Tumbleweed&arch=ppc64le&test=container_host_aardvark_testsuite
-[twp_cl]: https://openqa.opensuse.org/tests/latest/badge?distri=opensuse&flavor=DVD&version=Tumbleweed&arch=ppc64le&test=container_host_conmon_testsuite
-[twp_c]: https://openqa.opensuse.org/tests/latest?distri=opensuse&flavor=DVD&version=Tumbleweed&arch=ppc64le&test=container_host_conmon_testsuite
 [twp_nl]: https://openqa.opensuse.org/tests/latest/badge?distri=opensuse&flavor=DVD&version=Tumbleweed&arch=ppc64le&test=container_host_netavark_testsuite
 [twp_n]: https://openqa.opensuse.org/tests/latest?distri=opensuse&flavor=DVD&version=Tumbleweed&arch=ppc64le&test=container_host_netavark_testsuite
 [twp_pl]: https://openqa.opensuse.org/tests/latest/badge?distri=opensuse&flavor=DVD&version=Tumbleweed&arch=ppc64le&test=container_host_podman_testsuite
@@ -179,21 +179,18 @@ openSUSE Tumbleweed with crun as `OCI_RUNTIME`
 [s16_s]: https://openqa.suse.de/tests/latest?distri=sle&flavor=Online&version=16.0&arch=x86_64&test=skopeo_testsuite
 
 [s16a_a]: https://openqa.suse.de/tests/latest?distri=sle&flavor=Online&version=16.0&arch=aarch64&test=aardvark_testsuite
-[s16a_c]: https://openqa.suse.de/tests/latest?distri=sle&flavor=Online&version=16.0&arch=aarch64&test=conmon_testsuite
 [s16a_n]: https://openqa.suse.de/tests/latest?distri=sle&flavor=Online&version=16.0&arch=aarch64&test=netavark_testsuite
 [s16a_p]: https://openqa.suse.de/tests/latest?distri=sle&flavor=Online&version=16.0&arch=aarch64&test=podman_testsuite
 [s16a_r]: https://openqa.suse.de/tests/latest?distri=sle&flavor=Online&version=16.0&arch=aarch64&test=runc_testsuite
 [s16a_s]: https://openqa.suse.de/tests/latest?distri=sle&flavor=Online&version=16.0&arch=aarch64&test=skopeo_testsuite
 
 [s16p_a]: https://openqa.suse.de/tests/latest?distri=sle&flavor=Online&version=16.0&arch=ppc64le&test=aardvark_testsuite
-[s16p_c]: https://openqa.suse.de/tests/latest?distri=sle&flavor=Online&version=16.0&arch=ppc64le&test=conmon_testsuite
 [s16p_n]: https://openqa.suse.de/tests/latest?distri=sle&flavor=Online&version=16.0&arch=ppc64le&test=netavark_testsuite
 [s16p_p]: https://openqa.suse.de/tests/latest?distri=sle&flavor=Online&version=16.0&arch=ppc64le&test=podman_testsuite
 [s16p_r]: https://openqa.suse.de/tests/latest?distri=sle&flavor=Online&version=16.0&arch=ppc64le&test=runc_testsuite
 [s16p_s]: https://openqa.suse.de/tests/latest?distri=sle&flavor=Online&version=16.0&arch=ppc64le&test=skopeo_testsuite
 
 [s16s_a]: https://openqa.suse.de/tests/latest?distri=sle&flavor=Online&version=16.0&arch=s390x&test=aardvark_testsuite
-[s16s_c]: https://openqa.suse.de/tests/latest?distri=sle&flavor=Online&version=16.0&arch=s390x&test=conmon_testsuite
 [s16s_n]: https://openqa.suse.de/tests/latest?distri=sle&flavor=Online&version=16.0&arch=s390x&test=netavark_testsuite
 [s16s_p]: https://openqa.suse.de/tests/latest?distri=sle&flavor=Online&version=16.0&arch=s390x&test=podman_testsuite
 [s16s_r]: https://openqa.suse.de/tests/latest?distri=sle&flavor=Online&version=16.0&arch=s390x&test=runc_testsuite
@@ -251,17 +248,6 @@ openSUSE Tumbleweed with crun as `OCI_RUNTIME`
 [sp4s_r]: https://openqa.suse.de/tests/latest?distri=sle&flavor=Server-DVD-Updates&version=15-SP4&arch=ppc44le&test=runc_testsuite
 [sp4s_s]: https://openqa.suse.de/tests/latest?distri=sle&flavor=Server-DVD-Updates&version=15-SP4&arch=ppc44le&test=skopeo_testsuite
 
-## Skipped tests
-
-Complete list found in [skip.yaml](data/containers/bats/skip.yaml)
-
 ## Tools
 
 - [susebats](https://github.com/ricardobranco777/susebats)
-
-## TODO
-
-| package | tests |
-| --- | --- |
-| podman-tui | https://github.com/containers/podman-tui/tree/main/test |
-| umoci | https://github.com/opencontainers/umoci/tree/main/test |

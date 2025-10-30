@@ -30,7 +30,7 @@ use testapi;
 use publiccloud::ssh_interactive 'select_host_console';
 use publiccloud::instance;
 use publiccloud::instances;
-use publiccloud::utils qw(is_azure is_gce is_ec2 get_ssh_private_key_path is_byos);
+use publiccloud::utils qw(is_azure is_gce is_ec2 get_ssh_private_key_path is_byos detect_worker_ip);
 use sles4sap_publiccloud;
 use sles4sap::qesap::qesapdeployment;
 use sles4sap::qesap::azure;
@@ -72,10 +72,6 @@ sub run {
     set_var("MAIN_ADDRESS_RANGE", $maintenance_vars{main_address_range});
     set_var("SUBNET_ADDRESS_RANGE", $maintenance_vars{subnet_address_range});
 
-    # Select console on the host (not the PC instance) to reset 'TUNNELED',
-    # otherwise select_serial_terminal() will be failed
-    select_host_console();
-    select_serial_terminal();
 
     # Collect OpenQA variables and default values
     set_var_output('NODE_COUNT', 1) unless ($ha_enabled);
@@ -94,12 +90,27 @@ sub run {
         set_var('IBSM_RG', '') unless (get_var('IBSM_RG'));
         set_var('IBSM_VNET', '') unless (get_var('IBSM_VNET'));
     } elsif (is_gce()) {
+        die "Pering with NCC and using network_peering cannot be both active in the same config"
+          if ((get_var('IBSM_VPC_NAME') || get_var('IBSM_SUBNET_NAME') || get_var('IBSM_SUBNET_REGION')) && get_var('IBSM_NCC_HUB'));
         set_var('IBSM_VPC_NAME', '') unless (get_var('IBSM_VPC_NAME'));
         set_var('IBSM_SUBNET_NAME', '') unless (get_var('IBSM_SUBNET_NAME'));
         set_var('IBSM_SUBNET_REGION', '') unless (get_var('IBSM_SUBNET_REGION'));
+        set_var('IBSM_NCC_HUB', '') unless (get_var('IBSM_NCC_HUB'));
     } elsif (is_ec2()) {
         set_var('IBSM_PRJ_TAG', '') unless (get_var('IBSM_PRJ_TAG'));
     }
+
+    # Select console on the host (not the PC instance) to reset 'TUNNELED',
+    # otherwise select_serial_terminal() will be failed
+    select_host_console();
+    select_serial_terminal();
+
+    # has to be after select_serial_terminal as detect_worker_ip
+    # needs it.
+    set_var("SLES4SAP_WORKER_IP",
+        qesap_create_cidr_from_ip(
+            ip => detect_worker_ip(proceed_on_failure => 1),
+            proceed_on_failure => 1));
 
     my $deployment_name = deployment_name();
     # Create a QESAP_DEPLOYMENT_NAME variable so it includes the random
@@ -169,7 +180,7 @@ sub run {
     # has been cloned.
     # Not all the conf.yaml used by this file needs it but
     # it is just easier to define it here for all.
-    set_var("ANSIBLE_ROLES", qesap_get_ansible_roles_dir());
+    set_var("ANSIBLE_ROLES", qesap_ansible_get_roles_dir());
     my $reg_mode = 'registercloudguest';    # Use registercloudguest by default
     if (get_var('QESAP_SCC_NO_REGISTER')) {
         $reg_mode = 'noreg';

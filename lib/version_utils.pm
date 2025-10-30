@@ -877,6 +877,8 @@ sub get_bootloader {
     return 'grub2' if !check_var('UEFI', 1);
     return 'grub2' if is_upgrade;
     return 'systemd-boot' if is_microos && !(get_var('FLAVOR', '') =~ /(MicroOS-SelfInstall|MicroOS-Image|Image-ContainerHost|JeOS-for-kvm-and-xen|JeOS-for-OpenStack-Cloud)$/);
+    # Avoid unnecesary failures in staging
+    return 'grub2' if (get_var('FLAVOR', '') =~ /(MicroOS-SelfInstall|MicroOS-Image|Image-ContainerHost|JeOS-for-kvm-and-xen|JeOS-for-OpenStack-Cloud)$/);
     return 'grub2-bls' if check_var('VERSION', 'Staging:F');
     return 'grub2';
 }
@@ -1035,7 +1037,7 @@ Returns true for tests using the images built by the "JeOS" package on OBS
 =cut
 
 sub is_community_jeos {
-    return (get_var('FLAVOR', '') =~ /JeOS-for-(AArch64|RISCV|RPi)/);
+    return (get_var('FLAVOR', '') =~ /JeOS-for-(AArch64|armv9|RISCV|RPi)/);
 }
 
 =head2 has_selinux_by_default

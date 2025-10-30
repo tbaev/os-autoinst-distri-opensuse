@@ -4,7 +4,7 @@
 # SPDX-License-Identifier: FSFAP
 
 # Summary: Public cloud utilities
-# Maintainer: Felix Niederwanger <felix.niederwanger@suse.de>
+# Maintainer: QE-C team <qa-c@suse.de>
 
 package publiccloud::utils;
 
@@ -14,6 +14,7 @@ use Mojo::UserAgent;
 use Mojo::URL;
 use Mojo::JSON 'encode_json';
 use Carp qw(croak);
+use Socket qw(AF_INET AF_INET6 inet_pton);
 
 use strict;
 use warnings;
@@ -61,6 +62,8 @@ our @EXPORT = qw(
   get_available_packages_remote
   zypper_install_remote
   zypper_install_available_remote
+  wait_quit_zypper_pc
+  detect_worker_ip
 );
 
 # Check if we are a BYOS test run
@@ -210,7 +213,7 @@ sub registercloudguest {
     # Check what version of registercloudguest binary we use, chost images have none pre-installed
     my $version = $instance->ssh_script_output(cmd => 'rpm -q --queryformat "%{VERSION}\n" cloud-regionsrv-client', proceed_on_failure => 1);
     if ($version =~ /cloud-regionsrv-client is not installed/) {
-        die 'cloud-regionsrv-client should not be installed' if !is_container_host;
+        die 'cloud-regionsrv-client should be installed' if !is_container_host;
     }
 
     my $cmd_time = time();
@@ -230,7 +233,7 @@ sub register_addons_in_pc {
     # Workaround for bsc#1245220
     my $env = is_sle("=15-SP3") ? "ZYPP_CURL2=1" : "";
     my $cmd = "sudo $env zypper -n --gpg-auto-import-keys ref";
-    my $ret = script_run $cmd, timeout => 300;
+    my $ret = $instance->ssh_script_run(cmd => $cmd, timeout => 300);
     die 'No enabled repos defined: bsc#1245651' if $ret == 6;    # from zypper man page: ZYPPER_EXIT_NO_REPOS
     $instance->ssh_script_retry(cmd => $cmd, timeout => 300, retry => 3, delay => 120);
     for my $addon (@addons) {
@@ -791,6 +794,69 @@ sub zypper_install_available_remote {
     my $available_ref = get_available_packages_remote($instance, $packages_ref);
     return unless @$available_ref;
     zypper_install_remote($instance, $available_ref);
+}
+
+=head2 wait_quit_zypper_pc
+
+    wait_quit_zypper_pc($instance
+        [, timeout => 20 ]   # per-attempt SSH timeout (s)
+        [, delay   => 10 ]   # delay between attempts (s)
+        [, retry   => 60 ]   # number of attempts
+    );
+
+Wait until no background zypper-related processes are running on the remote
+instance. Uses C<retry_ssh_command> for polling. Returns on success; dies
+after retries are exhausted.
+
+=cut
+
+sub wait_quit_zypper_pc {
+    my ($instance, %args) = @_;
+
+    my $timeout = $args{timeout} // 20;    # per-attempt SSH timeout
+    my $delay = $args{delay} // 10;    # seconds between polls
+    my $retry = $args{retry} // 120;    # total attempts (~10 min ceiling)
+
+    # Succeeds (RC 0) only when NO matching processes exist.
+    # Using '!' avoids explicit 'exit' and works cleanly with retry_ssh_command.
+    my $cmd = q{pgrep -f "zypper|purge-kernels|rpm" && false || true};
+
+    $instance->retry_ssh_command(
+        cmd => $cmd,
+        timeout => $timeout,
+        delay => $delay,
+        retry => $retry,
+    );
+}
+
+=head2 detect_worker_ip
+
+    detect_worker_ip($proceed_on_failure)
+
+    Detects the current openQA worker's public IPs (ipv4/6) and returns them as
+    an array of suitable CIDR strings(/32 or /128 for ipv4/6, respectively).
+    The function uses http://checkip.amazonaws.com and falls back to https://ifconfig.me
+    if the first attempt fails.
+    Optionally accepts proceed_on_failure => 1 to return undef instead of dying.
+
+    Return:
+    - worker ip, if retrieved
+    - undef otherwise (if proceed_on_failure is set)
+
+=cut
+
+sub detect_worker_ip {
+    my (%args) = @_;
+    my $ip;
+    for my $url ('http://checkip.amazonaws.com', 'https://ifconfig.me') {
+        $ip = script_output("curl -q -fsS --max-time 10 $url",
+            timeout => 15, proceed_on_failure => 1);
+        $ip =~ s/^\s+|\s+$//g;
+        next unless $ip && (inet_pton(AF_INET, $ip) || inet_pton(AF_INET6, $ip));
+        return $ip;
+    }
+    return undef if $args{proceed_on_failure};
+    die "Worker IP could not be determined - return was $ip";
 }
 
 1;

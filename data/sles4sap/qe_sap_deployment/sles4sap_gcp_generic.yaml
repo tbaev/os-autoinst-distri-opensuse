@@ -11,7 +11,7 @@ apiver: 3
 terraform:
   variables:
     # GENERAL VARIABLES #
-    project: 'ei-sle-qa-sap-8469'
+    project: '%SLES4SAP_GOOGLE_PROJECT%'
     gcp_credentials_file: '/root/google_credentials.json'
     region: '%PUBLIC_CLOUD_REGION%'
     deployment_name: '%QESAP_DEPLOYMENT_NAME%'
@@ -24,6 +24,7 @@ terraform:
     ibsm_vpc_name: '%IBSM_VPC_NAME%'
     ibsm_subnet_name: '%IBSM_SUBNET_NAME%'
     ibsm_subnet_region: '%IBSM_SUBNET_REGION%'
+    ibsm_hub_name: '%IBSM_NCC_HUB%'
 
     # REMOTE PYTHON
     hana_remote_python: '%ANSIBLE_REMOTE_PYTHON%'

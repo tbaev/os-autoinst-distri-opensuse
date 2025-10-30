@@ -9,7 +9,7 @@ package sles4sap::ipaddr2;
 
 use strict;
 use warnings FATAL => 'all';
-use testapi;
+use Mojo::Base -signatures;
 use Carp qw( croak );
 use Exporter qw(import);
 use Mojo::JSON qw( decode_json );
@@ -17,10 +17,11 @@ use Mojo::JSON qw( decode_json );
 # a Fully Qualified Domain Name which returns an ipV4 address or an ipV6 address
 # embodied in that order. This feature can be disabled with:
 use NetAddr::IP::Lite ':nofqdn';
+use testapi;
 use mmapi qw( get_current_job_id );
-use publiccloud::utils qw( get_ssh_private_key_path register_addon);
 use utils qw( write_sut_file ssh_fully_patch_system);
 use hacluster qw($crm_mon_cmd cluster_status_matches_regex);
+use publiccloud::utils qw( get_ssh_private_key_path register_addon);
 use sles4sap::ibsm;
 use sles4sap::azure_cli;
 
@@ -57,12 +58,14 @@ our @EXPORT = qw(
   ipaddr2_test_master_vm
   ipaddr2_test_other_vm
   ipaddr2_cloudinit_create
-  ipaddr2_cloudinit_logs
+  ipaddr2_logs_cloudinit
   ipaddr2_azure_resource_group
   ipaddr2_network_peering_create
   ipaddr2_patch_system
   ipaddr2_repos_add_server_to_hosts
   ipaddr2_cleanup
+  ipaddr2_logs_collect
+  ipaddr2_ssh_intrusion_detection
 );
 
 use constant DEPLOY_PREFIX => 'ip2t';
@@ -70,8 +73,8 @@ use constant WEB_RSC => 'rsc_web_00';
 use constant USER => 'cloudadmin';
 use constant SSH_KEY_ID => 'id_rsa';
 use constant SSH_VERBOSE => '-vvv';
-use constant SSH_LOG => '/var/tmp/ssh_sut.log';
-use constant SSH_PROXY_LOG => '/var/tmp/ssh_proxy_sut.log';
+use constant SSH_LOG => '/var/tmp/ssh_sut.log.txt';
+use constant SSH_PROXY_LOG => '/var/tmp/ssh_proxy_sut.log.txt';
 use constant PING_CMD => 'ping -c 3';
 
 our $bastion_vm_name = DEPLOY_PREFIX . "-vm-bastion";
@@ -138,8 +141,7 @@ Create the cloud-init.txt profile file
 =back
 =cut
 
-sub ipaddr2_cloudinit_create {
-    my (%args) = @_;
+sub ipaddr2_cloudinit_create(%args) {
     $args{nginx_root} //= '/srv/www/htdocs';
 
     # start to dynamically compose the profile
@@ -217,8 +219,7 @@ Create a deployment in Azure designed for this specific test.
 =back
 =cut
 
-sub ipaddr2_infra_deploy {
-    my (%args) = @_;
+sub ipaddr2_infra_deploy(%args) {
     foreach (qw(region os)) {
         croak("Argument < $_ > missing") unless $args{$_}; }
     $args{diagnostic} //= 0;
@@ -394,7 +395,7 @@ sub ipaddr2_infra_deploy {
     # with it by changing the networking on the running VM
     foreach my $i (1 .. 2) {
         my $vm = ipaddr2_get_internal_vm_name(id => $i);
-        my $nic_id = az_nic_id_get(
+        my $nic_id = az_nic_get_id(
             resource_group => $rg,
             name => $vm);
         my $ip_config = az_ipconfig_name_get(nic_id => $nic_id);
@@ -481,8 +482,7 @@ in the deployment that has public IP.
 =back
 =cut
 
-sub ipaddr2_bastion_ssh_addr {
-    my (%args) = @_;
+sub ipaddr2_bastion_ssh_addr(%args) {
     $args{bastion_ip} //= ipaddr2_bastion_pubip();
     return USER . '@' . $args{bastion_ip};
 }
@@ -502,8 +502,7 @@ For the worker to accept the ssh key of the bastion
 =back
 =cut
 
-sub ipaddr2_bastion_key_accept {
-    my (%args) = @_;
+sub ipaddr2_bastion_key_accept(%args) {
     $args{bastion_ip} //= ipaddr2_bastion_pubip();
 
     # Clean up known_hosts on the machine running the test script
@@ -547,15 +546,12 @@ This function always use cloudadmin as user in any ssh connections.
 =back
 =cut
 
-sub ipaddr2_internal_key_accept {
-    my (%args) = @_;
-
+sub ipaddr2_internal_key_accept(%args) {
     $args{bastion_ip} //= ipaddr2_bastion_pubip();
     $args{key_checking} //= 'accept-new';
+
     my $key_policy = '-oStrictHostKeyChecking=' . $args{key_checking};
-
     my $bastion_ssh_addr = ipaddr2_bastion_ssh_addr(bastion_ip => $args{bastion_ip});
-
     my ($vm_name, $vm_addr, $ret, $start_time, $exit_code, $score);
     foreach my $i (1 .. 2) {
         $vm_name = ipaddr2_get_internal_vm_private_ip(id => $i);
@@ -646,13 +642,12 @@ it is later on needed by crm cluster init/join
 =back
 =cut
 
-sub ipaddr2_internal_key_gen {
-    my (%args) = @_;
+sub ipaddr2_internal_key_gen(%args) {
     $args{bastion_ip} //= ipaddr2_bastion_pubip();
     $args{key_checking} //= 'accept-new';
     $args{user} //= USER;
-    my $key_policy = '-oStrictHostKeyChecking=' . $args{key_checking};
 
+    my $key_policy = '-oStrictHostKeyChecking=' . $args{key_checking};
     my $bastion_ssh_addr = ipaddr2_bastion_ssh_addr(bastion_ip => $args{bastion_ip});
     my $user_ssh = ($args{user} eq 'root') ? '/root/' : "/home/$args{user}/";
     $user_ssh .= '.ssh';
@@ -768,8 +763,7 @@ The process involves:
 =back
 =cut
 
-sub ipaddr2_internal_key_authorize {
-    my (%args) = @_;
+sub ipaddr2_internal_key_authorize(%args) {
     foreach (qw(src dst key_checking)) {
         croak("Argument < $_ > missing") unless $args{$_}; }
     $args{bastion_ip} //= ipaddr2_bastion_pubip();
@@ -879,8 +873,7 @@ Tests are independent by the cluster status.
 =back
 =cut
 
-sub ipaddr2_os_sanity {
-    my (%args) = @_;
+sub ipaddr2_os_sanity(%args) {
     $args{bastion_ip} //= ipaddr2_bastion_pubip();
     $args{user} //= USER;
 
@@ -914,8 +907,7 @@ Run some cluster level checks
 =back
 =cut
 
-sub ipaddr2_cluster_sanity {
-    my (%args) = @_;
+sub ipaddr2_cluster_sanity(%args) {
     $args{bastion_ip} //= ipaddr2_bastion_pubip();
     $args{id} //= 1;
 
@@ -963,8 +955,7 @@ die in case of failure
 =back
 =cut
 
-sub ipaddr2_os_connectivity_sanity {
-    my (%args) = @_;
+sub ipaddr2_os_connectivity_sanity(%args) {
     $args{bastion_ip} //= ipaddr2_bastion_pubip();
 
     # intentionally ignore the return as ping or nc
@@ -1015,8 +1006,7 @@ when a cloudinit script is not used to bootstrap the SUT.
 =back
 =cut
 
-sub ipaddr2_cloudinit_sanity {
-    my (%args) = @_;
+sub ipaddr2_cloudinit_sanity(%args) {
     $args{bastion_ip} //= ipaddr2_bastion_pubip();
 
     foreach my $id (1 .. 2) {
@@ -1037,11 +1027,11 @@ sub ipaddr2_cloudinit_sanity {
     }
 }
 
-=head2 ipaddr2_cloudinit_logs
+=head2 ipaddr2_logs_cloudinit
 
-    ipaddr2_cloudinit_logs()
+    ipaddr2_logs_cloudinit()
 
-Collect some cloud-init related logs
+Print on the terminal some cloud-init related logs
 
 =over
 
@@ -1052,8 +1042,7 @@ Collect some cloud-init related logs
 =back
 =cut
 
-sub ipaddr2_cloudinit_logs {
-    my (%args) = @_;
+sub ipaddr2_logs_cloudinit(%args) {
     $args{bastion_ip} //= ipaddr2_bastion_pubip();
 
     foreach my $id (1 .. 2) {
@@ -1091,8 +1080,7 @@ Check that private IP are in the network configuration on the internal VMs
 =back
 =cut
 
-sub ipaddr2_os_network_sanity {
-    my (%args) = @_;
+sub ipaddr2_os_network_sanity(%args) {
     $args{bastion_ip} //= ipaddr2_bastion_pubip();
 
     foreach (1 .. 2) {
@@ -1122,8 +1110,7 @@ die in case of failure
 =back
 =cut
 
-sub ipaddr2_os_ssh_sanity {
-    my (%args) = @_;
+sub ipaddr2_os_ssh_sanity(%args) {
     $args{bastion_ip} //= ipaddr2_bastion_pubip();
     $args{user} //= USER;
     my $user_ssh = ($args{user} eq 'root') ? '/root/' : "/home/$args{user}/";
@@ -1188,8 +1175,7 @@ Run a command on the bastion using assert_script_run
 =back
 =cut
 
-sub ipaddr2_ssh_bastion_assert_script_run {
-    my (%args) = @_;
+sub ipaddr2_ssh_bastion_assert_script_run(%args) {
     croak("Argument < cmd > missing") unless $args{cmd};
     $args{bastion_ip} //= ipaddr2_bastion_pubip();
 
@@ -1219,8 +1205,7 @@ Run a command on the bastion using script_run
 =back
 =cut
 
-sub ipaddr2_ssh_bastion_script_run {
-    my (%args) = @_;
+sub ipaddr2_ssh_bastion_script_run(%args) {
     croak("Argument < cmd > missing") unless $args{cmd};
     $args{bastion_ip} //= ipaddr2_bastion_pubip();
 
@@ -1250,8 +1235,7 @@ Run a command on the bastion using script_output
 =back
 =cut
 
-sub ipaddr2_ssh_bastion_script_output {
-    my (%args) = @_;
+sub ipaddr2_ssh_bastion_script_output(%args) {
     croak("Argument < cmd > missing") unless $args{cmd};
     $args{bastion_ip} //= ipaddr2_bastion_pubip();
 
@@ -1288,8 +1272,7 @@ like assert_script_run or script_output.
 =back
 =cut
 
-sub ipaddr2_ssh_internal_cmd {
-    my (%args) = @_;
+sub ipaddr2_ssh_internal_cmd(%args) {
     foreach (qw(id cmd)) {
         croak("Argument < $_ > missing") unless $args{$_}; }
     $args{bastion_ip} //= ipaddr2_bastion_pubip();
@@ -1308,7 +1291,7 @@ sub ipaddr2_ssh_internal_cmd {
     ipaddr2_ssh_internal(id => 2,
         cmd => 'whoami',
         bastion_ip => '4.5.6.7',
-        method => script_run/assert_script_run);
+        no_assert => 1);
 
 Run a command on one of the two internal VM through the bastion
 using the assert_script_run API
@@ -1325,24 +1308,23 @@ using the assert_script_run API
 
 =item B<timeout> - Execution timeout, default 90sec
 
-=item B<method> - Specify which function use when running command
+=item B<no_assert> - If specified internally use 'script_run' in place of
+                     'assert_script_run' and return the exit code.
 
 =back
 =cut
 
-sub ipaddr2_ssh_internal {
-    my (%args) = @_;
+sub ipaddr2_ssh_internal(%args) {
     foreach (qw(id cmd)) {
         croak("Argument < $_ > missing") unless $args{$_}; }
     $args{bastion_ip} //= ipaddr2_bastion_pubip();
     $args{timeout} //= 90;
-    $args{method} //= 'assert_script_run';
 
     my $command = ipaddr2_ssh_internal_cmd(
         id => $args{id},
         bastion_ip => $args{bastion_ip},
         cmd => $args{cmd});
-    if ($args{method} eq "script_run") {
+    if ($args{no_assert}) {
         return script_run($command, timeout => $args{timeout});
     }
     else {
@@ -1375,8 +1357,7 @@ Return the command output.
 =back
 =cut
 
-sub ipaddr2_ssh_internal_output {
-    my (%args) = @_;
+sub ipaddr2_ssh_internal_output(%args) {
     foreach (qw(id cmd)) {
         croak("Argument < $_ > missing") unless $args{$_}; }
     $args{bastion_ip} //= ipaddr2_bastion_pubip();
@@ -1407,8 +1388,7 @@ Initialize and configure the Pacemaker cluster on the two internal nodes
 =back
 =cut
 
-sub ipaddr2_cluster_create {
-    my (%args) = @_;
+sub ipaddr2_cluster_create(%args) {
     $args{bastion_ip} //= ipaddr2_bastion_pubip();
     $args{rootless} //= 0;
 
@@ -1485,9 +1465,7 @@ For the moment all the commands are only executed on VM1.
 =back
 =cut
 
-sub ipaddr2_cluster_check_version {
-    my (%args) = @_;
-
+sub ipaddr2_cluster_check_version(%args) {
     $args{bastion_ip} //= ipaddr2_bastion_pubip();
 
     foreach (
@@ -1518,10 +1496,8 @@ Return 1 if all modules are registered, 0 if at least one is not.
 =back
 =cut
 
-sub ipaddr2_scc_check {
-    my (%args) = @_;
+sub ipaddr2_scc_check(%args) {
     croak("Argument < id > missing") unless $args{id};
-
     $args{bastion_ip} //= ipaddr2_bastion_pubip();
 
     # Initially suppose is registered
@@ -1562,11 +1538,9 @@ ipaddr2_infra_deploy by adding couple of lines to cloud-init configuration file.
 =back
 =cut
 
-sub ipaddr2_scc_register {
-    my (%args) = @_;
+sub ipaddr2_scc_register(%args) {
     foreach (qw(id scc_code)) {
         croak("Argument < $_ > missing") unless $args{$_}; }
-
     $args{bastion_ip} //= ipaddr2_bastion_pubip();
     $args{scc_endpoint} //= 'registercloudguest';
     croak("SCC endpoint $args{scc_endpoint} is not supported.") unless ($args{scc_endpoint} eq 'SUSEConnect' || $args{scc_endpoint} eq 'registercloudguest');
@@ -1611,8 +1585,7 @@ This function is in charge to:
 =back
 =cut
 
-sub ipaddr2_configure_web_server {
-    my (%args) = @_;
+sub ipaddr2_configure_web_server(%args) {
     croak("Argument < id > missing") unless $args{id};
     $args{nginx_root} //= '/srv/www/htdocs';
 
@@ -1654,11 +1627,10 @@ Call zypper refresh
 =back
 =cut
 
-sub ipaddr2_repo_refresh {
-    my (%args) = @_;
+sub ipaddr2_repo_refresh(%args) {
     croak("Argument < id > missing") unless $args{id};
-
     $args{bastion_ip} //= ipaddr2_bastion_pubip();
+
     ipaddr2_ssh_internal(id => $args{id},
         cmd => 'sudo zypper ref',
         timeout => 600,
@@ -1682,10 +1654,8 @@ List all configured zypper repos
 =back
 =cut
 
-sub ipaddr2_repo_list {
-    my (%args) = @_;
+sub ipaddr2_repo_list(%args) {
     croak("Argument < id > missing") unless $args{id};
-
     $args{bastion_ip} //= ipaddr2_bastion_pubip();
 
     # record repo lr
@@ -1737,8 +1707,7 @@ Compose and return a string for the vm name
 =back
 =cut
 
-sub ipaddr2_get_internal_vm_name {
-    my (%args) = @_;
+sub ipaddr2_get_internal_vm_name(%args) {
     croak("Argument < id > missing") unless $args{id};
     return DEPLOY_PREFIX . "-vm-0$args{id}";
 }
@@ -1756,8 +1725,7 @@ compose and return a string representing the VM private IP
 =back
 =cut
 
-sub ipaddr2_get_internal_vm_private_ip {
-    my (%args) = @_;
+sub ipaddr2_get_internal_vm_private_ip(%args) {
     croak("Argument < id > missing") unless $args{id};
     return $priv_ip_range . '.4' . $args{id};
 }
@@ -1770,8 +1738,7 @@ Return a path in /tmp of the worker used to store files associated
 two one of the internal VM
 =cut
 
-sub ipaddr2_get_worker_tmp_for_internal_vm {
-    my (%args) = @_;
+sub ipaddr2_get_worker_tmp_for_internal_vm(%args) {
     croak("Argument < id > missing") unless $args{id};
     return "/tmp/" . ipaddr2_get_internal_vm_name(id => $args{id});
 }
@@ -1795,10 +1762,8 @@ Move the rsc_web_00 resource to the indicated node
 =back
 =cut
 
-sub ipaddr2_crm_move {
-    my (%args) = @_;
+sub ipaddr2_crm_move(%args) {
     croak("Argument < destination > missing") unless $args{destination};
-
     $args{bastion_ip} //= ipaddr2_bastion_pubip();
     $args{id} //= 1;
 
@@ -1828,9 +1793,7 @@ Clear all location constrain used during the test
 =back
 =cut
 
-sub ipaddr2_crm_clear {
-    my (%args) = @_;
-
+sub ipaddr2_crm_clear(%args) {
     $args{bastion_ip} //= ipaddr2_bastion_pubip();
     $args{id} //= 1;
 
@@ -1864,10 +1827,8 @@ Return 1 as soon as it gets the id in the response. Return 0 if not within 10 mi
 =back
 =cut
 
-sub ipaddr2_wait_for_takeover {
-    my (%args) = @_;
+sub ipaddr2_wait_for_takeover(%args) {
     croak("Argument < destination > missing") unless $args{destination};
-
     $args{bastion_ip} //= ipaddr2_bastion_pubip();
 
     my $counter = 0;
@@ -1907,8 +1868,7 @@ Return result of searching str_match in the curl response
 =back
 =cut
 
-sub ipaddr2_get_web {
-    my (%args) = @_;
+sub ipaddr2_get_web(%args) {
     foreach (qw(web_url str_match)) {
         croak("Argument < $_ > missing") unless $args{$_}; }
     $args{bastion_ip} //= ipaddr2_bastion_pubip();
@@ -1938,10 +1898,8 @@ the resources.
 =back
 =cut
 
-sub ipaddr2_test_master_vm {
-    my (%args) = @_;
+sub ipaddr2_test_master_vm(%args) {
     croak("Argument < id > missing") unless $args{id};
-
     $args{bastion_ip} //= ipaddr2_bastion_pubip();
 
     # checks on the cluster side
@@ -2025,10 +1983,8 @@ the resources.
 =back
 =cut
 
-sub ipaddr2_test_other_vm {
-    my (%args) = @_;
+sub ipaddr2_test_other_vm(%args) {
     croak("Argument < id > missing") unless $args{id};
-
     $args{bastion_ip} //= ipaddr2_bastion_pubip();
 
     # checks on the cluster side
@@ -2060,8 +2016,7 @@ Create network peering
 =back
 =cut
 
-sub ipaddr2_network_peering_create {
-    my (%args) = @_;
+sub ipaddr2_network_peering_create(%args) {
     croak 'Missing mandatory argument < ibsm_rg >' unless $args{ibsm_rg};
 
     ibsm_network_peering_azure_create(
@@ -2093,13 +2048,12 @@ Add download.suse.de server to hosts by specifying IBSM address
 =back
 =cut
 
-sub ipaddr2_repos_add_server_to_hosts {
-    my (%args) = @_;
+sub ipaddr2_repos_add_server_to_hosts(%args) {
     foreach (qw(ibsm_ip incident_repos)) {
         croak("Argument < $_ > missing") unless $args{$_}; }
-
     $args{bastion_ip} //= ipaddr2_bastion_pubip();
     $args{repo_host} //= 'download.suse.de';
+
     foreach my $id (1 .. 2) {
         ipaddr2_ssh_internal(id => $id,
             cmd => "echo \"$args{'ibsm_ip'} $args{repo_host}\" | sudo tee -a /etc/hosts",
@@ -2141,8 +2095,7 @@ Patch system
 =back
 =cut
 
-sub ipaddr2_patch_system {
-    my (%args) = @_;
+sub ipaddr2_patch_system(%args) {
     $args{bastion_ip} //= ipaddr2_bastion_pubip();
 
     my @vms = ();
@@ -2167,7 +2120,7 @@ sub ipaddr2_patch_system {
         ipaddr2_ssh_internal(id => $vm_id,
             cmd => 'sudo systemctl mask packagekit; sudo systemctl stop packagekit; while pgrep packagekitd; do sleep 1; done',
             timeout => 120,
-            method => 'script_run',
+            no_assert => 1,
             bastion_ip => $args{bastion_ip});
 
         # on 12-SP5, reboot causes the VM to restart too fast which can cause failures with
@@ -2175,7 +2128,7 @@ sub ipaddr2_patch_system {
         ipaddr2_ssh_internal(id => $vm_id,
             cmd => 'sudo reboot',
             timeout => 60,
-            method => 'script_run',
+            no_assert => 1,
             bastion_ip => $args{bastion_ip});
     }
 
@@ -2204,7 +2157,7 @@ sub ipaddr2_patch_system {
                 id => $v_id,
                 cmd => 'pgrep "zypper|purge-kernels|rpm"',
                 timeout => 60,
-                method => 'script_run',
+                no_assert => 1,
                 bastion_ip => $args{bastion_ip});
             if ($ret == 0) {
                 record_info('zypper process running, need to quit');
@@ -2237,10 +2190,10 @@ Register addons on SUT
 =back
 =cut
 
-sub ipaddr2_scc_addons {
-    my (%args) = @_;
+sub ipaddr2_scc_addons(%args) {
     croak 'Missing mandatory argument < scc_addons >' unless $args{scc_addons};
     $args{bastion_ip} //= ipaddr2_bastion_pubip();
+
     my $host_ip = ipaddr2_bastion_ssh_addr(bastion_ip => $args{bastion_ip});
     my @addons = split(/,/, $args{scc_addons});
 
@@ -2258,7 +2211,9 @@ sub ipaddr2_scc_addons {
 
 =head2 ipaddr2_cleanup
 
+  ipaddr2_cleanup();
 
+Collect logs, remove the IBSm network peering if present and destroy the deployment.
 
 =over
 
@@ -2275,13 +2230,12 @@ sub ipaddr2_scc_addons {
 =back
 =cut
 
-sub ipaddr2_cleanup {
-    my (%args) = @_;
+sub ipaddr2_cleanup(%args) {
     $args{diagnostic} //= 0;
     $args{cloudinit} //= 1;
 
     ipaddr2_deployment_logs() if ($args{diagnostic} == 1);
-    ipaddr2_cloudinit_logs() unless ($args{cloudinit} == 0);
+    ipaddr2_logs_cloudinit() unless ($args{cloudinit} == 0);
     if ($args{ibsm_rg}) {
         ibsm_network_peering_azure_delete(
             sut_rg => ipaddr2_azure_resource_group(),
@@ -2290,5 +2244,221 @@ sub ipaddr2_cleanup {
     }
     ipaddr2_infra_destroy();
 }
+
+=head2 ipaddr2_logs_collect_cmds
+
+    my @cmds = ipaddr2_logs_collect_cmds();
+
+Returns a list of commands to collect logs from the ipaddr2 cluster.
+=cut
+
+sub ipaddr2_logs_collect_cmds {
+    my @log_list = (
+        {
+            name => 'cloudregister',
+            remote_log => 1,
+            f_log => sub {
+                my $id = shift;
+                return {
+                    file => '/var/log/cloudregister'}; }
+        },
+        {
+            name => 'crm_report',
+            remote_log => 1,
+            f_log => sub {
+                my $id = shift;
+                my $file = "/var/log/crm_report_$id";
+                return {
+                    cmd => "sudo crm report $file",
+                    file => $file . '.tar.gz'}; }
+        },
+        {
+            name => 'y2logs',
+            remote_log => 1,
+            f_log => sub {
+                my $id = shift;
+                my $file = "/tmp/y2logs_$id.tar.gz";
+                return {
+                    cmd => "sudo save_y2logs $file",
+                    file => $file}; }
+        },
+        {
+            name => 'supportconfig',
+            remote_log => 1,
+            timeout => 600,
+            f_log => sub {
+                my $id = shift;
+                my $file = "supportconfig_$id";
+                return {
+                    cmd => "sudo supportconfig -R /var/tmp -B $file -x AUDIT && sudo chmod 0755 /var/tmp/scc_$file.txz",
+                    file => "/var/tmp/scc_$file.txz"}; }
+        },
+        {f_log => sub { return {file => SSH_LOG}; }},
+        {f_log => sub { return {file => SSH_PROXY_LOG}; }}
+    );
+    return @log_list;
+}
+
+=head2 ipaddr2_logs_collect
+
+    ipaddr2_logs_collect();
+
+Collect logs from the ipaddr2 cluster.
+
+=over
+
+=item B<bastion_ip> - Public IP address of the bastion. Calculated if not provided.
+                      Providing it as an argument is recommended
+                      to avoid having to query Azure to get it.
+
+=back
+=cut
+
+sub ipaddr2_logs_collect(%args) {
+    $args{bastion_ip} //= ipaddr2_bastion_pubip();
+    my $bastion_ssh_addr = ipaddr2_bastion_ssh_addr(bastion_ip => $args{bastion_ip});
+    my $vm_addr;
+    my $worker_tmp_dir;
+    my $scp_ret;
+    my $local_file;
+    my %log_data;
+    my $remote_file;
+    my $timeout;
+
+    # Iterate over all the logs
+    foreach my $log (ipaddr2_logs_collect_cmds()) {
+        $scp_ret = 0;
+
+        if (defined $log->{remote_log} && $log->{remote_log} == 1) {
+            $timeout = $log->{timeout} // 300;
+            # Iterate through each remote VM to generate and collect logs.
+            foreach my $id (1 .. 2) {
+                $vm_addr = USER . '@' . ipaddr2_get_internal_vm_private_ip(id => $id);
+                $worker_tmp_dir = ipaddr2_get_worker_tmp_for_internal_vm(id => $id);
+                assert_script_run("mkdir -p $worker_tmp_dir || echo 'Folder $worker_tmp_dir already exist'");
+                %log_data = %{$log->{f_log}->($id)};
+                $remote_file = $log_data{file};
+
+                # Execute command on the remote VM to generate the log file, if there is a command to run.
+                ipaddr2_ssh_internal(
+                    id => $id,
+                    bastion_ip => $args{bastion_ip},
+                    no_assert => 1,
+                    timeout => $timeout,
+                    cmd => $log_data{cmd}) if (defined $log_data{cmd});
+
+                # Download the generated file from the remote VM to the local worker.
+                my ($filename) = $remote_file =~ m|/([^/]+)$|;
+                $filename //= $remote_file;    # Fallback
+                $local_file = "$worker_tmp_dir/$filename";
+                record_info("bastion_ssh_addr:$bastion_ssh_addr vm_addr:$vm_addr ", join(' ',
+                        'scp',
+                        '-J', $bastion_ssh_addr,
+                        "$vm_addr:$remote_file", $local_file));
+
+                $scp_ret = script_run(join(' ',
+                        'scp',
+                        '-J', $bastion_ssh_addr,
+                        "$vm_addr:$remote_file", $local_file));
+
+                # If download was successful or file is local, upload the local file to openQA.
+                upload_logs($local_file) if ($scp_ret == 0);
+            }
+        } else {
+            # call it without id
+            %log_data = %{$log->{f_log}->()};
+            upload_logs($log_data{file});
+        }
+    }
+}
+
+=head2 ipaddr2_ssh_intrusion_detection
+
+    my $ret = ipaddr2_ssh_intrusion_detection();
+
+  Analyze sshd logs for failed login attempts using journalctl.
+  Verifies that sshd logs do not contain login attempts from unexpected public IP addresses.
+  Report any external IP is found.
+  return 0 if no problem detected.
+
+=over
+
+=item B<bastion_ip> - Public IP of the bastion host.
+
+=back
+=cut
+
+sub ipaddr2_ssh_intrusion_detection(%args) {
+    $args{bastion_ip} //= ipaddr2_bastion_pubip();
+
+    my $attempts;
+    my $total_attempts = 0;
+    my %users;
+    my %ips;
+    my %report;
+    my @suspicious_ips;
+    my %allowed_ips = map { $_ => 1 } (
+        $args{bastion_ip},
+        ipaddr2_get_internal_vm_private_ip(id => 1),
+        ipaddr2_get_internal_vm_private_ip(id => 2),
+    );
+    my $cmd = 'sudo journalctl -u sshd | grep "Connection closed by" || true';
+
+    my @log_outputs;
+
+    push @log_outputs, {
+        bastion => ipaddr2_ssh_bastion_script_output(bastion_ip => $args{bastion_ip}, cmd => $cmd)};
+
+    foreach my $id (1 .. 2) {
+        push @log_outputs, {
+            ipaddr2_get_internal_vm_name(id => $id) =>
+              ipaddr2_ssh_internal_output(id => $id,
+                bastion_ip => $args{bastion_ip}, cmd => $cmd)};
+    }
+
+    foreach my $log_hash_ref (@log_outputs) {
+        while (my ($vm_name, $log_output) = each %$log_hash_ref) {
+            $attempts = 0;
+            %users = ();
+            %ips = ();
+
+            foreach my $line (split /\n/, $log_output) {
+                # Regex to capture user and IP for both 'authenticating user' and 'invalid user'
+                if ($line =~ /Connection closed by (?:authenticating|invalid) user (\S+) (\S+)/) {
+                    my ($user, $ip) = ($1, $2);
+                    $users{$user}++;
+                    $ips{$ip}++;
+                    $attempts++;
+                }
+            }
+
+            $report{$vm_name}{attempts} = $attempts;
+            $report{$vm_name}{users} = [keys %users];
+            $report{$vm_name}{ips} = [keys %ips];
+
+            next if $attempts == 0;
+            record_info("SSHD Log Analysis for $vm_name",
+                "Found $report{$vm_name}{attempts} login attempts. Users: @{$report{$vm_name}{users}}. IPs: @{$report{$vm_name}{ips}}");
+            $total_attempts += $attempts;
+            foreach my $ip (@{$report{$vm_name}{ips}}) {
+                my $ip_obj = NetAddr::IP::Lite->new($ip);
+                # Flag any IP that is not in the allowed list and is not a private address.
+                #if ($ip_obj && !$ip_obj->is_private() && !$allowed_ips{$ip}) {
+                if ($ip_obj && !$allowed_ips{$ip}) {
+                    push @suspicious_ips, $ip;
+                }
+            }
+        }
+    }
+    return 0 unless $total_attempts > 0;
+
+    if (@suspicious_ips) {
+        record_info(
+            "INTRUSION ATTEMPT DETECTED:" .
+              "Unexpected external login attempts found from IPs: " . join(', ', @suspicious_ips));
+    }
+    return $total_attempts;
+}
+
 
 1;

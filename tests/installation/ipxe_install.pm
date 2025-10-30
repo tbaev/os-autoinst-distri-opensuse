@@ -22,6 +22,7 @@ use virt_autotest::utils qw(is_kvm_host is_xen_host);
 use HTTP::Tiny;
 use IPC::Run;
 use Time::HiRes 'sleep';
+use Socket qw(inet_ntoa inet_aton);
 
 
 sub poweroff_host {
@@ -357,6 +358,17 @@ sub run {
         return;
     }
 
+    if (get_var('WORKER_CLASS') =~ /ipmi-nvdimm/) {
+        assert_screen 'nue-ipxe-menu', 600;
+        my $sut_ip = inet_ntoa(inet_aton(get_required_var('SUT_IP')));
+        wait_screen_change { send_key 'i' };
+        assert_screen 'ipxe-shell';
+        # machine has two interfaces with IPs, ipxe detects the first one,
+        # but it is not correct, this line is correcting it
+        enter_cmd_slow 'chain --replace --autofree ' . get_var('IPXE_HTTPSERVER') . '/' . $sut_ip . '/script.ipxe';
+        send_key "ret";
+    }
+
     if (is_agama) {
         assert_screen([qw(load-linux-kernel load-initrd)], 240);
         record_info("Installing", "Please check the expected product is being installed");
@@ -371,6 +383,7 @@ sub run {
         enter_o3_ipxe_boot_entry if get_var('IPXE_STATIC');
         check_screen([qw(load-linux-kernel load-initrd)], 80);
         assert_screen([qw(network-config-created loading-installation-system sshd-server-started autoyast-installation)], 300);
+        set_bootscript_hdd if get_var('IPXE_SET_HDD_BOOTSCRIPT');
         return if get_var('AUTOYAST');
         wait_still_screen(stilltime => 12, similarity_level => 60, timeout => 30) unless check_screen('sshd-server-started', timeout => 60);
         save_screenshot;

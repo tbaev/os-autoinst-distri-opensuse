@@ -8,7 +8,7 @@
 # https://github.com/SUSE-Enceladus/cloud-regionsrv-client/blob/master/integration_test-process.txt
 # Leave system in *registered* state
 #
-# Maintainer: <qa-c@suse.de>
+# Maintainer: QE-C team <qa-c@suse.de>
 
 use Mojo::Base 'publiccloud::basetest';
 use version_utils;
@@ -37,7 +37,8 @@ sub run {
         $instance = $self->{my_instance} = $args->{my_instance};
     } else {
         $provider = $args->{my_provider} = $self->provider_factory();
-        $instance = $self->{my_instance} = $args->{my_instance} = $provider->create_instance(check_guestregister => is_openstack ? 0 : 1);
+        $instance = $self->{my_instance} = $args->{my_instance} = $provider->create_instance();
+        $instance->wait_for_guestregister() if (is_ondemand());
     }
 
     if (check_var('PUBLIC_CLOUD_SCC_ENDPOINT', 'SUSEConnect')) {
@@ -155,7 +156,8 @@ sub check_instance_unregistered {
     return if ($out =~ /No repositories defined/m);
 
     for (split('\n', $out)) {
-        if ($_ =~ /^\s?\d+/ && $_ !~ /SUSE_Maintenance/) {
+        # bsc#1252277 - The NVIDIA repos are added by SUSEConnect but not removed
+        if ($_ =~ /^\s?\d+/ && $_ !~ /SUSE_Maintenance|:NVIDIA-/) {
             record_info('zypper lr', $out);
             die($error);
         }
@@ -176,7 +178,7 @@ sub test_container_runtimes {
 
     record_info('Test docker');
     $instance->ssh_assert_script_run("sudo rm -f /root/.docker/config.json");    # workaround for https://bugzilla.suse.com/show_bug.cgi?id=1231185
-    $instance->ssh_assert_script_run("sudo zypper install -y docker", timeout => 300);
+    $instance->ssh_assert_script_run("sudo zypper install -y docker", timeout => 600);
     $instance->ssh_assert_script_run("sudo systemctl start docker.service");
     record_info("systemctl status docker.service", $instance->ssh_script_output("systemctl status docker.service"));
     $instance->ssh_script_retry("sudo docker pull $image", retry => 3, delay => 60, timeout => 600);

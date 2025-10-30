@@ -21,7 +21,7 @@ use utils qw(write_sut_file file_content_replace);
 use Scalar::Util 'looks_like_number';
 use Mojo::JSON qw(decode_json);
 use publiccloud::utils qw(get_credentials);
-use sles4sap::azure_cli qw(az_keyvault_secret_list az_keyvault_secret_show);
+use sles4sap::azure_cli qw(az_keyvault_secret_list az_keyvault_secret_show az_group_name_get);
 use sles4sap::sap_deployment_automation_framework::naming_conventions qw(
   homedir
   deployment_dir
@@ -55,6 +55,7 @@ our @EXPORT = qw(
   validate_components
   get_fencing_mechanism
   sdaf_upload_logs
+  get_workload_resource_group
 );
 
 our $output_log_file = '';
@@ -1141,6 +1142,31 @@ sub get_fencing_mechanism {
     return ($supported_fencing_values{$fencing_type});
 }
 
+=head2 get_workload_resource_group
+
+    get_workload_resource_group(deployment_id=>'1234');
+
+Finds and returns resource group belonging to the tests workload zone.
+
+B<Value conversion:>
+
+=over
+
+=item * B<deployment_id> =>  Test/deployment ID
+
+=back
+
+=cut
+
+sub get_workload_resource_group {
+    my (%args) = @_;
+    croak 'Missing mandatory argument "$args{deployment_id}"' unless $args{deployment_id};
+    my $query = "[?contains(name, 'workload') && contains(name, '$args{deployment_id}')].name";
+    my $groups = az_group_name_get(query => $query);
+    die "Zero or more than one resource groups found:\n" . join("\n", @$groups) unless (@$groups == 1);
+    return $groups->[0];
+}
+
 =head3 sdaf_upload_logs
 
     sdaf_upload_logs(hostname => $hostname, sap_sid => $sap_sid)
@@ -1167,11 +1193,11 @@ sub sdaf_upload_logs {
 
     record_info('Uploading crm report log');
     script_run("sudo crm report -E /var/log/ha-cluster-bootstrap.log $crm_report_log", timeout => 300);
-    upload_logs("${crm_report_log}.tar.gz");
+    upload_logs("${crm_report_log}.tar.gz", failok => 1);
 
     record_info('Uploading crm configure log');
-    script_run("sudo crm configure show > $crm_cfg_log", timeout => 120);
-    upload_logs("$crm_cfg_log");
+    record_info('crm configure show', 'Failed to run "crm configure show"', result => 'fail') if (script_run("sudo crm configure show > $crm_cfg_log", timeout => 120));
+    upload_logs("$crm_cfg_log", failok => 1);
 
     # Upload zypper log
     upload_logs('/var/log/zypper.log', log_name => "$autotest::current_test->{name}-${hostname}_zypper.log", failok => 1);
@@ -1189,17 +1215,17 @@ sub sdaf_upload_logs {
     my $nw_log = script_run("ls /var/tmp/$sap_sid | grep $sap_sid");
     if (!script_run("ls /var/tmp/$sap_sid | grep $sap_sid")) {
         my $nw_log = script_output("ls /var/tmp/$sap_sid | grep $sap_sid | grep 'zip'");
-        upload_logs("/var/tmp/$sap_sid/$nw_log");
+        upload_logs("/var/tmp/$sap_sid/$nw_log", failok => 1);
     }
 
     # Uploading supportconfig log (it is time consuming so it is conditional)
-    if (get_var('SUPPORTCONGFIG')) {
+    if (get_var('SUPPORTCONFIG')) {
         record_info('Uploading supportconfig log');
         script_run("sudo supportconfig -B $hostname", timeout => 1800);
         # Sometimes the tar ball is scc_${hostname}_xxx-xxx-xxx-*.txz
         if (!script_run("ls /var/log/scc_${hostname}*.txz")) {
             my $supportconfig_log = script_output("ls /var/log/scc_${hostname}*.txz");
-            upload_logs("$supportconfig_log");
+            upload_logs("$supportconfig_log", failok => 1);
         }
     } else {
         record_info('Skipped uploading supportconfig log');

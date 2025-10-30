@@ -14,6 +14,7 @@ use testapi;
 use serial_terminal 'select_serial_terminal';
 use utils;
 use version_utils qw(is_sle is_sle_micro is_transactional package_version_cmp);
+use bootloader_setup 'add_grub_cmdline_settings';
 use qam;
 use kernel;
 use klp;
@@ -472,6 +473,32 @@ sub boot_to_console {
       unless is_sle('<12');
 }
 
+sub install_requirements {
+    my @requirements = qw(
+      rasdaemon
+      libnvme1
+      nvme-cli
+      rdma-core
+      rdma-ndd
+      librdmacm1
+      blktrace
+      bpftrace
+      bcc-tools
+      libbcc0
+      tcpdump
+      kdump
+      crash
+      makedumpfile
+      nfs-client
+      nfs-kernel-server
+      open-iscsi
+      multipath-tools
+      liburing2
+    );
+
+    install_package(join(' ', @requirements));
+}
+
 sub run {
     my $self = shift;
     my $kernel_package = get_kernel_flavor;
@@ -490,6 +517,9 @@ sub run {
         boot_to_console($self);
     }
 
+    # Install requirements for SLE 16 staging tests
+    install_requirements if check_var('FLAVOR', 'Online-Kernel-Utils-Updates-Staging');
+
     # SLE Micro RT 5.1 image contains both kernel flavors, we need to remove kernel-default
     if (is_sle_micro('=5.1') && check_var('SLE_PRODUCT', 'slert')) {
         trup_call('pkg rm kernel-default');
@@ -498,9 +528,11 @@ sub run {
         reboot_on_changes;
     }
 
-    my $repo = is_sle_micro('>=6.0') ? get_var('OS_TEST_REPOS') : get_var('KOTD_REPO');
+    my $repo = (is_sle_micro('>=6.0') || is_sle('16+')) ? get_var('OS_TEST_REPOS') : get_var('KOTD_REPO');
     my $incident_id = undef;
+    my $grub_param = get_var('APPEND_GRUB_PARAMS');
 
+    add_grub_cmdline_settings($grub_param) if defined $grub_param;
     add_extra_customer_repositories;
     zypper_call('al kernel-rt_debug') if check_var('SLE_PRODUCT', 'slert');
 

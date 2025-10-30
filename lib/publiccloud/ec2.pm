@@ -5,7 +5,7 @@
 
 # Summary: Helper class for amazon ec2
 #
-# Maintainer: Clemens Famulla-Conrad <cfamullaconrad@suse.de>, qa-c team <qa-c@suse.de>
+# Maintainer: QE-C team <qa-c@suse.de>
 
 package publiccloud::ec2;
 use Mojo::Base 'publiccloud::provider';
@@ -161,15 +161,17 @@ sub upload_boot_diagnostics {
     my ($self, %args) = @_;
     my $instance_id = $self->get_terraform_output('.vm_name.value[]');
     return if (check_var('PUBLIC_CLOUD_SLES4SAP', 1));
-
+    unless (defined($instance_id)) {
+        record_info('UNDEF. diagnostics', 'upload_boot_diagnostics: on ec2, undefined instance');
+        return;
+    }
     my $dt = DateTime->now;
     my $time = $dt->hms;
     $time =~ s/:/-/g;
     my $asset_path = "/tmp/console-$time.txt";
     script_run("aws ec2 get-console-output --latest --color=off --no-paginate --output text --instance-id $instance_id &> $asset_path", proceed_on_failure => 1);
     if (script_output("du $asset_path | cut -f1") < 8) {
-        record_soft_failure('poo#155116 - The console log is empty.');
-        record_info($asset_path, script_output("cat $asset_path"));
+        record_info("EMPTY", "The console log is empty. `cat $asset_path`:\n" . script_output("cat $asset_path"));
     } elsif (check_var('PUBLIC_CLOUD_INSTANCE_TYPE', 'i3.large')) {
         record_info('UNSUPPORTED_INSTANCE', "The 'i3.large' instance doesn't support serial terminal.");
     } else {

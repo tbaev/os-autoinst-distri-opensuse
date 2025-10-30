@@ -5,9 +5,7 @@
 
 # Summary: Helper class for Google Cloud Platform Computer Engine
 #
-# Maintainer: Clemens Famulla-Conrad <cfamullaconrad@suse.de>
-#             Jose Lausuch <jalausuch@suse.de>
-#             qa-c team <qa-c@suse.de>
+# Maintainer: QE-C team <qa-c@suse.de>
 
 package publiccloud::gce;
 use Mojo::Base 'publiccloud::provider';
@@ -119,14 +117,25 @@ sub get_gcp_guest_os_features {
             'UEFI_COMPATIBLE',
             'VIRTIO_SCSI_MULTIQUEUE',
         ],
+        'SLES-SAP-16.0' => [
+            'GVNIC',
+            'IDPF',
+            'SEV_CAPABLE',
+            'SEV_LIVE_MIGRATABLE',
+            'SEV_LIVE_MIGRATABLE_V2',
+            'SEV_SNP_CAPABLE',
+            'TDX_CAPABLE',
+            'UEFI_COMPATIBLE',
+            'VIRTIO_SCSI_MULTIQUEUE',
+        ],
     );
 
     my $os_version;
-    if ($file =~ /SLES\d+-SP\d+|SLES-\d+\.\d+/i) {
+    if ($file =~ /SLES\d+-SP\d+|SLES-(SAP-)?\d+\.\d+/i) {
         $os_version = uc($&);
     }
 
-    die "Unsupported OS: $os_version" unless ($os_version && exists $guest_os_features{$os_version});
+    die "Unsupported OS: '$os_version'" unless ($os_version && exists $guest_os_features{$os_version});
 
     return join(',', @{$guest_os_features{$os_version}});
 }
@@ -198,7 +207,10 @@ sub upload_boot_diagnostics {
     my $project = $self->get_terraform_output('.project.value');
     my $instance_id = $self->get_terraform_output(".vm_name.value[0]");
     return if (check_var('PUBLIC_CLOUD_SLES4SAP', 1));
-
+    unless (defined($instance_id) && defined($region) && defined($availability_zone)) {
+        record_info('UNDEF. diagnostics', 'upload_boot_diagnostics: on gce, undefined instance or region or availability zone');
+        return;
+    }
     my $dt = DateTime->now;
     my $time = $dt->hms;
     $time =~ s/:/-/g;

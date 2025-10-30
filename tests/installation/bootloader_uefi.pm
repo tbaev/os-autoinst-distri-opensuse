@@ -96,7 +96,7 @@ sub run {
 
     # Some aach64 JeOS jobs take too long to match the first grub2 needle.
     # By pressing a random key, we stop the grub timeout
-    send_key 'backspace' if (is_jeos && is_aarch64);
+    send_key 'backspace' if (is_aarch64 && is_sle_micro('6.0+') || is_jeos);
 
     if (get_var('FLAVOR') =~ /VMware-Updates/) {
         # VMware guests have a short GRUB timeout, which can cause issues with needle matching.
@@ -128,7 +128,8 @@ sub run {
         return;
     }
 
-    if (get_var('DISABLE_SECUREBOOT') && (get_var('BACKEND') eq 'qemu')) {
+    my $efi_vars_have_nosb = get_var('UEFI_PFLASH_VARS', '') =~ /nosb/i;
+    if (!$efi_vars_have_nosb && get_var('DISABLE_SECUREBOOT') && (get_var('BACKEND') eq 'qemu')) {
         $self->tianocore_disable_secureboot;
     }
     if ((get_var("ZDUP") && !is_jeos) || (get_var('ONLINE_MIGRATION') && check_var('BOOTFROM', 'd'))) {

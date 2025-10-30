@@ -220,6 +220,15 @@ if (get_var("REGRESSION", '') =~ /xen/) {
             location => 'http://mirror.suse.cz/install/SLP/SLE-15-SP6-Full-GM/x86_64/DVD1/',
             boot_firmware => 'efi',    # EFI version of SLES 15 SP6
         },
+        'sles15sp6-efi-sev-es' => {
+            name => 'sles15sp6-efi-sev-es',
+            extra_params => '--os-variant sle15-unknown',
+            distro => 'SLE_15',
+            location => 'http://mirror.suse.cz/install/SLP/SLE-15-SP6-Full-GM/x86_64/DVD1/',
+            boot_firmware => 'efi_sev_es',    # sev_es
+            launch_security => 'sev,policy=0x06',    # sev_es
+            memory_backing => 'locked=on',    # sev_es
+        },
         sles15sp7 => {
             name => 'sles15sp7',
             extra_params => '--os-variant sle15-unknown',
@@ -232,6 +241,30 @@ if (get_var("REGRESSION", '') =~ /xen/) {
             distro => 'SLE_15',
             location => 'http://mirror.suse.cz/install/SLP/SLE-15-SP7-Full-GM/x86_64/DVD1/',
             boot_firmware => 'efi',    # EFI version of SLES 15 SP7
+        },
+        sles16efi_online => {
+            name => 'sles16efi_online',
+            extra_params => '--os-variant sles16',    # Use SLES16 variant
+            distro => 'SLE_16',
+            iso_url => 'http://openqa.suse.de/assets/iso/SLES-16.0-Online-x86_64-Build135.5.install.iso',    # ISO download URL
+            boot_firmware => 'efi',    # SLES16 only supports EFI guests, no BIOS support
+        },
+        sles16efi_full => {
+            name => 'sles16efi_full',
+            extra_params => '--os-variant sles16',    # Use SLES16 variant
+            distro => 'SLE_16',
+            location => 'http://openqa.suse.de/assets/repo/SLES-16.0-Full-x86_64-Build135.5.install/',    # Network location for live OS
+            install_url => 'http://openqa.suse.de/assets/repo/SLES-16.0-x86_64-Build135.5/',    # Install repository URL
+            boot_firmware => 'efi',    # SLES16 only supports EFI guests, no BIOS support
+        },
+        'sles15sp7-efi-sev-es' => {
+            name => 'sles15sp7-efi-sev-es',
+            extra_params => '--os-variant sle15-unknown',
+            distro => 'SLE_15',
+            location => 'http://mirror.suse.cz/install/SLP/SLE-15-SP7-Full-GM/x86_64/DVD1/',
+            boot_firmware => 'efi_sev_es',    # sev_es
+            launch_security => 'sev,policy=0x06',    # sev_es
+            memory_backing => 'locked=on',    # sev_es
         }
     );
     # Filter out guests not allowed for the detected SLE version
@@ -273,9 +306,19 @@ if (get_var("REGRESSION", '') =~ /xen/) {
     } elsif (is_sle('=15-SP7')) {
         my @allowed_guests = qw(sles12sp5 sles15sp6 sles15sp7);
         # For SEV-SNP guest verification, use specific guest sets
-        if (get_var('ENABLE_SEV_SNP', 1)) {
+        if (check_var('ENABLE_SEV_SNP', '1')) {
             @allowed_guests = qw(sles15sp6efi sles15sp7efi);
         }
+        if (check_var('ENABLE_SEV_ES', '1')) {
+            @allowed_guests = qw(sles15sp6-efi-sev-es sles15sp7-efi-sev-es);
+        }
+        foreach my $guest (keys %guests) {
+            delete $guests{$guest} unless grep { $_ eq $guest } @allowed_guests;
+        }
+    } elsif (is_sle('>=16')) {
+        # SLES16+ support - only EFI guests are supported, no BIOS guests
+        my @allowed_guests = qw(sles15sp7 sles15sp7efi sles16efi_online sles16efi_full);
+        # Both online and full installation types supported for SLES16 EFI guests
         foreach my $guest (keys %guests) {
             delete $guests{$guest} unless grep { $_ eq $guest } @allowed_guests;
         }

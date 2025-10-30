@@ -20,7 +20,6 @@ sub run_tests {
     return 0 if check_var($skip_tests, "all");
 
     my $storage_driver = $rootless ? "vfs" : script_output("buildah info --format '{{ .store.GraphDriverName }}'");
-    $storage_driver = get_var("BUILDAH_STORAGE_DRIVER", $storage_driver);
     record_info("storage driver", $storage_driver);
 
     my $oci_runtime = get_var('OCI_RUNTIME', script_output("buildah info --format '{{ .host.OCIRuntime }}'"));
@@ -36,9 +35,8 @@ sub run_tests {
 
     my $ret = bats_tests($log_file, \%env, $skip_tests, 5000);
 
-    run_command 'podman rm -vf $(podman ps -aq --external) || true';
-    run_command "podman system reset -f";
     run_command "buildah prune -a -f";
+    cleanup_podman;
 
     return ($ret);
 }
@@ -62,18 +60,36 @@ sub enable_docker {
         run_command "ip6tables -I DOCKER-USER -j ACCEPT";
     }
 
-    record_info("docker info", script_output("docker info"));
-    record_info("docker version", script_output("docker version"));
+    record_info("docker info", script_output("docker info -f json | jq -Mr"));
+    my $warnings = script_output("docker info -f '{{ range .Warnings }}{{ println . }}{{ end }}'");
+    record_info("WARNINGS daemon", $warnings) if $warnings;
+    $warnings = script_output("docker info -f '{{ range .ClientInfo.Warnings }}{{ println . }}{{ end }}'");
+    record_info("WARNINGS client", $warnings) if $warnings;
+    record_info("docker version", script_output("docker version -f json | jq -Mr"));
+}
+
+# Run conformance tests that compare the output of buildah against Docker's BuildKit
+sub test_conformance {
+    install_gotestsum;
+    run_command 'cp /usr/bin/busybox-static tests/conformance/testdata/mount-targets/true';
+    run_command 'docker rmi -f $(docker images -q) || true';
+    run_command 'gotestsum --junitfile conformance.xml --format standard-verbose -- ./tests/conformance/... |& tee conformance.txt', timeout => 1200;
+    my $version = script_output "buildah version --json | jq -Mr .version";
+    patch_junit "buildah", $version, "conformance.xml";
+    parse_extra_log(XUnit => "conformance.xml");
+    upload_logs("conformance.txt");
 }
 
 sub run {
     my ($self) = @_;
     select_serial_terminal;
 
-    my @pkgs = qw(buildah docker git-daemon glibc-devel-static go1.24 jq libgpgme-devel libseccomp-devel make openssl podman selinux-tools);
+    my @pkgs = qw(buildah docker git-daemon glibc-devel-static go1.24 libgpgme-devel libseccomp-devel make openssl podman selinux-tools);
     push @pkgs, "qemu-linux-user" if (is_tumbleweed || is_sle('>=15-SP6'));
+    # Packages needed for conformance tests
+    push @pkgs, "busybox-static docker-buildx libbtrfs-devel" unless is_sle;
 
-    $self->bats_setup(@pkgs);
+    $self->setup_pkgs(@pkgs);
 
     record_info("buildah version", script_output("buildah --version"));
     record_info("buildah info", script_output("buildah info"));
@@ -87,7 +103,7 @@ sub run {
 
     # Download buildah sources
     my $buildah_version = script_output "buildah --version | awk '{ print \$3 }'";
-    patch_sources "buildah", "v$buildah_version", "tests", bats_patches();
+    patch_sources "buildah", "v$buildah_version", "tests";
 
     # Patch mkdir to always use -p
     run_command "sed -i 's/ mkdir /& -p /' tests/*.bats tests/helpers.bash";
@@ -102,6 +118,8 @@ sub run {
     switch_to_root;
 
     $errors += run_tests(rootless => 0, skip_tests => 'BATS_IGNORE_ROOT');
+
+    test_conformance unless is_sle;
 
     die "buildah tests failed" if ($errors);
 }

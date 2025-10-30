@@ -38,8 +38,12 @@ sub prepare_virtual_env {
     my $install_timeout = 600;
     my $virtualenv = 'bci/bin/activate';
     my $python = 'python3';
+    my $pip = 'pip3';
 
     record_info('Install', 'Installing needed packages');
+
+    my $should_pip_upgrade = 1;
+    my $should_create_venv = 1;
 
     if ($host_distri =~ /ubuntu/) {
         # Sometimes, the host doesn't get an IP automatically via dhcp, we need force it just in case
@@ -49,7 +53,13 @@ sub prepare_virtual_env {
         script_run('export DEBIAN_FRONTEND=noninteractive');
         script_retry("apt-get -y install python3-venv", timeout => $install_timeout);
     } elsif ($host_distri =~ /centos|rhel/) {
-        script_retry("dnf install -y --allowerasing git-core python3 jq", timeout => $install_timeout);
+        if (get_var("VERSION") =~ /mls8/) {
+            assert_script_run("dnf install -y --allowerasing git-core jq python3.11 python3.11-pip");
+            $python = 'python3.11';
+            $pip = 'pip3.11';
+        } else {
+            script_retry("dnf install -y --allowerasing git-core python3 jq", timeout => $install_timeout);
+        }
     } elsif ($host_distri =~ /micro/i) {
         # this works only for sle-micro 6.0 and 6.1
         # 6.2 is officially sles 16.0 with transactional variant
@@ -57,21 +67,36 @@ sub prepare_virtual_env {
         trup_call('pkg in skopeo tar git jq');
         reboot_on_changes;
     } elsif ($host_distri =~ /opensuse|sles/) {
-        my @packages = ('jq', 'skopeo');
+        my @packages = ('jq', 'skopeo', 'git-core');
         # Avoid PackageKit to conflict about lock with zypper
         script_run("timeout 20 pkcon quit");
         # Wait for any zypper tasks in the background to finish
         assert_script_run('while pgrep -f zypp; do sleep 1; done', timeout => 300);
         my $version = "$version.$sp";
         if ($version =~ /12\./) {
-            $python = 'python3.6';
+            $should_pip_upgrade = 0;
+            $should_create_venv = 0;
+            $python = 'python3.11';
+            $pip = 'pip3.11';
             @packages = ('jq');
             # PackageHub is needed for jq
             script_retry("SUSEConnect -p PackageHub/12.5/$arch", delay => 60, retry => 3, timeout => $scc_timeout);
-        } elsif ($version !~ /15\.[1-3]/) {
+            zypper_call("ar -f http://download.suse.de/ibs/SUSE:/SLE-12:/Update:/Products:/SaltBundle:/Update/standard/ saltbundle");
+            zypper_call("rm python3-pip");
+            zypper_call("in saltbundlepy-base venv-salt-minion");
+            assert_script_run("mkdir -p ./bci/bin");
+            assert_script_run("ln -s /usr/lib/venv-salt-minion/bin/activate ./$virtualenv");
+        } elsif ($version =~ /15\.[4-7]/) {
             $python = 'python3.11';
-            script_retry("SUSEConnect -p sle-module-python3/$version/$arch", delay => 60, retry => 3, timeout => $scc_timeout) unless ($host_distri =~ /opensuse/);
+            $pip = 'pip3.11';
+            script_retry("SUSEConnect -p sle-module-python3/$version/$arch", delay => 60, retry => 3, timeout => $scc_timeout);
             push @packages, qw(git-core python311);
+        } elsif ($version =~ /16/) {
+            # Python 3.13 is the default vers. for SLE 16.0
+            push @packages, qw(git-core python313);
+        } elsif ($version =~ /Tumbleweed/) {
+            # In TW we would like to test the latest version
+            push @packages, qw(git-core python3);
         }
         zypper_call("--quiet in " . join(' ', @packages), timeout => $install_timeout);
     } else {
@@ -79,10 +104,11 @@ sub prepare_virtual_env {
     }
 
     assert_script_run("$python --version");
-    assert_script_run("$python -m venv bci");
+    assert_script_run("$python -m venv bci") if $should_create_venv;
     assert_script_run("source $virtualenv");
-    assert_script_run("$python -m pip --quiet install --upgrade pip", timeout => $install_timeout);
-    assert_script_run("$python -m pip --quiet install tox", timeout => $install_timeout);
+    assert_script_run("$python -m pip --quiet install --upgrade pip", timeout => $install_timeout) if $should_pip_upgrade;
+    assert_script_run("$pip --quiet install tox", timeout => $install_timeout);
+    record_info("pip freeze", script_output("$pip freeze", timeout => $install_timeout));
     assert_script_run('deactivate');
 }
 
@@ -103,16 +129,41 @@ sub update_test_repos {
     assert_script_run("git clone $branch -q --depth 1 $bci_tests_repo /root/BCI-tests");
 }
 
+sub check_container_signature {
+    my $engines = get_required_var('CONTAINER_RUNTIMES');
+    my $engine;
+    if ($engines =~ /podman|k3s/) {
+        $engine = 'podman';
+    } elsif ($engines =~ /docker/) {
+        $engine = 'docker';
+    } else {
+        die('No valid container engines defined in CONTAINER_RUNTIMES variable!');
+        return;
+    }
+
+    my $image = get_required_var('CONTAINER_IMAGE_TO_TEST');
+    record_info('Image signature', "Checking signature of $image");
+
+    my $cosign_image = "registry.suse.com/suse/cosign";
+
+    my $engine_options = "-v /usr/share/pki/trust/anchors/SUSE_Trust_Root.crt.pem:/SUSE_Trust_Root.crt.pem:ro";
+    my $options = "--key /usr/share/pki/containers/suse-container-key.pem";
+    $options .= " --registry-cacert=/SUSE_Trust_Root.crt.pem";    # include SUSE CA for registry.suse.de
+    $options .= " --insecure-ignore-tlog=true";    # ignore missing transparency log entries for registry.suse.de
+
+    script_retry("$engine pull -q $image", timeout => 300, delay => 60, retry => 2);
+    assert_script_run("$engine run --rm -q $engine_options $cosign_image verify $options $image", timeout => 300);
+}
+
 sub run {
     select_serial_terminal;
     my ($version, $sp, $host_distri) = get_os_release;
 
     prepare_virtual_env($version, $sp, $host_distri) if get_var('BCI_PREPARE');
 
-    return if (get_var('HELM_CONFIG') && !($host_distri == "sles" && $version == 15 && $sp >= 3));
-
     # Ensure LTSS subscription is active when testing LTSS containers.
-    validate_script_output("SUSEConnect -l", qr/.*LTSS.*Activated/, fail_message => "Host requires LTSS subscription for LTSS container") if (get_var('CONTAINER_IMAGE_TO_TEST') =~ /ltss/i);
+    validate_script_output("SUSEConnect -l", qr/.*LTSS.*Activated/, fail_message => "Host requires LTSS subscription for LTSS container")
+      if (get_var('CONTAINER_IMAGE_TO_TEST') =~ /ltss/i && ($version !~ /16/));
 
     update_test_repos if (get_var('BCI_TESTS_REPO'));
 
@@ -121,6 +172,13 @@ sub run {
     # For BCI tests using podman, buildah package is also needed
     # buildah is not present in any sle-micro, including 6.2
     install_buildah_when_needed($host_distri) if ($engines =~ /podman/ && $host_distri !~ /micro/i);
+
+    my $host_version = get_var("HOST_VERSION", get_required_var("VERSION"));    # VERSION is the version of the container, not the host.
+    check_container_signature()
+      if (get_var('CONTAINER_IMAGE_TO_TEST')
+        && get_var("CONTAINERS_SKIP_SIGNATURE", "0") != 1
+        && $host_version =~ "15-SP7|16\..*|slem-6\.1"
+      );
 }
 
 sub test_flags {

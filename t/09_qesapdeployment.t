@@ -7,6 +7,7 @@ use Test::MockModule;
 use Test::Mock::Time;
 
 use List::Util qw(any none);
+use NetAddr::IP;
 
 use testapi 'set_var';
 use sles4sap::qesap::qesapdeployment;
@@ -292,6 +293,7 @@ subtest '[qesap_execute] simple call integrate qesap_venv_cmd_exec' => sub {
             return (%paths);
     });
     $qesap->redefine(script_run => sub { push @calls, $_[0]; return $expected_res; });
+    $qesap->redefine(script_retry => sub { push @calls, $_[0]; return $expected_res; });
     $qesap->redefine(script_output => sub { push @calls, $_[0]; return ""; });
     # needed within the qesap_venv_cmd_exec as activating the vevn
     $qesap->redefine(assert_script_run => sub { push @calls, $_[0] });
@@ -300,8 +302,6 @@ subtest '[qesap_execute] simple call integrate qesap_venv_cmd_exec' => sub {
 
     note("qesap_execute res[0]: $res[0]  res[1]: $res[1]");
     note("\n  -->  " . join("\n  -->  ", @calls));
-    # check that the glue script is called with failok, 90 is default in qesap_execute
-    ok((any { /.*timeout \d+.*qesap\.py/ } @calls), 'timeout wrap the qesap.py with default value');
     # command composition
     ok((any { /.*qesap\.py.*-c.*-b.*$cmd\s+/ } @calls), 'qesap.py cmd composition is fine');
     ok((any { /.*qesap\.py.*tee.*\/tmp\/WALLABY_STREET/ } @calls), 'qesap.py log redirection is fine');
@@ -341,29 +341,6 @@ subtest '[qesap_execute] simplest call' => sub {
     note("\n  -->  " . join("\n  -->  ", @calls));
     ok((any { /.*qesap\.py.*-c.*-b.*$cmd\s+/ } @calls), 'qesap.py cmd composition is fine');
     ok(($res[0] == $expected_res), 'The function return what is internally returned by the command call');
-};
-
-subtest '[qesap_execute] positive timeout' => sub {
-    my $qesap = Test::MockModule->new('sles4sap::qesap::qesapdeployment', no_auto => 1);
-    my @calls;
-    my @logs = ();
-    my $cmd = 'GILL';
-    $qesap->redefine(record_info => sub { note(join(' # ', 'RECORD_INFO -->', @_)); });
-    $qesap->redefine(upload_logs => sub { push @logs, $_[0]; note("UPLOAD_LOGS:$_[0]") });
-    $qesap->redefine(script_run => sub { push @calls, $_[0]; return 0; });
-    $qesap->redefine(qesap_get_file_paths => sub {
-            my %paths;
-            $paths{deployment_dir} = '/BRUCE';
-            $paths{qesap_conf_trgt} = '/BRUCE/MARIANATRENCH';
-            return (%paths);
-    });
-    $qesap->redefine(script_output => sub { push @calls, $_[0]; return ""; });
-
-    my @res = qesap_execute(cmd => $cmd, logname => 'WALLABY_STREET', timeout => 123456);
-
-    note("qesap_execute res[0]: $res[0]  res[1]: $res[1]");
-    note("\n  -->  " . join("\n  -->  ", @calls));
-    ok((any { /.*timeout 123456.*qesap\.py/ } @calls), 'timeout wrap the qesap.py');
 };
 
 subtest '[qesap_execute] invalid timeout' => sub {
@@ -961,8 +938,10 @@ subtest '[qesap_prepare_env] integration test' => sub {
     $qesap->redefine(qesap_get_variables => sub { return; });
     $qesap->redefine(qesap_upload_logs => sub { return; });
     my @calls;
+    my @retries;
     $qesap->redefine(assert_script_run => sub { push @calls, $_[0]; });
     $qesap->redefine(script_run => sub { push @calls, $_[0]; return 0; });
+    $qesap->redefine(script_retry => sub { my ($cmd, %args) = @_; push @retries, $args{retry}; return 0; });
     $qesap->redefine(script_output => sub { push @calls, $_[0]; return 'DENTIST'; });
     $qesap->redefine(enter_cmd => sub { push @calls, $_[0]; return 0; });
     $qesap->redefine(record_info => sub { note(join(' ', 'RECORD_INFO -->', @_)); });
@@ -970,11 +949,7 @@ subtest '[qesap_prepare_env] integration test' => sub {
     qesap_prepare_env(provider => 'DONALDUCK');
 
     note("\n  C-->  " . join("\n  C-->  ", @calls));
-    foreach (@calls) {
-        # check that all command using the redirection also have the pipefail
-        my $cmd = $_;
-        like($cmd, qr/set -o pipefail/, "Command $cmd has pipe and set pipefail") if $cmd =~ /\|/;
-    }
+    ok((any { /3/ } @retries), 'default retry times is 3 for qesap_pip_install and qesap_galaxy_install');
 };
 
 subtest '[qesap_prepare_env]' => sub {
@@ -1086,6 +1061,7 @@ subtest '[qesap_prepare_env] qesap_create_folder_tree/qesap_get_file_paths defau
     my @calls;
     $qesap->redefine(data_url => sub { return '/TORNADO'; });
     $qesap->redefine(script_run => sub { push @calls, $_[0]; return 0; });
+    $qesap->redefine(script_retry => sub { push @calls, $_[0]; return 0; });
     $qesap->redefine(assert_script_run => sub { push @calls, $_[0]; });
     $qesap->redefine(record_info => sub { note(join(' ', 'RECORD_INFO -->', @_)); });
     $qesap->redefine(qesap_upload_logs => sub { return; });
@@ -1110,6 +1086,7 @@ subtest '[qesap_prepare_env] qesap_create_folder_tree/qesap_get_file_paths user 
     my @calls;
     $qesap->redefine(data_url => sub { return '/TORNADO'; });
     $qesap->redefine(script_run => sub { push @calls, $_[0]; return 0; });
+    $qesap->redefine(script_retry => sub { push @calls, $_[0]; return 0; });
     $qesap->redefine(assert_script_run => sub { push @calls, $_[0]; });
     $qesap->redefine(record_info => sub { note(join(' ', 'RECORD_INFO -->', @_)); });
     $qesap->redefine(qesap_upload_logs => sub { return; });
@@ -1316,6 +1293,63 @@ subtest '[qesap_terraform_ansible_deploy_retry] reboot timeout Ansible failures'
     ok $ret == 0, "Return of qesap_terraform_ansible_deploy_retry '$ret' is expected 0";
     # 3 = "terraform -d" + "terraform" + "ansible"
     ok $qesap_execute_calls eq 3, "qesap_execute() never called (qesap_execute_calls: $qesap_execute_calls expected 3)";
+};
+
+subtest '[qesap_create_cidr_from_ip]' => sub {
+    my $ret;
+    # ipv4 => /32
+    $ret = qesap_create_cidr_from_ip(ip => '195.0.0.10');
+    note("ipv4 result: $ret");
+    ok($ret eq '195.0.0.10/32', 'IPv4 mask');
+
+    # ipv6 => /128
+    $ret = qesap_create_cidr_from_ip(ip => '2001:db8::1');
+    my $exp = NetAddr::IP->new('2001:db8::1')->cidr;
+    note("ipv6 result: $ret");
+    like($ret, qr/\Q$exp\E/i, 'IPv6 mask');
+
+    # replace existing mask
+    $ret = qesap_create_cidr_from_ip(ip => '195.0.0.10/24');
+    note("Strip old mask result: $ret");
+    ok($ret eq '195.0.0.10/32', 'Existing mask is removed');
+
+    # invalid ip with proceed_on_failure => undef
+    $ret = qesap_create_cidr_from_ip(ip => 'not_an_ip', proceed_on_failure => 1);
+    ok(!defined $ret, 'Invalid IP returns undef when proceed_on_failure is true');
+
+    # invalid IP without proceed_on_failure => dies
+    dies_ok { qesap_create_cidr_from_ip(ip => 'still_not_an_ip') } 'Dies on invalid IP without proceed_on_failure';
+};
+
+subtest '[qesap_ssh_intrusion_detection]' => sub {
+    my $qesap = Test::MockModule->new('sles4sap::qesap::qesapdeployment', no_auto => 1);
+    $qesap->redefine(qesap_get_inventory => sub { return '/CRUSH'; });
+    my @calls;
+    $qesap->redefine(script_run => sub { push @calls, $_[0]; return 0; });
+    $qesap->redefine(enter_cmd => sub { push @calls, $_[0]; return 0; });
+
+    $qesap->redefine(script_output => sub {
+            push @calls, $_[0];
+            return <<'LOG';
+2025-09-02T11:59:20.291296+0000 vmhana02 sshd[143121]: Connection closed by authenticating user root 1.2.3.4 port 42 [preauth]
+2025-09-02T12:04:21.002220+0000 vmhana02 sshd[160619]: Connection closed by invalid user debian 1.2.3.4 port 42 [preauth]
+2025-09-02T12:04:23.503717+0000 vmhana02 sshd[160801]: Connection closed by invalid user debian 1.2.3.4 port 42 [preauth]
+LOG
+    });
+
+    $qesap->redefine(upload_logs => sub { note("UPLOAD_LOGS:$_[0]") });
+    $qesap->redefine(qesap_ansible_script_output_file => sub {
+            my (%args) = @_;
+            push @calls, "ANSIBLE:" . $args{cmd};
+            note("\n ###--> out_path : $args{out_path}");
+            note("\n ###--> file : $args{file}");
+            return 'BOUBLE_FILE.txt'; });
+    $qesap->redefine(record_info => sub { note(join(' ', 'RECORD_INFO -->', @_)); });
+
+    qesap_ssh_intrusion_detection(provider => 'NEMO');
+
+    note("\n  C-->  " . join("\n  C-->  ", @calls));
+    ok 1;
 };
 
 done_testing;

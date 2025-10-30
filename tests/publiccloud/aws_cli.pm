@@ -8,7 +8,7 @@
 # without any warranty.
 
 # Summary: Create VM in EC2 using aws binary
-# Maintainer: qa-c team <qa-c@suse.de>
+# Maintainer: QE-C team <qa-c@suse.de>
 
 use Mojo::Base 'publiccloud::basetest';
 use testapi;
@@ -16,6 +16,7 @@ use serial_terminal 'select_serial_terminal';
 use mmapi 'get_current_job_id';
 use utils qw(zypper_call script_retry);
 use version_utils 'is_sle';
+use publiccloud::utils 'detect_worker_ip';
 use registration qw(add_suseconnect_product get_addon_fullname);
 
 sub run {
@@ -25,7 +26,8 @@ sub run {
 
     # If 'aws' is preinstalled, we test that version
     if (script_run("which aws") != 0) {
-        add_suseconnect_product(get_addon_fullname('pcm'), (is_sle('=12-sp5') ? '12' : undef));
+        # Public Cloud module is not needed since SLE 16 to install aws cli
+        add_suseconnect_product(get_addon_fullname('pcm'), (is_sle('=12-sp5') ? '12' : undef)) unless (is_sle('16+'));
         add_suseconnect_product(get_addon_fullname('phub')) if is_sle('=12-sp5');
         zypper_call 'in aws-cli jq';
     }
@@ -52,7 +54,7 @@ sub run {
     $create_security_group .= " --tag-specifications 'ResourceType=security-group,Tags=[$tag]'";
     assert_script_run($create_security_group, 180);
     my $security_group_id = script_output("aws ec2 describe-security-groups --filters Name=group-name,Values=$security_group_name --query 'SecurityGroups[*].GroupId' --output=text", 180);
-    my $worker_public_ip = script_output('curl -q http://checkip.amazonaws.com');
+    my $worker_public_ip = detect_worker_ip();
     assert_script_run("aws ec2 authorize-security-group-ingress --group-id $security_group_id --protocol tcp --port 22 --cidr $worker_public_ip/32");
 
     my $run_instances = "aws ec2 run-instances --image-id $image_id --count 1 --security-group-ids $security_group_id --instance-type t2.micro --key-name $ssh_key";

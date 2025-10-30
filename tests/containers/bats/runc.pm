@@ -34,10 +34,10 @@ sub run {
     my ($self) = @_;
     select_serial_terminal;
 
-    my @pkgs = qw(glibc-devel-static go1.24 jq libseccomp-devel make runc);
+    my @pkgs = qw(glibc-devel-static go1.24 libseccomp-devel make runc);
     push @pkgs, "criu" if is_tumbleweed;
 
-    $self->bats_setup(@pkgs);
+    $self->setup_pkgs(@pkgs);
 
     record_info("runc version", script_output("runc --version"));
     record_info("runc features", script_output("runc features"));
@@ -47,14 +47,14 @@ sub run {
 
     # Download runc sources
     my $runc_version = script_output "runc --version  | awk '{ print \$3 }'";
-    patch_sources "runc", "v$runc_version", "tests/integration", bats_patches();
+    patch_sources "runc", "v$runc_version", "tests/integration";
 
     # Compile helpers used by the tests
     my $helpers = script_output "find contrib/cmd tests/cmd -mindepth 1 -maxdepth 1 -type d ! -name _bin -printf '%f ' || true";
     record_info("helpers", $helpers);
     run_command "make $helpers || true";
 
-    unless (get_var("BATS_TESTS")) {
+    unless (get_var("RUN_TESTS")) {
         # Skip this test due to https://bugzilla.suse.com/show_bug.cgi?id=1247568
         run_command "rm -f tests/integration/no_pivot.bats" if is_ppc64le;
         # Skip this test due to https://bugzilla.suse.com/show_bug.cgi?id=1247567

@@ -4,7 +4,7 @@
 # SPDX-License-Identifier: FSFAP
 
 # Summary: Check public cloud specific services
-# Maintainer: qa-c <qa-c@suse.de>
+# Maintainer: QE-C team <qa-c@suse.de>
 
 use base 'publiccloud::basetest';
 use serial_terminal 'select_serial_terminal';
@@ -20,16 +20,38 @@ sub run {
     select_host_console();
 
     my $instance = $args->{my_instance};
-
-    # Debug
-    $instance->ssh_script_run('systemctl --no-pager list-units');
-
-    # Check if there are any failed services
-    my $failed_services = $instance->ssh_script_output('systemctl --failed');
-    unless ($failed_services =~ /0 loaded units listed/) {
-        record_info("Failing services!", $failed_services);
-        die("There are some failed services!");
+    my %known_failing_services = (
+        'systemd-vconsole-setup' => 'bsc#1249902 - systemd-vconsole-setup.service failed to load',
+        augenrules => 'bsc#1250320 - augenrules.service fails at startup on Hardened Images'
+    );
+    $known_failing_services{guestregister} = 'Custom ignore of guestregister via openQA variable' if (get_var('PUBLIC_CLOUD_IGNORE_UNREGISTERED'));
+    my $failed_services_output = $instance->ssh_script_output(
+        'sudo systemctl --failed --no-legend --plain --no-pager | awk "{print \\$1}"'
+    );
+    my @failed_services = split /\s+/, $failed_services_output;
+    if (!@failed_services) {
+        record_info("All SVCs good", "No failed services found.");
+    } else {
+        my $failed = 0;
+        foreach my $service (@failed_services) {
+            $service =~ s/\.service//;    # Removes .service if exists
+            if (exists($known_failing_services{$service})) {
+                my $reference = $known_failing_services{$service};
+                record_soft_failure($reference);
+            }
+            else {
+                my $log_output = $instance->ssh_script_output(
+                    "sudo journalctl -u $service --no-pager"
+                );
+                record_info(
+                    "Failing services!", "SVC $service FAILED:\n$log_output"
+                );
+                $failed = 1;
+            }
+        }
+        die('Some services failed to start.') if ($failed);
     }
+
     # waagent, cloud-init, google agents not available in Micro
     unless (is_sle_micro) {
         if (is_azure) {

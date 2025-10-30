@@ -6,7 +6,7 @@
 # Package: perl-base ltp
 # Summary: Use perl script to run LTP on public cloud
 #
-# Maintainer: Clemens Famulla-Conrad <cfamullaconrad@suse.de>, qa-c team <qa-c@suse.de>
+# Maintainer: QE-C team <qa-c@suse.de>
 
 use Mojo::Base 'publiccloud::basetest';
 use testapi;
@@ -18,7 +18,7 @@ use Mojo::UserAgent;
 use LTP::utils qw(get_ltproot prepare_whitelist_environment);
 use LTP::install qw(get_required_build_dependencies get_maybe_build_dependencies get_submodules_to_rebuild);
 use LTP::WhiteList;
-use publiccloud::utils qw(is_byos is_gce registercloudguest register_openstack install_in_venv get_python_exec venv_activate zypper_install_remote zypper_install_available_remote zypper_add_repo_remote);
+use publiccloud::utils qw(is_byos is_ondemand is_gce registercloudguest register_openstack install_in_venv get_python_exec venv_activate zypper_install_remote zypper_install_available_remote zypper_add_repo_remote);
 use publiccloud::ssh_interactive 'select_host_console';
 use Data::Dumper;
 use version_utils;
@@ -230,8 +230,6 @@ sub run {
 
     $self->prepare_kirk($instance);
 
-    $self->upload_runtest($instance, $provider);
-
     $self->printk_loglevel($instance);
 
     my $reset_cmd = $root_dir . '/restart_instance.sh ' . instance_log_args($provider, $instance);
@@ -252,7 +250,8 @@ sub prepare_instance {
     my ($self, $args) = @_;
     unless ($args->{my_provider} && $args->{my_instance}) {
         $args->{my_provider} = $self->provider_factory();
-        $args->{my_instance} = $args->{my_provider}->create_instance(check_guestregister => is_openstack ? 0 : 1);
+        $args->{my_instance} = $args->{my_provider}->create_instance();
+        $args->{my_instance}->wait_for_guestregister() if (is_ondemand());
     }
     return ($args->{my_provider}, $args->{my_instance});
 }
@@ -326,13 +325,6 @@ sub prepare_kirk {
     venv_activate($venv);
 }
 
-sub upload_runtest {
-    my ($self, $instance, $provider) = @_;
-    assert_script_run('curl ' . data_url('publiccloud/ltp_runtest') . ' -o publiccloud');
-    $instance->scp("publiccloud", 'remote:/tmp/publiccloud', 9999);
-    $instance->ssh_assert_script_run(cmd => "sudo mv /tmp/publiccloud /opt/ltp/runtest/publiccloud");
-}
-
 sub printk_loglevel {
     my ($self, $instance) = @_;
     # this will print /all/ kernel messages to the console. So in case kernel panic we will have some data to analyse
@@ -346,6 +338,8 @@ sub prepare_logging {
 
 sub prepare_ltp_cmd {
     my ($self, $instance, $provider, $reset_cmd, $ltp_command, $skip_tests, $env) = @_;
+    my $exec_timeout = get_var('LTP_EXEC_TIMEOUT', 1200);
+    my $suite_timeout = get_var('LTP_SUITE_TIMEOUT', 9600);
 
     my $sut = ':user=' . $instance->username;
     $sut .= ':sudo=1';
@@ -356,11 +350,12 @@ sub prepare_ltp_cmd {
     my $python_exec = get_python_exec();
     my $cmd = "$python_exec kirk ";
     $cmd .= '--verbose ';
-    $cmd .= '--exec-timeout=1200 ';
-    $cmd .= '--suite-timeout=5400 ';
+    $cmd .= '--exec-timeout=' . $exec_timeout . ' ';
+    $cmd .= '--suite-timeout=' . $suite_timeout . ' ';
     $cmd .= '--run-suite ' . $ltp_command . ' ';
     $cmd .= '--skip-tests \'' . $skip_tests . '\' ' if $skip_tests;
-    $cmd .= '--sut=ssh' . $sut . ' ';
+    $cmd .= '--sut default:com=ssh ';
+    $cmd .= '--com=ssh' . $sut . ' ';
     $cmd .= '--env ' . $env . ' ' if ($env);
     return $cmd;
 }

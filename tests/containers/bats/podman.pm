@@ -38,8 +38,7 @@ sub run_tests {
 
     run_command 'kill %1; kill -9 %1 || true' if ($remote);
 
-    run_command 'podman rm -vf $(podman ps -aq --external) || true';
-    run_command "podman system reset -f";
+    cleanup_podman;
 
     return ($ret);
 }
@@ -48,7 +47,7 @@ sub run {
     my ($self) = @_;
     select_serial_terminal;
 
-    my @pkgs = qw(aardvark-dns apache2-utils buildah catatonit glibc-devel-static go1.24 gpg2 jq libgpgme-devel
+    my @pkgs = qw(aardvark-dns apache2-utils buildah catatonit glibc-devel-static go1.24 gpg2 libgpgme-devel
       libseccomp-devel make netavark openssl podman podman-remote python3-PyYAML skopeo socat sudo systemd-container xfsprogs);
     push @pkgs, qw(criu libcriu2) if is_tumbleweed;
     push @pkgs, qw(netcat-openbsd) if is_sle("<16");
@@ -59,7 +58,7 @@ sub run {
         push @pkgs, "qemu-arm";
     }
 
-    $self->bats_setup(@pkgs);
+    $self->setup_pkgs(@pkgs);
 
     run_command "podman system reset -f";
     run_command "modprobe ip6_tables";
@@ -75,21 +74,24 @@ sub run {
 
     # Download podman sources
     my $podman_version = script_output "podman --version | awk '{ print \$3 }'";
-    patch_sources "podman", "v$podman_version", "test/system", bats_patches();
+    patch_sources "podman", "v$podman_version", "test/system";
 
     $oci_runtime = get_var("OCI_RUNTIME", script_output("podman info --format '{{ .Host.OCIRuntime.Name }}'"));
 
     # Patch tests
     run_command "sed -i 's/^PODMAN_RUNTIME=/&$oci_runtime/' test/system/helpers.bash";
     run_command "rm -f contrib/systemd/system/podman-kube@.service.in";
-    unless (get_var("BATS_TESTS")) {
+    unless (get_var("RUN_TESTS")) {
         # This test fails on systems with GNU tar 1.35 due to
         # https://bugzilla.suse.com/show_bug.cgi?id=1246607
         run_command "rm -f test/system/125-import.bats" if (!is_x86_64 && (is_tumbleweed || is_sle('>=16.0')));
         # This test is flaky on architectures other than x86_64
         run_command "rm -f test/system/180-blkio.bats" unless is_x86_64;
-        # This test is flaky on ppc64le & s390x
-        run_command "rm -f test/system/220-healthcheck.bats" if (is_ppc64le || is_s390x);
+        # This test is flaky on s390x
+        run_command "rm -f test/system/220-healthcheck.bats" if is_s390x;
+        # This test fails on ppc64le with crun
+        # https://github.com/containers/crun/issues/1882
+        run_command "rm -f test/system/280-update.bats" if (is_ppc64le && $oci_runtime eq "crun");
         # This test is flaky and will fail if system is "full"
         run_command "rm -f test/system/320-system-df.bats";
         # This tests needs criu, available only on Tumbleweed

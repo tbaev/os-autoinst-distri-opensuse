@@ -226,7 +226,9 @@ sub sles4sap_cleanup {
     type_string('', terminate_with => 'ETX');
 
     qesap_cluster_logs();
-    qesap_supportconfig_logs(provider => get_required_var('PUBLIC_CLOUD_PROVIDER'));
+    if ((defined $self->{result}) && ($self->{result} eq 'fail')) {
+        qesap_supportconfig_logs(provider => get_required_var('PUBLIC_CLOUD_PROVIDER'));
+    }
     qesap_upload_logs();
     upload_logs('/var/tmp/ssh_sut.log', failok => 1, log_name => 'ssh_sut.log.txt');
 
@@ -536,6 +538,8 @@ sub cleanup_resource {
         }
         sleep 30;
     }
+    # Show the status of resource after cleanup resource
+    record_info('Cluster status after cleanup resource', $self->run_cmd(cmd => $crm_mon_cmd));
 }
 
 =head2 check_takeover
@@ -1394,6 +1398,13 @@ sub wait_for_cluster {
                 record_soft_failure('bsc#1233026 - Error occurred, see previous output: Proceeding despite failure.');
                 return;
             }
+            # Call cleanup_resource if $hanasr_ready or $crm_ok is false
+            if (!$hanasr_ready || !$crm_ok) {
+                $self->cleanup_resource();
+                record_soft_failure("jsc#TEAM-10642 SAPHanaSR-ScaleUp-PerfOpt failed in 'Cluster is not ready after specified retries'");
+                $crm_output = $self->run_cmd(cmd => $crm_mon_cmd, quiet => 1);
+                return if (check_crm_output(input => $crm_output));
+            }
             die('Cluster is not ready after specified retries.');
         }
         sleep($args{wait_time});
@@ -1501,7 +1512,7 @@ sub wait_for_idle {
     my ($self, %args) = @_;
     my $timeout = $args{timeout} // 240;
 
-    my $rc = $self->run_cmd(cmd => 'cs_wait_for_idle --sleep 5', timeout => $timeout, rc_only => 1, proceed_on_failure => 1);
+    my $rc = $self->run_cmd_retry(cmd => 'cs_wait_for_idle --sleep 5', timeout => $timeout, rc_only => 1);
     if ($rc == 124) {
         record_info('WARN cs_wait_for_idle', "cs_wait_for_idle timed out after $timeout. Gathering info and retrying");
         $self->run_cmd(cmd => 'cs_clusterstate', proceed_on_failure => 1);
