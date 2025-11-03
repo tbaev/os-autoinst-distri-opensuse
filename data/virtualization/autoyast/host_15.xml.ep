@@ -51,7 +51,7 @@
 	<alias>Development-Tools-OBS-IBS</alias>
       </listentry>
         <listentry>
-          <media_url>http://download.suse.de/ibs/SUSE/Updates/SLE-Module-Development-Tools-OBS/15-SP7/x86_64/</media_url>
+          <media_url>http://download.suse.de/ibs/SUSE/Updates/SLE-Module-Development-Tools-OBS/15-SP7/x86_64/update</media_url>
           <alias>TEST_9</alias>
         </listentry>
       % }
