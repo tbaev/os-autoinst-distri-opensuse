@@ -711,7 +711,7 @@ sub create_guest {
         $virtinstall .= " --wait -1";
         # Configure boot firmware based on guest configuration
         if ($guest->{boot_firmware} && $guest->{boot_firmware} eq 'efi') {
-            $virtinstall .= " --boot firmware=efi";
+            $virtinstall .= " --boot firmware=efi,firmware.feature0.enabled=no,firmware.feature0.name=secure-boot";
             record_info("Boot Firmware", "Guest $name configured for EFI boot");
         }
         if ($guest->{boot_firmware} && $guest->{boot_firmware} eq 'efi_sev_es') {
