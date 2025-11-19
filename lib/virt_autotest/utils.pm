@@ -166,7 +166,7 @@ sub restart_modular_libvirt_daemons {
             } else {
                 systemctl("restart virt${daemon}d\{,-ro,-admin\}.socket");
             }
-        sleep 5;
+        sleep 15;
         }
 
         # Introduce idle time here (e.g., sleep 5) if necessary
