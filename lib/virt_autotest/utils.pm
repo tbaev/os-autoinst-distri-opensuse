@@ -166,10 +166,11 @@ sub restart_modular_libvirt_daemons {
             } else {
                 systemctl("restart virt${daemon}d\{,-ro,-admin\}.socket");
             }
+        sleep 5;
         }
 
         # Introduce idle time here (e.g., sleep 5) if necessary
-        sleep 30;
+        sleep 5;
 
         # Restart the services after a brief idle time
         foreach my $daemon (@daemons) {
