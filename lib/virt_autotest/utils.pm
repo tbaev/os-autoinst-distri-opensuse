@@ -169,7 +169,7 @@ sub restart_modular_libvirt_daemons {
         }
 
         # Introduce idle time here (e.g., sleep 5) if necessary
-        sleep 5;
+        sleep 30;
 
         # Restart the services after a brief idle time
         foreach my $daemon (@daemons) {
