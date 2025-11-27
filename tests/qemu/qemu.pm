@@ -44,8 +44,12 @@ sub run {
         assert_screen 'qemu-no-bootable-device', 60;
     }
     elsif (is_ppc64le) {
+        if (is_sle_micro('=6.2')) {
+            record_soft_failure('workaround for poo#193099');
+            install_qemu('patterns-micro-kvm_host');
+        }
         is_qemu_preinstalled or install_qemu('qemu-ppc');
-        enter_cmd "qemu-system-ppc64 -nographic";
+        enter_cmd "qemu-system-ppc64";
         assert_screen ['qemu-open-firmware-ready', 'qemu-ppc64-no-trans-mem'], 60;
         if (match_has_tag 'qemu-ppc64-no-trans-mem') {
             # this should only happen on SLE12SP5
