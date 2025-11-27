@@ -6,6 +6,8 @@
 # Summary: Run QEMU as emulator
 # Maintainer: Dominik Heidler <dheidler@suse.de>
 
+use strict;
+use warnings;
 use base "consoletest";
 use testapi;
 use Utils::Backends;
@@ -16,16 +18,8 @@ use version_utils qw(is_sle_micro is_leap_micro is_transactional);
 
 # 'patterns-microos-kvm_host' is required for SUMA client use case
 sub is_qemu_preinstalled {
-    if (is_sle_micro('<6.0') || is_leap_micro('<6.0')) {
+    if (is_sle_micro || is_leap_micro) {
         assert_script_run('rpm -q patterns-microos-kvm_host');
-        return 1;
-    }
-    elsif (is_sle_micro('>=6.2') || is_leap_micro('>=6.2')) {
-        assert_script_run('rpm -q patterns-micro-kvm_host');
-        return 1;
-    }
-    elsif (is_sle_micro('>=6.0') || is_leap_micro('>=6.0')) {
-        assert_script_run('rpm -q patterns-base-kvm_host');
         return 1;
     }
     return 0;
@@ -50,9 +44,12 @@ sub run {
         assert_screen 'qemu-no-bootable-device', 60;
     }
     elsif (is_ppc64le) {
+        if (is_sle_micro('=6.2')) {
+            record_soft_failure('workaround for poo#193099');
+            install_qemu('patterns-micro-kvm_host');
+        }
         is_qemu_preinstalled or install_qemu('qemu-ppc');
-        record_soft_failure('workaround for bsc#1230042 - plan to remove this workaround until PPC images test on PowerVM');
-        enter_cmd "qemu-system-ppc64 -vga none -nographic";
+        enter_cmd "qemu-system-ppc64 --nographic";
         assert_screen ['qemu-open-firmware-ready', 'qemu-ppc64-no-trans-mem'], 60;
         if (match_has_tag 'qemu-ppc64-no-trans-mem') {
             # this should only happen on SLE12SP5
@@ -64,8 +61,8 @@ sub run {
     elsif (is_s390x) {
         is_qemu_preinstalled or install_qemu('qemu-s390x');
         # use kernel from host system for booting
-        enter_cmd "qemu-system-s390x -nographic -m 1G -kernel /boot/image -initrd /boot/initrd";
-        assert_screen ['qemu-reached-target-basic-system', 'qemu-s390x-exec-0x7f4-not-impl', 'qemu-linux-req-more-recent-proc-hw', 'qemu-reached-target-socket-units'], 400;
+        enter_cmd "qemu-system-s390x -nographic -kernel /boot/image -initrd /boot/initrd";
+        assert_screen ['qemu-reached-target-basic-system', 'qemu-s390x-exec-0x7f4-not-impl', 'qemu-linux-req-more-recent-proc-hw'], 180;
         if (match_has_tag 'qemu-s390x-exec-0x7f4-not-impl') {
             record_soft_failure 'bsc#1124595 - qemu on s390x fails when called WITHOUT kvm: EXECUTE on instruction prefix 0x7f4 not implemented';
             return;
@@ -82,11 +79,7 @@ sub run {
         assert_script_run 'dd if=/usr/share/qemu/qemu-uefi-aarch64.bin of=flash0.img conv=notrunc';
         assert_script_run 'dd if=/dev/zero of=flash1.img bs=1M count=64';
         enter_cmd "qemu-system-aarch64 -M virt,usb=off -cpu cortex-a57 -nographic -pflash flash0.img -pflash flash1.img";
-        assert_screen([qw(qemu-enter-boot-manager qemu-uefi-shell)], 600);
-        if (match_has_tag('qemu-enter-boot-manager')) {
-            send_key('e');
-            assert_screen('qemu-uefi-boot-manager');
-        }
+        assert_screen 'qemu-uefi-shell', 600;
     }
     else {
         die sprintf("Test case is missing support for %s architecture", get_var('ARCH'));
