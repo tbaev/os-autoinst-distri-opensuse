@@ -8,14 +8,14 @@ grub2_config() {
     sed -i -r 's/^(\s|#)*GRUB_TERMINAL_INPUT=.*$/GRUB_TERMINAL_INPUT="gfxterm console"/g' $file
     sed -i -r 's/^(\s|#)*GRUB_TERMINAL_OUTPUT=.*$/GRUB_TERMINAL_OUTPUT="gfxterm console"/g' $file
     sed -i 's/console=tty0//g' $file
-    sed -i 's/console=tty[^ ]*/console={{SERIALCONSOLE}},115200/g' $file
+    sed -i 's/console=tty[^ ]*/console=ttyS1,115200/g' $file
     echo "DEBUG: now $file is,"
     cat $file
     grub2-mkconfig -o /boot/grub2/grub.cfg
 }
 
 # Redirect output to the console
-exec > >(exec tee -a /dev/{{SERIALCONSOLE}}) 2>&1
+exec > >(exec tee -a /dev/ttyS1) 2>&1
 
 # Configure grub2 in the system
 grub2_config
