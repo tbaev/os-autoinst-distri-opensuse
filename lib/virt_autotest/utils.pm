@@ -1050,6 +1050,7 @@ sub setup_common_ssh_config {
     if (script_run("grep \"Host \\\*\" $args{ssh_config_file}") ne 0) {
         type_string("cat >> $args{ssh_config_file} <<EOF
 Host *
+    IdentityFile /root/.ssh/id_rsa
     UserKnownHostsFile /dev/null
     StrictHostKeyChecking no
     User root
