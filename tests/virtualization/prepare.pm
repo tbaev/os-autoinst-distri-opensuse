@@ -11,6 +11,7 @@ use utils 'zypper_call';
 
 sub run {
     my ($self) = @_;
+    # just a test
     # login and preparation of the system
     if (get_var('DESKTOP') =~ /icewm/) {
         send_key 'ret';
