@@ -255,7 +255,7 @@ if (get_var("REGRESSION", '') =~ /xen/) {
             name => 'sles16efi_online',
             extra_params => '--os-variant sles16',    # Use SLES16 variant
             distro => 'SLE_16',
-            iso_url => 'http://openqa.suse.de/assets/iso/SLES-16.0-Online-x86_64-Build135.5.install.iso',    # ISO download URL
+            iso_url => 'http://openqa.suse.de/assets/iso/SLES-16.0-Online-x86_64-GM.install.iso',    # ISO download URL
             boot_firmware => 'efi',    # SLES16 only supports EFI guests, no BIOS support
         },
         sles16efi_full => {
