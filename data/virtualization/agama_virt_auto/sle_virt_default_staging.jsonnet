@@ -8,6 +8,7 @@ local urls = if repo != '' then std.split(repo, ',') else [];
   },
   bootloader: {
     stopOnBootMenu: true,
+    extraKernelParams: mem_encrypt=on kvm_amd.sev=1
   },
   user: {
     fullName: 'Bernhard M. Wiedemann',
