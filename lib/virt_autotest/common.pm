@@ -285,6 +285,18 @@ if (get_var("REGRESSION", '') =~ /xen/) {
             boot_firmware => 'efi_sev_es',    # sev_es
             launch_security => 'sev,policy=0x06',    # sev_es
             memory_backing => 'locked=on',    # sev_es
+        },
+        'sles16efi_full-sev-es' => {
+            name => 'sles16efi_full',
+            extra_params => '--os-variant sles16',    # Use SLES16 variant
+            distro => 'SLE_16',
+            location => 'http://download.suse.de/install/SLP/SLES-16.0-Full-LATEST/x86_64/DVD1/',    # Network location for live OS
+            install_url => 'http://download.suse.de/install/SLP/SLE-16-Packages-TEST/x86_64/DVD1/',    # Install repository URL
+	    # location => 'http://openqa.suse.de/assets/repo/fixed/SLES-16.0-Full-x86_64-GM.install/',    # Network location for live OS
+            # install_url => 'http://openqa.suse.de/assets/repo/SLES-16.0-x86_64-Build135.5/',    # Install repository URL
+            boot_firmware => 'efi_sev_es',    # sev_es
+            launch_security => 'sev,policy=0x06',    # sev_es
+            memory_backing => 'locked=on',    # sev_es
         }
     );
     # Filter out guests not allowed for the detected SLE version
@@ -349,6 +361,8 @@ if (get_var("REGRESSION", '') =~ /xen/) {
             @allowed_guests = qw(sles15sp7efi sles16efi_online);
         } elsif (check_var('ENABLE_SEV_SNP', '1')) {
             @allowed_guests = qw(sles15sp7efi sles16efi_full);
+        } elsif (check_var('ENABLE_SEV_ES', '1')) {
+            @allowed_guests = qw(sles15sp7efi-sev-es sles16efi_full-sev-es);
         } elsif (check_var('ENABLE_SNAPSHOTS', '1')) {
             @allowed_guests = qw(sles15sp7efi-snapshot sles16efi_full_snapshot);
         }
