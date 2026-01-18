@@ -362,7 +362,7 @@ if (get_var("REGRESSION", '') =~ /xen/) {
         } elsif (check_var('ENABLE_SEV_SNP', '1')) {
             @allowed_guests = qw(sles15sp7efi sles16efi_full);
         } elsif (check_var('ENABLE_SEV_ES', '1')) {
-            @allowed_guests = qw(sles15sp7efi-sev-es sles16efi_full-sev-es);
+            @allowed_guests = qw(sles15sp7-efi-sev-es sles16efi_full-sev-es);
         } elsif (check_var('ENABLE_SNAPSHOTS', '1')) {
             @allowed_guests = qw(sles15sp7efi-snapshot sles16efi_full_snapshot);
         }
