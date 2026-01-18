@@ -287,7 +287,7 @@ if (get_var("REGRESSION", '') =~ /xen/) {
             memory_backing => 'locked=on',    # sev_es
         },
         'sles16efi_full-sev-es' => {
-            name => 'sles16efi_full',
+            name => 'sles16efi_full-sev-es',
             extra_params => '--os-variant sles16',    # Use SLES16 variant
             distro => 'SLE_16',
             location => 'http://download.suse.de/install/SLP/SLES-16.0-Full-LATEST/x86_64/DVD1/',    # Network location for live OS
