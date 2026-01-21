@@ -1,5 +1,7 @@
 local repo = '{{INCIDENT_REPO}}';
 local urls = if repo != '' then std.split(repo, ',') else [];
+local extraKernelParams = if '{{EXTRA_KERNEL_PARAMS}}' != '' then '{{EXTRA_KERNEL_PARAMS}}' else '';
+
 {
   product: {
     id: '{{AGAMA_PRODUCT_ID}}',
@@ -8,7 +10,7 @@ local urls = if repo != '' then std.split(repo, ',') else [];
   },
   bootloader: {
     stopOnBootMenu: true,
-    extraKernelParams: '{{EXTRA_KERNEL_PARAMS}}'
+    extraKernelParams: 'extraKernelParams'
   },
   user: {
     fullName: 'Bernhard M. Wiedemann',
