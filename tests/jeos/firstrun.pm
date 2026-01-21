@@ -25,11 +25,11 @@ use wsl qw(wsl_choose_sles register_via_scc wsl_firstboot_refocus);
 my $user_created = 0;
 
 sub post_fail_hook {
-    assert_script_run('timedatectl');
-    assert_script_run('locale');
-    assert_script_run('cat /etc/vconsole.conf');
-    assert_script_run('cat /etc/fstab');
-    assert_script_run('ldd --help');
+    script_run('timedatectl');
+    script_run('locale');
+    script_run('cat /etc/vconsole.conf');
+    script_run('cat /etc/fstab');
+    script_run('ldd --help');
 }
 
 sub verify_user_info {
@@ -427,7 +427,7 @@ sub run {
         wait_still_screen;
     }
     # Manually configure root-console as we skipped some parts in root-console's activation
-    $testapi::distri->disable_key_repeat_if_applicable();
+    $testapi::distri->disable_key_repeat_if_applicable() unless current_console() =~ /ssh/;
     $testapi::distri->set_standard_prompt('root');
     assert_script_run('setterm -blank 0') unless is_s390x;
 

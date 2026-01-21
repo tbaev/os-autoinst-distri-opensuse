@@ -30,6 +30,7 @@ BASE_VERSION | string | | |
 BATS_* | string | | Used for [BATS tests](https://github.com/os-autoinst/os-autoinst-distri-opensuse/blob/master/tests/containers/bats/README.md) |
 BETA | boolean | false | Enables checks and processing of beta warnings. Defines current stage of the product under test.
 BCI_DEVEL_REPO | string | | This parameter is given to the bci-tests to inject a different SLE_BCI repository url to the container image instead of the default one. Used by `bci_test.pm`.
+BCI_SKIP_ENVS | string | | This tells tox to skip any env whose name matches that pattern.
 BCI_TEST_ENVS | string | | The list of environments to be tested, e.g. `base,init,dotnet,python,node,go,multistage`. Used by `bci_test.pm`. Use `-` to not schedule any BCI test runs.
 BCI_TESTS_REPO | string | https://github.com/SUSE/BCI-tests.git | If set, use this instead of the standart BCI-Test repo (see default). Uses the same syntax as CASE_DIR, so to use branch `branch123` on that repo use e.g. https://github.com/SUSE/BCI-tests#branch123
 BCI_TIMEOUT | string | | Timeout given to the command to test each environment. Used by `bci_test.pm`.
@@ -500,6 +501,7 @@ Following variables are relevant for agama installation
 Variable        | Type      | Default value | Details
 ---             | ---       | ---           | ---
 AGAMA | boolean | 0 | Agama installation support
+AGAMA_FORCE_REGISTER | boolean | 0 | Register the system even using full iso image
 AGAMA_LIVE_ISO_URL | string | | The url of agama live iso to pass as kernel's command-line parameter. Example of usage "root=live:http://agama.iso"
 INST_AUTO | string | | The auto-installation is started by passing `inst.auto=<url>` on the kernel's command line
 INST_INSTALL_URL | string | | This will support using 'inst.install_url' boot parameter for overriding the default installation repositories. You can use multiple URLs separated by comma: inst.install_url=https://example.com/1,https://example.com/2
