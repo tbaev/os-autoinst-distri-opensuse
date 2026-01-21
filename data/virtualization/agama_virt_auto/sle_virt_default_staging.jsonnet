@@ -8,7 +8,7 @@ local urls = if repo != '' then std.split(repo, ',') else [];
   },
   bootloader: {
     stopOnBootMenu: true,
-    extraKernelParams: ''
+    extraKernelParams: '{{EXTRA_KERNEL_PARAMS}}'
   },
   user: {
     fullName: 'Bernhard M. Wiedemann',
