@@ -10,7 +10,7 @@ local $addedKernelParams =  ('{{EXTRA_KERNEL_PARAMS}}' eq '{{EXTRA_KERNEL' . '_P
   },
   bootloader: {
     stopOnBootMenu: true,
-    extraKernelParams: addedKernelParams
+    extraKernelParams: $addedKernelParams
   },
   user: {
     fullName: 'Bernhard M. Wiedemann',
