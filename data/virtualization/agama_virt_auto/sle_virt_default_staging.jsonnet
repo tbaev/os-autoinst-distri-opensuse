@@ -9,7 +9,7 @@ local addedKernelParams = if '{{EXTRA_KERNEL_PARAMS}}' == '{{EXTRA_KERNEL' + '_P
     addons: []
   },
   bootloader: {
-    stopOnBootMenu: true,
+    stopOnBootMenu: '{{EXTRA_KERNEL_PARAMS}}',
     extraKernelParams: addedKernelParams
   },
   user: {
