@@ -1,6 +1,6 @@
 local repo = '{{INCIDENT_REPO}}';
 local urls = if repo != '' then std.split(repo, ',') else [];
-local $addedKernelParams =  ('{{EXTRA_KERNEL_PARAMS}}' eq '{{EXTRA_KERNEL' . '_PARAMS}}') ? '' : '{{EXTRA_KERNEL_PARAMS}}';
+local addedKernelParams = if '{{EXTRA_KERNEL_PARAMS}}' == '{{EXTRA_KERNEL' + '_PARAMS}}' then '' else '{{EXTRA_KERNEL_PARAMS}}';
 
 {
   product: {
@@ -10,7 +10,7 @@ local $addedKernelParams =  ('{{EXTRA_KERNEL_PARAMS}}' eq '{{EXTRA_KERNEL' . '_P
   },
   bootloader: {
     stopOnBootMenu: true,
-    extraKernelParams: $addedKernelParams
+    extraKernelParams: addedKernelParams
   },
   user: {
     fullName: 'Bernhard M. Wiedemann',
