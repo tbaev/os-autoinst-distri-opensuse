@@ -1,6 +1,6 @@
 local repo = '{{INCIDENT_REPO}}';
 local urls = if repo != '' then std.split(repo, ',') else [];
-local addedKernelParams = if '{{EXTRA_KERNEL_PARAMS}}' == '{{EXTRA_KERNEL' + '_PARAMS}}' then '' else '{{EXTRA_KERNEL_PARAMS}}';
+local $addedKernelParams =  ('{{EXTRA_KERNEL_PARAMS}}' eq '{{EXTRA_KERNEL' . '_PARAMS}}') ? '' : '{{EXTRA_KERNEL_PARAMS}}';
 
 {
   product: {
