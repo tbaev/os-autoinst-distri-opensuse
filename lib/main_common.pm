@@ -2501,10 +2501,10 @@ sub load_host_installation_modules {
 sub set_mu_virt_vars {
     # Set UPDATE_PACKAGE based on BUILD(format example, BUILD=:33310:dtb-armv7l)
     my $BUILD = get_required_var('BUILD');
-    $BUILD =~ /^:(\d+):([^:]+)$/im;
+    $BUILD =~ /^:([^:]+):(\d+):([^:]+)$/im;
 
-    die "BUILD value is $BUILD, but does not match required format." if (!$2);
-    my $_pkg = $2;
+    die "BUILD value is $BUILD, but does not match required format." if (!$3);
+    my $_pkg = $3;
     my $_update_package = '';
     # If $_pkg contains none, it is for ease of functional testing when no incidents are coming.
     if ($_pkg =~ /none/) {
