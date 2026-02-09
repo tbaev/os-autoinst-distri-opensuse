@@ -3,11 +3,12 @@
 # Copyright SUSE LLC
 # SPDX-License-Identifier: FSFAP
 # Maintainer: QE-SAP <qe-sap@suse.de>
-# Summary:  Executes list of playbooks compiled according to defined scenario.
+# Summary:  Executes list of ansible playbooks for SAP application setup and installation according to defined scenario.
 #           https://learn.microsoft.com/en-us/azure/sap/automation/tutorial#sap-application-installation
 # Playbooks can be found in SDAF repo: https://github.com/Azure/sap-automation/tree/main/deploy/ansible
 
 use parent 'sles4sap::sap_deployment_automation_framework::basetest';
+use sles4sap::sap_deployment_automation_framework::ansible;
 use sles4sap::sap_deployment_automation_framework::deployment;
 use sles4sap::sap_deployment_automation_framework::naming_conventions;
 use sles4sap::console_redirection qw(connect_target_to_serial disconnect_target_from_serial);
@@ -17,9 +18,10 @@ use publiccloud::utils 'is_byos';
 
 =head1 SYNOPSIS
 
-Executes list of SDAF ansible playbooks according to defined scenario:
-          https://learn.microsoft.com/en-us/azure/sap/automation/tutorial#sap-application-installation
+Executes list of ansible playbooks for SAP application setup and installation according to defined scenario.
+L<https://learn.microsoft.com/en-us/azure/sap/automation/tutorial#sap-application-installation>
 Playbooks can be found in SDAF repo: https://github.com/Azure/sap-automation/tree/main/deploy/ansible
+Test module must be executed after C<sles4sap/sap_deployment_automation_framework/os_preparation>.
 
 List of executed playbooks is compiled using OpenQA setting B<`SDAF_DEPLOYMENT_SCENARIO`>.
 It is defined by list of components delimited by a comma ",".
@@ -62,7 +64,6 @@ sub run {
     # Skip module if existing deployment is being re-used
     return if sdaf_deployment_reused();
 
-    serial_console_diag_banner('Module sdaf_deploy_hanasr.pm : start');
     my $sap_sid = get_required_var('SAP_SID');
     my $sdaf_config_root_dir = get_sdaf_config_path(
         deployment_type => 'sap_system',
@@ -70,46 +71,29 @@ sub run {
         env_code => get_required_var('SDAF_ENV_CODE'),
         sdaf_region_code => convert_region_to_short(get_required_var('PUBLIC_CLOUD_REGION')),
         sap_sid => $sap_sid);
-    my $sut_private_key_path = get_sut_sshkey_path(config_root_path => $sdaf_config_root_dir);
     # setup = combination of all components chosen for installation
     # Leave OpenQA setting mandatory without default value to keep it consistent across all test modules.
-    my @setup = split(/,/, get_required_var('SDAF_DEPLOYMENT_SCENARIO'));
-    validate_components(components => \@setup);
-
-    # List of playbooks (and their options) to be executed.
-    # Playbook description is here as well: https://learn.microsoft.com/en-us/azure/sap/automation/run-ansible?tabs=linux
-    my @execute_playbooks = @{playbook_settings(components => \@setup)};
-    my @playbook_list = map { $_->{playbook_filename} } @execute_playbooks;
-
-    record_info('Playbook list', "Following playbooks will be executed:\n" . join("\n", @playbook_list));
+    my @components = split(/,/, get_required_var('SDAF_DEPLOYMENT_SCENARIO'));
+    validate_components(components => \@components);
 
     connect_target_to_serial();
     load_os_env_variables();
     # Some playbooks use azure cli
     az_login();
 
-    for my $playbook_options (@execute_playbooks) {
-        $sles4sap::sap_deployment_automation_framework::basetest::serial_regexp_playbook = 1;
+    my $playbook_setup = sles4sap::sap_deployment_automation_framework::ansible->new();
+    my $playbook_list = $playbook_setup->{playbook_list};
+    record_info('Playbook list', "Following playbooks will be executed:\n" .
+          join("\n", map($_->{playbook_filename}, @$playbook_list)));
+    # Get first playbook settings
+    my $playbook_options = $playbook_setup->get();
+    # Request next playbook in loop until all are executed
+    while ($playbook_options->{playbook_filename}) {
         sdaf_execute_playbook(%{$playbook_options}, sdaf_config_root_dir => $sdaf_config_root_dir);
-        $sles4sap::sap_deployment_automation_framework::basetest::serial_regexp_playbook = 0;
-
-        # tasks needed to be run after playbook 'pb_get-sshkey.yaml'
-        if ($playbook_options->{playbook_filename} =~ /pb_get-sshkey/) {
-            # Check if SSH key was created by playbook
-            record_info('File check', "Check if SSH key '$sut_private_key_path' was created by SDAF");
-            assert_script_run("test -f $sut_private_key_path");
-
-            # BYOS image registration must happen before executing any other playbooks
-            sdaf_register_byos(
-                sap_sid => $sap_sid,
-                sdaf_config_root_dir => $sdaf_config_root_dir,
-                scc_reg_code => get_required_var('SCC_REGCODE_SLES4SAP'))
-              if is_byos() || get_var('PUBLIC_CLOUD_FORCE_REGISTRATION');
-        }
-
+        # Get next playbook settings
+        $playbook_options = $playbook_setup->get();
     }
     disconnect_target_from_serial();
-    serial_console_diag_banner('Module sdaf_deploy_hanasr.pm : stop');
 }
 
 1;

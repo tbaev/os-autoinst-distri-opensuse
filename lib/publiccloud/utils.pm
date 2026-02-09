@@ -35,6 +35,7 @@ our @EXPORT = qw(
   deregister_addon
   define_secret_variable
   get_credentials
+  get_available_packages_remote
   validate_repo
   is_byos
   is_ondemand
@@ -52,7 +53,6 @@ our @EXPORT = qw(
   get_ssh_private_key_path
   permit_root_login
   prepare_ssh_tunnel
-  kill_packagekit
   allow_openqa_port_selinux
   ssh_update_transactional_system
   create_script_file
@@ -61,10 +61,6 @@ our @EXPORT = qw(
   get_python_exec
   zypper_add_repo_remote
   zypper_remove_repo_remote
-  get_installed_packages_remote
-  get_available_packages_remote
-  zypper_install_remote
-  zypper_install_available_remote
   wait_quit_zypper_pc
   detect_worker_ip
   upload_asset_on_remote
@@ -236,14 +232,13 @@ sub register_addons_in_pc {
     my ($instance) = @_;
     my @addons = split(/,/, get_var('SCC_ADDONS', ''));
     my $remote = $instance->username . '@' . $instance->public_ip;
-    my $zcmd = "--gpg-auto-import-keys ref";
-    my $ret = $instance->zypper_call_remote(cmd => $zcmd, exitcode => [0, 6, 7], timeout => 300);
+    # Using zypper_call_remote here appends `transactional-update -n pkg` and it
+    # fails with invalid syntax and causes registration failures.
+    #
+    # TODO: this is a hotfix. We need to fix the `zypper_call_remote` itself
+    # as transactional-update does not support repo actions => poo#195920)
+    my $ret = $instance->ssh_script_run(cmd => "sudo zypper -n --gpg-auto-import-keys ref");
     die 'No enabled repos defined: bsc#1245651' if $ret == 6;    # from zypper man page: ZYPPER_EXIT_NO_REPOS
-    if ($ret == 7) {
-        record_info('System management is locked by another application:', $instance->ssh_script_output(cmd => 'sudo pgrep -af "zypper|yast"', proceed_on_failure => 1));
-        wait_quit_zypper_pc($instance);
-    }
-    $instance->zypper_call_remote(cmd => $zcmd, timeout => 300, retry => 6, delay => 200);
     for my $addon (@addons) {
         next if ($addon =~ /^\s+$/);
         register_addon($remote, $addon);
@@ -419,17 +414,6 @@ sub prepare_ssh_tunnel {
     # Create log file for ssh tunnel
     my $ssh_sut = '/var/tmp/ssh_sut.log';
     assert_script_run "touch $ssh_sut; chmod 777 $ssh_sut";
-}
-
-sub kill_packagekit {
-    my ($instance) = @_;
-    my $ret = $instance->ssh_script_run(cmd => "sudo pkcon quit", timeout => 120);
-    if ($ret) {
-        # Older versions of systemd don't support "disable --now"
-        $instance->ssh_script_run(cmd => "sudo systemctl stop packagekitd");
-        $instance->ssh_script_run(cmd => "sudo systemctl disable packagekitd");
-        $instance->ssh_script_run(cmd => "sudo systemctl mask packagekitd");
-    }
 }
 
 
@@ -710,7 +694,8 @@ sub get_available_packages_remote {
 
     my %installed = map { $_ => 1 } @{get_installed_packages_remote($instance, $packages_ref)};
     my @not_installed = grep { !$installed{$_} } @$packages_ref;
-    return [] unless @not_installed;
+
+    return '' unless @not_installed;
 
     my $pkg_list = join(' ', @not_installed);
     my $output = $instance->ssh_script_output(
@@ -721,9 +706,8 @@ sub get_available_packages_remote {
     # Grep all "Name           : <pkg>" lines
     my %available = map { $_ => 1 } ($output =~ /^Name\s*:\s*(\S+)/mg);
 
-    # Return only those that are in the original not-installed list
     my @result = grep { $available{$_} } @not_installed;
-    return \@result;
+    return join(' ', @result);
 }
 
 =head2 zypper_add_repo_remote
@@ -758,51 +742,6 @@ sub zypper_remove_repo_remote {
         cmd => "sudo zypper -n removerepo $repo_name",
         timeout => 600
     );
-}
-
-=head2 zypper_install_remote
-
-zypper_install_remote($instance, $packages)
-
-This function installs the specified packages on the remote instance using zypper.
-It handles both transactional updates and regular zypper installations based on the system type.
-
-=cut
-
-sub zypper_install_remote {
-    my ($instance, $packages) = @_;
-
-    my @pkg_list = ref($packages) eq 'ARRAY' ? @$packages : ($packages);
-    my $pkg_str = join(' ', @pkg_list);
-
-    if (is_transactional) {
-        $instance->ssh_assert_script_run(
-            cmd => "sudo transactional-update -n pkg install --no-recommends $pkg_str",
-            timeout => 900
-        );
-        $instance->softreboot();
-    } else {
-        $instance->ssh_assert_script_run(
-            cmd => "sudo zypper -n in --no-recommends $pkg_str",
-            timeout => 600
-        );
-    }
-}
-
-=head2 zypper_install_available_remote
-
-zypper_install_available_remote($instance, $packages_ref)
-
-This function checks which packages from the provided list are available for installation on the remote instance.
-If any packages are available, it installs them using zypper_install_remote.
-
-=cut
-
-sub zypper_install_available_remote {
-    my ($instance, $packages_ref) = @_;
-    my $available_ref = get_available_packages_remote($instance, $packages_ref);
-    return unless @$available_ref;
-    zypper_install_remote($instance, $available_ref);
 }
 
 =head2 wait_quit_zypper_pc
@@ -892,15 +831,64 @@ sub upload_asset_on_remote {
     $instance->ssh_assert_script_run($mv_cmd);
 }
 
-=head2 $instance->zypper_call_remote
+=head2 zypper_call_remote
 
-    $instance->zypper_call_remote($command [, exitcode => $exitcode] [, timeout => $timeout];
+    zypper_call_remote($instance, cmd => $cmd, [%args]);
 
-Function wrapping zypper command for remote execution via ssh; not for tunnelling.
-Implements similar routine as lib/utils::zypper_call_remote, but for remote execution on publiccloud instances.
+Executes a C<zypper> or C<transactional-update> command on a remote C<$instance> via SSH.
+The function automatically handles command prefixing (adding sudo and non-interactive flags),
+retries on specific network/solver failures, and parses logs for detailed error reporting.
 
-Usage example:
-    $instance->zypper_call_remote("up", exitcode => [0,102,103], timeout => 300);
+=over 4
+
+=item B<cmd> => $string
+
+The zypper subcommand and arguments (e.g., C<'install -y vim'>). Do not include C<sudo> 
+or C<-n>, as these are added automatically. B<Note:> Piping to C<grep> is forbidden 
+to ensure exit codes are captured correctly.
+
+=item B<timeout> => $int
+
+Command timeout in seconds. Defaults to B<900> for transactional systems and 
+B<700> for standard systems. Must be greater than 0.
+
+=item B<exitcode> => $arrayref
+
+A list of exit codes to be treated as success. Defaults to C<[0]>.
+
+=item B<retry> => $int
+
+Number of times to attempt the command if it fails. Defaults to C<1>.
+
+=item B<delay> => $int
+
+Seconds to wait between retries. Defaults to C<5>.
+
+=item B<proceed_on_failure> => $boolean
+
+If set to C<1>, the function will record a failure in the test results but will
+not C<die>. Defaults to C<0>.
+
+=item B<wait_quit_zypper> => $boolean
+
+If set to C<1> (default), it calls C<wait_quit_zypper_pc> to wait for any 
+running zypper processes to terminate before starting. This effectively 
+eliminates the need for manual handling of B<exit code 7> (ZYPPER_EXIT_INTERFACE_LOCKED), 
+which occurs when zypper cannot acquire the execution lock because it is 
+held by another process.
+
+=back
+
+=head3 Transactional Systems
+If C<is_transactional()> is true, the command is prefixed with C<transactional-update -n pkg>.
+Additionally, a C<softreboot()> is triggered automatically upon success to apply changes.
+
+=head3 Error Handling
+On failure, the function:
+1. Uploads C</var/log/zypper.log> to the test results.
+2. Specifically checks for known issues like B<bsc#1070851> (502 errors).
+3. Parses logs for Solver Conflicts (Exit 4), Missing Capabilities (Exit 104), or
+   RPM scriptlet failures (Exit 107) and reports them via C<record_info>.
 
 =cut
 
@@ -908,7 +896,7 @@ sub zypper_call_remote {
     my $instance = shift;
     my %args = testapi::compat_args({cmd => undef}, ['cmd'], @_);
     $args{rc_only} = 1;
-    $args{timeout} //= 700;
+    $args{timeout} //= is_transactional() ? 900 : 700;
     die "Invalid value 'timeout' = 0" unless ($args{timeout});
     die "Empty 'cmd' argument in zypper call" unless ($args{cmd});
     die "Exit code is from PIPESTATUS[0], not grep" if $args{cmd} =~ /^((?!`).)*\| ?grep/;
@@ -917,20 +905,26 @@ sub zypper_call_remote {
     my $retry = $args{retry} // 1;
     my $delay = $args{delay} // 5;
     my $proceed = $args{proceed_on_failure} // 0;
-    my $zcmd = $args{cmd};
+    my $cmd = $args{cmd};
+    my $wait_quit_zypper = $args{wait_quit_zypper} // 1;
     # full command to run in ssh
-    $args{cmd} = "sudo zypper -n $zcmd";
-    #
+    if (is_transactional) {
+        $cmd = "sudo transactional-update -n pkg " . $cmd;
+    } else {
+        $cmd = "sudo zypper -n " . $cmd;
+    }
+    delete $args{cmd};
     delete $args{exitcode};
     delete $args{retry};
     delete $args{delay};
     # retry loop
     my $ret;
+    wait_quit_zypper_pc($instance) if $wait_quit_zypper;
     for (1 .. $retry) {
         # pause on next
         sleep($delay) if (defined($ret));
         # remote execution
-        $ret = $instance->ssh_script_run(%args);
+        $ret = $instance->ssh_script_run(cmd => $cmd, %args);
         last if ($ret == 0);
         # check exit codes
         if ($ret == 4) {
@@ -938,9 +932,7 @@ sub zypper_call_remote {
                 die 'According to bsc#1070851 zypper should automatically retry internally. Bugfix missing for current product?';
             }
             elsif ($instance->ssh_script_run(qq[sudo grep "Solverrun finished with an ERROR" $log]) == 0) {
-                my $search_conflicts = q[sudo awk '
-                    /Solverrun finished with an ERROR/,/statistics/{ 
-                    print group"|", $0; if ($0 ~ /statistics/ ){ print "EOL"; group++ } }' ] . $log;
+                my $search_conflicts = q[sudo awk '/Solverrun finished with an ERROR/,/statistics/{ print group"|", $0; if ($0 ~ /statistics/ ){ print "EOL"; group++ } }' ] . $log;
                 my $conflicts = $instance->ssh_script_output($search_conflicts);
                 record_info("Conflicts", $conflicts, result => 'fail');
                 diag "Package conflicts found, not retrying anymore" if $conflicts;
@@ -950,12 +942,10 @@ sub zypper_call_remote {
         }
         last;
     }
-    # Result management
-    my $command = $args{cmd};
     unless (grep { $_ == $ret } @$exit_codes) {
         $instance->ssh_script_run(qq[sudo chmod o+r $log]);
         $instance->upload_log($log);
-        my $msg = qq[$command failed with code: $ret];
+        my $msg = qq[$cmd failed with code: $ret];
         if ($ret == 104) {
             $msg .= " (ZYPPER_EXIT_INF_CAP_NOT_FOUND)\n\nRelated zypper logs:\n";
             $instance->ssh_script_run(qq[sudo tac $log | grep -F -m1 -B100000 "Hi, me zypper" | tac | grep -E '(SolverRequester.cc|THROW|CAUGHT)' > /tmp/z104.txt]);
@@ -974,7 +964,8 @@ sub zypper_call_remote {
         die $msg unless ($proceed);
         record_info("zypper error", $msg, result => 'fail');
     }
-    record_info("zypper remote call", "Command: $command \nResult: $ret");
+    record_info("zypper remote call", "Command: $cmd \nResult: $ret");
+    $instance->softreboot() if is_transactional();
     return $ret;
 }
 

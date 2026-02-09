@@ -35,10 +35,10 @@ buildah:
   # https://github.com/containers/buildah/pull/5495 is needed to skip nixery.dev registry
   # https://github.com/containers/buildah/pull/6226 is needed for bud & run
   # https://github.com/containers/buildah/pull/6271 - Update "bud with --cpu-shares" test, and rename it
-  # https://github.com/containers/buildah/pull/6629 - tests: Skip chroot overlay test if STORAGE_DRIVER is overlay
+  # https://github.com/containers/buildah/pull/6636 - chroot.bats(chroot with overlay root): ensure we can overlay
   opensuse-Tumbleweed:
     GITHUB_PATCHES:
-    - 6629
+    - 6636
   sle-16.1:
     GITHUB_PATCHES:
     - 6226
@@ -82,7 +82,10 @@ buildx:
 compose:
   # Note on patches:
   # https://github.com/docker/compose/pull/13214 - test: Set stop_signal to SIGTERM
+  # https://github.com/docker/compose/pull/13564 - test: fix pull failure assertion for Docker v29
   opensuse-Tumbleweed:
+    GITHUB_PATCHES:
+    - 13564
   sle-16.1:
     GITHUB_PATCHES:
     - 13214
@@ -92,33 +95,42 @@ compose:
 conmon:
   # Note on patches:
   # https://github.com/containers/conmon/pull/579 is needed to enable tests
-  # https://github.com/containers/conmon/pull/597 - Really run the container in the 04-runtime.bats.
-  # https://github.com/containers/conmon/pull/602 - Add more tests for --stdin and --exec.
-  # https://github.com/containers/conmon/pull/603 - Add tests for --exec-attach
+  # https://github.com/containers/conmon/pull/628 - Skip test if RUNTIME_BINARY is not runc
   opensuse-Tumbleweed:
     GITHUB_PATCHES:
-    - 579
-    - 597
-    - 602
-    - 603
+    - 628
   sle-16.1:
     GITHUB_PATCHES:
     - 579
   sle-16.0:
     GITHUB_PATCHES:
     - 579
+containerd:
+  opensuse-Tumbleweed:
+  sle-16.1:
+  sle-16.0:
 docker-py:
   # Note on patches:
+  # https://github.com/docker/docker-py/pull/3261 - Bump default API version to 1.45 (Moby 26.0/26.1)
   # https://github.com/docker/docker-py/pull/3290 - tests/exec: expect 127 exit code for missing executable
   # https://github.com/docker/docker-py/pull/3354 - tests: Fix deprecation warning for utcfromtimestamp()
+  # https://github.com/docker/docker-py/pull/3362 - test/integration: don't check for deprecated Networks field
   # https://github.com/docker/docker-py/pull/3366 - test: Skip from_env_unix tests if DOCKER_HOST is network socket
   # https://github.com/docker/docker-py/pull/3367 - tests/integration: Make the tests runnable on SELinux enabled daemon
+  # https://github.com/docker/docker-py/pull/3372 - test_connect_with_ipv6_address: enable IPv6
+  # https://github.com/docker/docker-py/pull/3373 - test_create_with_ipv6_address: enable IPv6
+  # https://github.com/docker/docker-py/pull/3380 - integration: Remove test_build_squash tests
   opensuse-Tumbleweed:
     GITHUB_PATCHES:
+    - 3261
     - 3290
     - 3354
+    - 3362
     - 3366
     - 3367
+    - 3372
+    - 3373
+    - 3380
   sle-16.1:
     GITHUB_PATCHES:
     - 3290
@@ -136,41 +148,50 @@ moby:
   # https://github.com/moby/moby/pull/51219 - integration/container: Make tests runnable on SELinux enabled daemon
   # https://github.com/moby/moby/pull/51263 - integration: Skip some tests as rootless
   # https://github.com/moby/moby/pull/51794 - integration: Support iputils ping
+  # https://github.com/moby/moby/pull/51970 - Skip some tests as rootless when SELinux is enabled
+  # https://github.com/moby/moby/pull/52016 - download-frozen-image-v2.sh: Use --retry with curl
   opensuse-Tumbleweed:
     GITHUB_PATCHES:
     - 51219
     - 51263
     - 51794
+    - 52016
   sle-16.1:
     GITHUB_PATCHES:
     - 51219
     - 51263
     - 51794
+    - 52016
   sle-16.0:
     GITHUB_PATCHES:
     - 51219
     - 51263
     - 51794
+    - 52016
   sle-15-SP7:
     GITHUB_PATCHES:
     - 51219
     - 51263
     - 51794
+    - 52016
   sle-15-SP6:
     GITHUB_PATCHES:
     - 51219
     - 51263
     - 51794
+    - 52016
   sle-15-SP5:
     GITHUB_PATCHES:
     - 51219
     - 51263
     - 51794
+    - 52016
   sle-15-SP4:
     GITHUB_PATCHES:
     - 51219
     - 51263
     - 51794
+    - 52016
 netavark:
   # Note on patches:
   # https://github.com/containers/netavark/pull/1191 is needed for 001-basic
@@ -264,9 +285,9 @@ podman:
     - 27760
 podman-py:
   opensuse-Tumbleweed:
+runc:
   # Note on patches:
   # https://github.com/opencontainers/runc/pull/5079 - integration: Skip test for new privileges if NoNewPrivs is set
-runc:
   opensuse-Tumbleweed:
     GITHUB_PATCHES:
     - 5079

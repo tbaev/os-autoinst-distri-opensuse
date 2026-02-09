@@ -34,6 +34,7 @@ our @EXPORT = qw(
   cleanup_rootless_docker
   configure_docker
   configure_rootless_docker
+  configure_podman_mirror
   go_arch
   install_gotestsum
   install_ncat
@@ -140,11 +141,16 @@ sub configure_docker {
     $docker_opts .= " -H tcp://0.0.0.0:$port";
     run_command "mv -f /etc/sysconfig/docker{,.bak} || true";
     run_command "mv -f /etc/docker/daemon.json{,.bak} || true";
+    if (script_output(q(docker --version | awk -F'[. ]' '{ print $3 }')) > 28) {
+        my $docker_min_api_version = get_var("DOCKER_MIN_API_VERSION", "1.24");
+        run_command qq(echo '{"min-api-version": "$docker_min_api_version"}' > /etc/docker/daemon.json);
+    }
     run_command qq(echo 'DOCKER_OPTS="$docker_opts"' > /etc/sysconfig/docker);
     record_info "DOCKER_OPTS", $docker_opts;
     run_command "systemctl restart docker";
     run_command "export DOCKER_HOST=tcp://localhost:$port";
     run_command "export DOCKER_TLS_VERIFY=1" if $args{tls};
+    record_info "containerd status", script_output("systemctl status containerd", proceed_on_failure => 1);
     record_info "docker status", script_output("systemctl status docker", proceed_on_failure => 1);
     record_info "docker version", script_output("docker version -f json | jq -Mr");
     record_info "docker info", script_output("docker info -f json | jq -Mr");
@@ -160,6 +166,12 @@ sub configure_rootless_docker {
 
     switch_to_user;
 
+    if (script_output(q(docker --version | awk -F'[. ]' '{ print $3 }')) > 28) {
+        run_command 'mkdir -p ${XDG_CONFIG_HOME:-$HOME/.config}/docker';
+        my $docker_min_api_version = get_var("DOCKER_MIN_API_VERSION", "1.24");
+        run_command qq(echo '{"min-api-version": "$docker_min_api_version"}' > \${XDG_CONFIG_HOME:-\$HOME/.config}/docker/daemon.json);
+    }
+
     # https://docs.docker.com/engine/security/rootless/
     run_command "dockerd-rootless-setuptool.sh install";
     run_command "systemctl --user enable --now docker";
@@ -171,6 +183,17 @@ sub configure_rootless_docker {
     $warnings = script_output("docker info -f '{{ range .ClientInfo.Warnings }}{{ println . }}{{ end }}'");
     record_info "WARNINGS client", $warnings if $warnings;
     run_command 'export PATH=$PATH:/usr/sbin:/sbin';
+}
+
+sub configure_podman_mirror {
+    my $registry = get_var("REGISTRY", "3.126.238.126:5000");
+    my $conf = <<'EOF';
+[[registry]]
+prefix = "docker.io"
+location = "$registry"
+insecure = true
+EOF
+    write_sut_file("/etc/containers/registries.conf.d/777-mirror.conf", $conf);
 }
 
 sub cleanup_docker {
@@ -281,13 +304,16 @@ sub enable_modules {
 }
 
 sub patch_junit {
-    my ($package, $version, $xmlfile, @ignore_tests) = @_;
+    my ($package, $version, $xmlfile, @xfails) = @_;
     my $os_version = join(' ', get_var("DISTRI"), get_var("VERSION"), get_var("BUILD"), get_var("ARCH"));
-    my $ignore_tests = join(' ', map { "\"$_\"" } @ignore_tests);
-    my @passed = split /\n/, script_output "patch_junit $xmlfile '$package $version $os_version' $ignore_tests";
+    @xfails = uniq sort @xfails;
+    my $xfails = join(' ', map { "\"$_\"" } @xfails);
+    script_run "cp $xmlfile $xmlfile.orig";
+    my @passed = split /\n/, script_output "patch_junit $xmlfile '$package $version $os_version' $xfails";
     foreach my $pass (@passed) {
         record_info("PASS", $pass);
     }
+    script_run "diff $xmlfile.orig $xmlfile ; rm -f $xmlfile.orig";
 }
 
 # /tmp as tmpfs has multiple issues: it can't store SELinux labels, consumes RAM and doesn't have enough space
@@ -314,22 +340,6 @@ sub nonewprivs {
     run_command "systemctl enable --now polkit-agent-helper.socket";
 }
 
-sub setup_docker_ce {
-    # https://github.com/docker/docker-ce-packaging/issues/1293
-    run_command "zypper addrepo https://download.docker.com/linux/fedora/docker-ce.repo";
-    run_command q(sed -i 's/\$releasever/43/g' /etc/zypp/repos.d/docker-ce-*.repo);
-    # This fake RPM provides libcgroup & libseccomp
-    assert_script_run "curl -o /tmp/docker-ce-deps.rpm " . data_url("containers/docker-ce-deps-1-1.noarch.rpm");
-    assert_script_run "zypper --no-gpg-checks -n install /tmp/docker-ce-deps.rpm";
-    my @docker_ce = qw(containerd.io docker-ce docker-ce-cli docker-ce-rootless-extras docker-buildx-plugin docker-compose-plugin libcgroup3 libseccomp2);
-    run_command "zypper --gpg-auto-import-keys -n install @docker_ce", timeout => 300;
-    run_command "mkdir -p /etc/systemd/system/docker.service.d";
-    run_command q(echo -e '[Service]\nEnvironmentFile=-/etc/sysconfig/docker' > /etc/systemd/system/docker.service.d/sysconfig.conf);
-    run_command q(echo -e 'ExecStart=\nExecStart=/usr/bin/dockerd $DOCKER_OPTS' >> /etc/systemd/system/docker.service.d/sysconfig.conf);
-    run_command "systemctl daemon-reload";
-    run_command "systemctl enable --now docker";
-}
-
 sub setup_pkgs {
     my ($self, @pkgs) = @_;
 
@@ -338,8 +348,6 @@ sub setup_pkgs {
     install_bats if get_var("BATS_PACKAGE");
 
     enable_modules if is_sle("<16");
-
-    setup_docker_ce if (get_var("DOCKER_CE") && script_run("test -f /etc/zypp/repos.d/docker-ce-stable.repo"));
 
     if (get_var("TEST_REPOS", "")) {
         if (script_run("zypper lr | grep -q SUSE_CA")) {
@@ -350,7 +358,7 @@ sub setup_pkgs {
         }
 
         foreach my $repo (split(/\s+/, get_var("TEST_REPOS", ""))) {
-            run_command "zypper addrepo $repo";
+            run_command "zypper addrepo --refresh $repo || true";
         }
     }
 
@@ -402,7 +410,7 @@ EOF
     nonewprivs if get_var("NONEWPRIVS");
 
     foreach my $pkg (split(/\s+/, get_var("TEST_PACKAGES", ""))) {
-        run_command "zypper --gpg-auto-import-keys --no-gpg-checks -n install $pkg";
+        run_command "zypper --gpg-auto-import-keys --no-gpg-checks -n install --force-resolution --allow-vendor-change $pkg || rpm -ivh --force --nodeps $pkg";
     }
 
     delegate_controllers;
@@ -544,7 +552,7 @@ sub bats_post_hook {
 }
 
 sub bats_tests {
-    my ($tapfile, $_env, $ignore_tests, $timeout) = @_;
+    my ($tapfile, $_env, $xfails, $timeout) = @_;
     my %env = %{$_env};
 
     my $package = get_required_var("BATS_PACKAGE");
@@ -587,12 +595,12 @@ sub bats_tests {
     script_run "mv report.xml $xmlfile";
 
     upload_logs($tapfile);
-    my @ignore_tests = get_var("RUN_TESTS") ? () : @{$ignore_tests};
+    my @xfails = get_var("RUN_TESTS") ? () : @{$xfails};
     # Strip control chars from XML as they aren't quoted and we can't quote them as valid XML 1.1
     # because it's not supported in most XML libraries anyway. See https://bugs.python.org/issue43703
     assert_script_run("LC_ALL=C sed -i 's/[\\x00-\\x08\\x0B\\x0C\\x0E-\\x1F]//g' $xmlfile") if ($package eq "umoci");
     my $version = script_output "rpm -q --queryformat '%{VERSION}' $package";
-    patch_junit $package, $version, $xmlfile, @ignore_tests;
+    patch_junit $package, $version, $xmlfile, @xfails;
     parse_extra_log(XUnit => $xmlfile);
 
     script_run("rm -rf $tmp_dir || true", timeout => 0);
@@ -622,6 +630,8 @@ sub patch_sources {
         $github_org = "docker";
     } elsif ($package =~ /moby/) {
         $github_org = "moby";
+    } elsif ($package =~ /containerd/) {
+        $github_org = "containerd";
     }
 
     # Support these cases for GITHUB_REPO: [<GITHUB_ORG>]#BRANCH

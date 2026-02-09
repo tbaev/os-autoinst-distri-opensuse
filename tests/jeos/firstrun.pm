@@ -13,7 +13,7 @@ use base "opensusebasetest";
 use lockapi qw(mutex_create mutex_wait);
 use testapi;
 use version_utils qw(is_wsl is_jeos is_sle is_tumbleweed is_leap is_opensuse is_microos is_sle_micro
-  is_leap_micro is_vmware is_bootloader_sdboot is_bootloader_grub2_bls has_selinux_by_default is_community_jeos is_sles4sap);
+  is_leap_micro is_vmware is_bootloader_sdboot is_bootloader_grub2_bls has_selinux_by_default is_community_jeos is_sles4sap is_transactional);
 use Utils::Architectures;
 use Utils::Backends;
 use jeos qw(expect_mount_by_uuid is_translations_preinstalled);
@@ -321,7 +321,7 @@ sub run {
         type_password;
         send_key "ret";
         # Disk encryption is gonna take time
-        assert_screen 're-encrypt-finished', 720 unless is_sle_micro('>=6.2');
+        assert_screen 're-encrypt-finished', 720 unless is_sle_micro('>=6.2') || is_sle('>=16');
     }
 
     if (is_wsl || is_tumbleweed || is_microos || is_sle_micro('>6.0') || is_leap_micro('>6.0') || is_sle('>=16')) {
@@ -461,7 +461,7 @@ sub run {
 
     verify_hypervisor unless is_generalhw;
     verify_norepos unless is_opensuse;
-    verify_bsc if is_jeos;
+    verify_bsc if (is_jeos && !is_transactional);
     verify_partition_label;
     verify_selinux;
 }

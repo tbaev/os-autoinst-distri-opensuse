@@ -20,16 +20,6 @@ sub run {
 
     select_console('root-console');
 
-    assert_script_run("echo 'url: " . get_var('SCC_URL') . "' > /etc/SUSEConnect");
-
-    my $repo_server = get_var('REPO_MIRROR_HOST', 'download.suse.de');
-    my $repo_home = "http://" . $repo_server . "/ibs/home:/fcrozat:/SLES16/"
-      . (get_var('AGAMA_PRODUCT_ID') =~ /SLES_SAP/ ? 'SLES_SAP_' : 'SLE_')
-      . "\$releasever";
-    my $repo_images = 'http://' . $repo_server . '/ibs/home:/fcrozat:/SLES16/images/';
-    zypper_call("ar --refresh -p 90 '$repo_home' home_sles16");
-    zypper_call("ar --refresh -p 90 $repo_images home_images");
-
     # install the migration image and active it
     my $migration_tool = is_s390x ? 'SLES16-Migration' : 'suse-migration-sle16-activation';
     zypper_call("--gpg-auto-import-keys -n in $migration_tool");
@@ -37,7 +27,6 @@ sub run {
     # disable repos of the product to migrate from due to proxySCC is not serving SLES 15 SP*
     my $version = get_var('VERSION_UPGRADE_FROM');
     $version =~ s/-/_/;
-    script_run('for s in $(zypper -t ls | grep ' . "$version" . ' | sed -e \'s,|.*,,g\'); do zypper modifyservice --disable $s; done');
 
     # deacivate unwanted/unsupported extensions before doing migration
     if (get_var('SCC_SUBTRACTIONS')) {

@@ -5,6 +5,7 @@ In addition to the [BATS](bats/) tests we currently have tests for:
 
 | project | tests |
 | --- | --- |
+| [containerd](containerd.pm) | https://github.com/docker/cli/tree/main/integration |
 | [docker-buildx](docker_buildx.pm) | https://github.com/docker/cli/tree/master/tests |
 | [docker-cli](docker_cli.pm) | https://github.com/docker/cli/tree/master/e2e |
 | [docker-compose](docker_compose.pm) | https://github.com/docker/compose/tree/main/pkg/e2e |
@@ -19,8 +20,8 @@ The tests rely on some variables:
 
 | variable | description |
 | --- | --- |
-| `DOCKER_CE` | Test upstream Docker Community Edition |
 | `DOCKER_EXPERIMENTAL` | Enable experimental features in Docker |
+| `DOCKER_MIN_API_VERSION` | Docker minimum API version |
 | `DOCKER_SELINUX` | Enable SELinux in Docker daemon |
 | `DOCKER_TLS` | Enable TLS in Docker as documented [here](https://docs.docker.com/engine/security/protect-access/) |
 | `GITHUB_PATCHES` | List of github PR id's containing upstream test patches |

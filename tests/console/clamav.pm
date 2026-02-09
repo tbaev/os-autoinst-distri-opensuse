@@ -43,12 +43,6 @@ sub run {
     zypper_call('in clamav');
     zypper_call('info clamav');
 
-    # only skip on maintenance if FIPS is enabled
-    if (is_sle('>=15-SP6') && check_var('FIPS_ENABLED', '1') && (check_var('BETA', '0') || !get_var('BETA'))) {
-        record_info('SKIPPING TEST', "Skipping test due to bsc#1221954");
-        return;
-    }
-
     # Create a random file
     assert_script_run "dd if=/dev/urandom of=/usr/local/bin/maybeavirus bs=1M count=1";
     assert_script_run "chmod +x /usr/local/bin/maybeavirus";
@@ -100,7 +94,12 @@ sub run {
     # Create md5, sha1 and sha256 Hash-based signatures
     # Assume /usr/local/bin/maybeavirus is an virus program and add its
     # signature to viruses database, then scan the virus
-    for my $alg (qw(md5 sha1 sha256)) {
+    #
+    # Base hashes always allowed
+    my @hashes = qw(sha1 sha256);
+    # MD5 is not allowed in FIPS mode
+    push @hashes, 'md5' unless check_var('FIPS_ENABLED', '1');
+    for my $alg (@hashes) {
         assert_script_run "sigtool --$alg /usr/local/bin/maybeavirus > test.hdb";
         enter_cmd "clamscan -d test.hdb  /usr/local/bin/maybeavirus | tee /dev/$serialdev";
         die "Virus scan result was not expected" unless (wait_serial qr/maybeavirus\.UNOFFICIAL FOUND.*Known viruses: 1/ms);

@@ -21,7 +21,7 @@ my $version;
 
 sub setup {
     my $self = shift;
-    my @pkgs = qw(aardvark-dns apache2-utils buildah catatonit glibc-devel-static go1.24 gpg2 jq libgpgme-devel
+    my @pkgs = qw(aardvark-dns apache2-utils buildah catatonit glibc-devel-static go1.25 gpg2 jq libgpgme-devel
       libseccomp-devel make netavark openssl podman podman-remote skopeo socat sudo systemd-container xfsprogs);
     push @pkgs, qw(criu libcriu2) unless is_sle;
     $oci_runtime = get_var("OCI_RUNTIME", "runc");
@@ -90,6 +90,11 @@ sub run {
         'Libpod Suite::[It] Podman run with volumes podman run with --mount and named volume with driver-opts',
         'Libpod Suite::[It] Podman run with volumes podman named volume copyup',
     ) unless (is_tumbleweed);
+    # https://github.com/containers/podman/issues/28014
+    push @xfails, (
+        'Libpod Suite::[It] Podman logs podman logs partial log lines: json-file',
+        'Libpod Suite::[It] Podman logs podman logs partial log lines: k8s-file',
+    ) unless (is_sle);
     push @xfails, (
         'Libpod Suite::[It] Verify podman containers.conf usage set .engine.remote=true',
     ) if (get_var("ROOTLESS"));

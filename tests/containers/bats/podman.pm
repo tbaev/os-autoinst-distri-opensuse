@@ -60,6 +60,11 @@ sub run_tests {
             ) unless (is_sle("<16"));
         }
     }
+    push @xfails, (
+        # Sporadic issue fixed in
+        # https://github.com/containers/podman/commit/f172ff789b14226b51cea39f9373e7de2a35905a
+        "550-pause-process.bats::podman system migrate works with conmon being killed",
+    ) if (is_ppc64le && !is_sle);
 
     my $ret = bats_tests($log_file, \%env, \@xfails, 5000);
 
@@ -74,7 +79,7 @@ sub run {
     my ($self) = @_;
     select_serial_terminal;
 
-    my @pkgs = qw(aardvark-dns apache2-utils buildah catatonit glibc-devel-static go1.24 gpg2 libgpgme-devel
+    my @pkgs = qw(aardvark-dns apache2-utils buildah catatonit glibc-devel-static go1.25 gpg2 libgpgme-devel
       libseccomp-devel make netavark openssl podman podman-remote python3-PyYAML skopeo socat sudo systemd-container xfsprogs);
     push @pkgs, qw(criu libcriu2) if is_tumbleweed;
     push @pkgs, qw(netcat-openbsd) if is_sle("<16");

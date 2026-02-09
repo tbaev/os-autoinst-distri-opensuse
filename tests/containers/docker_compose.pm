@@ -15,13 +15,12 @@ use utils;
 use Utils::Architectures;
 use containers::bats;
 
-my $docker_compose = get_var("DOCKER_CE") ? "/usr/libexec/docker/cli-plugins/docker-compose" : "/usr/lib/docker/cli-plugins/docker-compose";
+my $docker_compose = "/usr/lib/docker/cli-plugins/docker-compose";
 my $version;
 
 sub setup {
     my $self = shift;
-    my @pkgs = qw(go1.24 make);
-    push @pkgs, qw(docker docker-buildx docker-compose) unless get_var("DOCKER_CE");
+    my @pkgs = qw(docker docker-buildx docker-compose go1.25 make);
     $self->setup_pkgs(@pkgs);
 
     # docker-compose needs to be patched upstream to support SELinux
@@ -50,6 +49,14 @@ sub test ($target) {
     my $env = join " ", map { "$_=\"$env{$_}\"" } sort keys %env;
 
     my @xfails = ();
+    push @xfails, (
+        # These fail with Docker v29: https://github.com/docker/compose/issues/13565
+        "github.com/docker/compose/v5/pkg/e2e::TestBuildPlatformsStandardErrors",
+        "github.com/docker/compose/v5/pkg/e2e::TestBuildPlatformsStandardErrors/builder_does_not_support_multi-arch",
+        "github.com/docker/compose/v5/pkg/e2e::TestComposePull",
+        "github.com/docker/compose/v5/pkg/e2e::TestLocalComposeRun",
+        "github.com/docker/compose/v5/pkg/e2e::TestLocalComposeRun/compose_run_-rm_with_stop_signal",
+    ) unless (is_sle);
 
     run_command "$env make $target |& tee $target.txt || true", timeout => 3600;
 

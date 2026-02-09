@@ -20,15 +20,14 @@ my @test_dirs;
 
 sub setup {
     my $self = shift;
-    my @pkgs = qw(distribution-registry glibc-devel go1.24 selinux-tools);
-    push @pkgs, qw(nftables-devel) unless is_sle;
-    push @pkgs, qw(containerd-ctr docker docker-buildx docker-rootless-extras rootlesskit) unless get_var("DOCKER_CE");
+    my @pkgs = qw(containerd-ctr distribution-registry docker docker-buildx docker-rootless-extras glibc-devel go1.25 rootlesskit selinux-tools);
+    push @pkgs, qw(nftables-devel) unless is_sle("<15-SP5");
     $self->setup_pkgs(@pkgs);
 
     configure_docker(selinux => 1, tls => 0);
 
     # Tests use "ctr"
-    run_command "cp /usr/sbin/containerd-ctr /usr/local/bin/ctr" unless get_var("DOCKER_CE");
+    run_command "cp /usr/sbin/containerd-ctr /usr/local/bin/ctr";
 
     $version = script_output "docker version --format '{{.Client.Version}}'";
     $version =~ s/-ce$//;
@@ -56,15 +55,16 @@ sub setup {
         @test_dirs = split(/,/, $test_dirs);
     } else {
         # Ignore the tests in these directories in integration/
+        # as they fail in the current openQA setup
         my @ignore_dirs = (
-            "network",
-            "networking",
+            "network.*",
             "plugin.*",
         );
         my $ignore_dirs = join "|", map { "integration/$_" } @ignore_dirs;
         # Adapted from https://build.opensuse.org/projects/openSUSE:Factory/packages/docker/files/docker-integration.sh
         @test_dirs = split(/\n/, script_output(qq(go list -test -f '{{- if ne .ForTest "" -}}{{- .Dir -}}{{- end -}}' ./integration/... | sed "s,^\$(pwd)/,," | grep -vxE '($ignore_dirs)')));
     }
+    record_info("test_dirs", join(" ", @test_dirs));
 
     # Preload Docker images used for testing
     my $frozen_images = script_output q(grep -oE '[[:alnum:]./_-]+:[[:alnum:]._-]+@sha256:[0-9a-f]{64}' Dockerfile | xargs echo);
@@ -87,10 +87,14 @@ sub run {
     record_info "firewall backend", $firewall_backend;
     my $test_no_firewalld = ($firewall_backend eq "iptables") ? "true" : "";
 
+    my $docker_dest = "/var/tmp/moby/bundles/tmp";
+    run_command "mkdir -p $docker_dest";
+
     my %env = (
+        DOCKER_INTEGRATION_DAEMON_DEST => $docker_dest,
         DOCKER_FIREWALL_BACKEND => $firewall_backend,
-        DOCKER_ROOTLESS => get_var("ROOTLESS", ""),
         DOCKER_TEST_NO_FIREWALLD => $test_no_firewalld,
+        DOCKER_ROOTLESS => get_var("ROOTLESS", ""),
         TZ => "UTC",
     );
 
@@ -98,6 +102,15 @@ sub run {
         # Flaky tests
         "github.com/docker/docker/integration/service::TestServicePlugin",
     );
+    push @xfails, (
+        # We don't yet support CDI
+        "github.com/moby/moby/v2/integration/container::TestEtcCDI",
+        # These fail on Docker v29:
+        "github.com/moby/moby/v2/integration/image::TestImagePullNonExisting",
+        "github.com/moby/moby/v2/integration/image::TestImagePullNonExisting/asdfasdf",
+        "github.com/moby/moby/v2/integration/image::TestImagePullNonExisting/library/asdfasdf",
+        "github.com/moby/moby/v2/integration/service::TestRestoreIngressRulesOnFirewalldReload",
+    ) unless (is_sle);
     push @xfails, (
         # These tests use amd64 images:
         "github.com/docker/docker/integration/image::TestAPIImageHistoryCrossPlatform",

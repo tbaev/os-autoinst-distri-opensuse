@@ -1084,18 +1084,21 @@ into an array of hashes.
 
 sub zypper_patches {
     my $params = shift // '';
+    my $cmd;
     my @fields;
 
     if (is_sle('<12-SP2')) {
+        $cmd = "pch";
         @fields = ('repository', 'name', 'version', 'category', 'status');
     } else {
+        $cmd = "lp -a";
         @fields = ('repository', 'name', 'category', 'severity',
             'interactive', 'status');
         push @fields, 'since' if is_sle('15+');
         push @fields, 'summary';
     }
 
-    my $output = script_output("zypper pch $params", 300);
+    my $output = script_output("zypper $cmd $params", 300);
     return parse_zypper_table($output, \@fields);
 }
 
@@ -1984,7 +1987,9 @@ sub reconnect_mgmt_console {
     elsif (is_x86_64) {
         if (is_ipmi) {
             select_console 'sol', await_console => 0;
-            assert_screen([qw(qa-net-selection prague-pxe-menu nue-ipxe-menu grub2)], 300);
+            my $screen_to_match = [qw(qa-net-selection prague-pxe-menu nue-ipxe-menu grub2)];
+            push @$screen_to_match, 'linux-login' if (get_var('WORKER_CLASS') =~ /ipmi-nvdimm/);
+            assert_screen($screen_to_match, 300);
             if ($args{grub_expected_twice}) {
                 check_screen 'grub2', 60;
                 wait_screen_change { send_key 'ret' };
@@ -3082,6 +3087,8 @@ used afterwards by using $SECRET.
 
 sub define_secret_variable {
     my ($var_name, $var_value) = @_;
+    @_ = ($var_name, "==== MASKED VALUE ====");    # Mask the value for traceback
+
     script_run("set -a");
     script_run("read -sp '$var_name: ' $var_name", 0);
     type_password($var_value . "\n");

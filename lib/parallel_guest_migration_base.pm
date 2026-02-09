@@ -51,7 +51,7 @@ use List::MoreUtils qw(firstidx);
 use List::Util 'first';
 use version_utils qw(is_opensuse is_sle is_alp is_microos get_os_release);
 use virt_utils qw(collect_host_and_guest_logs cleanup_host_and_guest_logs enable_debug_logging);
-use virt_autotest::utils qw(is_kvm_host is_xen_host check_host_health check_guest_health is_fv_guest is_pv_guest add_guest_to_hosts parse_subnet_address_ipv4 check_port_state setup_common_ssh_config is_monolithic_libvirtd restart_libvirtd check_libvirtd restart_modular_libvirt_daemons reselect_openqa_console);
+use virt_autotest::utils qw(is_kvm_host is_xen_host check_host_health check_guest_health is_fv_guest is_pv_guest add_guest_to_hosts parse_subnet_address_ipv4 check_port_state setup_common_ssh_config is_monolithic_libvirtd restart_libvirtd check_libvirtd restart_modular_libvirt_daemons reselect_openqa_console get_default_ssh_keyfile);
 use virt_autotest::domain_management_utils qw(construct_uri create_guest remove_guest shutdown_guest show_guest check_guest_state register_guest_name manage_guest_service);
 use virt_autotest::virtual_network_utils qw(config_domain_resolver write_network_bridge_device_config write_network_bridge_device_ifcfg write_network_bridge_device_nmconnection activate_network_bridge_device config_virtual_network_device check_guest_network_config check_guest_network_address);
 use utils qw(zypper_call systemctl script_retry define_secret_variable);
@@ -222,9 +222,27 @@ sub do_local_initialization {
     my $_localfqdn = '';
     set_var('LOCAL_IPADDR', $_localip);
     set_var('LOCAL_FQDN', $_localfqdn);
-    $_localip = script_output("hostname -i | cut -d' ' -f 2", type_command => 1) if (script_retry("hostname -i", option => '--kill-after=1 --signal=9', delay => 1, retry => 60) == 0);
+    # Some bare-metal machines have multiple network connections and odd DNS configurations
+    # such as bare-metal1/2/3. We have to get its IP and FQDN from it primary interface
+    # apart from other machines. This situation would possibly improved after lab move is ready.
+    # At that time, we can have a better decision or enhancement on this part.
+    if (get_var('SUT_PRIMARY_MAC', '')) {
+        if (script_run("ip link show br0") == 0) {
+            $_localip = script_output("ip -4 addr show br0 | grep -oP 'inet \\K[\\d.]+'");
+        } else {
+            my $_primary_mac = get_var('SUT_PRIMARY_MAC');
+            $_localip = script_output("ip -4 addr show \$(ip link | grep -B 1 $_primary_mac | head -n 1 | awk -F': ' '{print \$2}') | grep -oP 'inet \\K[\\d.]+'");
+        }
+    } else {
+        $_localip = script_output("hostname -i | cut -d' ' -f 2", type_command => 1) if (script_retry("hostname -i", option => '--kill-after=1 --signal=9', delay => 1, retry => 60) == 0);
+    }
     (($_localip eq '' or $_localip eq '127.0.0.1' or $_localip eq '::1 127.0.0.1') and (is_sle('15+') or !is_sle)) ? set_var('LOCAL_IPADDR', (split(/ /, script_output("hostname -I", type_command => 1)))[0]) : set_var('LOCAL_IPADDR', $_localip);
-    $_localfqdn = script_output("hostname -f", type_command => 1) if (script_retry("hostname -f", option => '--kill-after=1 --signal=9', delay => 1, retry => 60) == 0);
+    # Use SUT_IP directly to get FQDN as `hostname` can hardly work on some machines(eg. bare-metal2)
+    if (get_var('SUT_IP') !~ /^\d+(\.\d+){3}$/) {
+        $_localfqdn = get_var('SUT_IP');
+    } else {
+        $_localfqdn = script_output("hostname -f", type_command => 1) if script_run("hostname -f") == 0;
+    }
     (($_localfqdn eq '' or $_localfqdn eq 'localhost') and (is_sle('15+') or !is_sle)) ? set_var('LOCAL_FQDN', (split(/ /, script_output("hostname -A", type_command => 1)))[0]) : set_var('LOCAL_FQDN', $_localfqdn);
     save_screenshot;
     my $_role = $self->get_parallel_role;
@@ -265,7 +283,21 @@ sub do_peer_initialization {
     my $_role = $self->get_parallel_role;
     my ($_peer_info, $_peer_vars) = $self->get_peer_info(_role => $_role);
     set_var('PEER_IPADDR', $_peer_vars->{'LOCAL_IPADDR'});
-    set_var('PEER_FQDN', $_peer_vars->{'LOCAL_IPADDR'});
+    set_var('PEER_FQDN', $_peer_vars->{'LOCAL_FQDN'});
+    # In some cases, the dst host FQDN failed be resolved, eg. on bare-metal1/2/3
+    # Configure /etc/hosts for resolving manually
+    # Besides we have to get its IP and FQDN from it primary interface
+    # apart from other machines. This situation would possibly improved after lab move is ready.
+    # At that time, we can have a better decision or enhancement on this part.
+    if ("$_peer_vars->{'SUT_PRIMARY_MAC'}") {
+        my ($_dst_short_fqdn) = $_peer_vars->{'LOCAL_FQDN'} =~ /^([^.]+)/;
+        my $_entry = "$_peer_vars->{'LOCAL_IPADDR'}    $_peer_vars->{'LOCAL_FQDN'} $_dst_short_fqdn";
+        script_run("echo \"$_entry\" >> /etc/hosts");
+        my ($_src_short_fqdn) = get_var('LOCAL_FQDN') =~ /^([^.]+)/;
+        $_entry = get_var('LOCAL_IPADDR') . "    " . get_var('LOCAL_FQDN') . " $_src_short_fqdn";
+        script_run("echo \"$_entry\" >> /etc/hosts");
+    }
+    record_info("/etc/hosts", script_output("cat /etc/hosts", proceed_on_failure => 1));
     if ($_role eq 'parent') {
         set_var('GUEST_SSH_PUBLIC_KEYFILE', $_peer_vars->{'GUEST_SSH_PUBLIC_KEY'});
         set_var('GUEST_SSH_PRIVATE_KEYFILE', $_peer_vars->{'GUEST_SSH_PRIVATE_KEY'});
@@ -323,7 +355,7 @@ either host (1) or guest (0) on which operation will be done and whether die
 sub config_ssh_pubkey_auth {
     my ($self, %args) = @_;
     $args{_addr} //= '';
-    $args{_keyfile} //= is_sle('16+') ? '/root/.ssh/id_ed25519' : '/root/.ssh/id_rsa';
+    $args{_keyfile} //= get_default_ssh_keyfile();
     $args{_overwrite} //= 0;
     $args{_host} //= 1;
     $args{_die} //= 0;

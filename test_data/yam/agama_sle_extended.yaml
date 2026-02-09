@@ -12,3 +12,4 @@ repos:
     enabled: 'Yes'
     filter: name
 bootloader_timeout: '8'
+self_update_enabled: 1
