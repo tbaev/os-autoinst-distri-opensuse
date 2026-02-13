@@ -2707,6 +2707,10 @@ sub load_hypervisor_tests {
             } elsif (check_var('UPDATE_PACKAGE', 'xen') || check_var('UPDATE_PACKAGE', 'qemu')) {
                 loadtest "virt_autotest/login_console";
                 loadtest "virtualization/universal/list_guests" unless (check_var('VIRT_NEW_GUEST_MIGRATION_DST', '1'));
+            } elsif (check_var('UPDATE_PACKAGE', 'snpguest') {
+                loadtest "virt_autotest/login_console";
+                loadtest "virtualization/universal/list_guests";
+                loadtest "virtualization/universal/patch_guests";
             }
         }
         loadtest "virtualization/universal/kernel";
