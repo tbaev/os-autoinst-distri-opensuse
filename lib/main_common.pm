@@ -2501,7 +2501,7 @@ sub load_host_installation_modules {
 sub set_mu_virt_vars {
     # Set UPDATE_PACKAGE based on BUILD(format example, BUILD=:33310:dtb-armv7l or BUILD=:smelt:33310:dtb-armv7l)
     my $BUILD = get_required_var('BUILD');
-    $BUILD =~ /^:(?:smelt:)?(\d+):([^:]+)$/im;
+    $BUILD =~ /:(\d+):([^:]+)$/im;
 
     die "BUILD value is $BUILD, but does not match required format." if (!$2);
     my $_pkg = $2;
@@ -2511,6 +2511,10 @@ sub set_mu_virt_vars {
         $_update_package = '';
     } elsif ($_pkg =~ /qemu|xen|virt-manager|libguestfs|libslirp|open-vm-tools|dnsmasq|sevctl/) {
         $_update_package = $_pkg;
+    } elsif ($_pkg =~ /snpguest/) {
+        # SNP guest testing requires patching workflow
+        $_update_package = $_pkg;
+        set_var('PATCH_ON_GUEST', 1);
     } elsif ($_pkg =~ /libvirt/) {
         $_update_package = 'libvirt-client';
     } else {
@@ -2613,7 +2617,7 @@ sub set_sles16_mu_virt_vars {
     # Parse BUILD variable and set UPDATE_PACKAGE (format example: BUILD=:345:qemu)
     # This logic is the same as set_mu_virt_vars() to maintain consistency
     if (!get_var('UPDATE_PACKAGE') && (my $BUILD = get_var('BUILD'))) {
-        $BUILD =~ /^:(\d+):([^:]+)$/im;
+        $BUILD =~ /:(\d+):([^:]+)$/im;
         die "BUILD value is $BUILD, but does not match required format." unless $2;
 
         set_var('UPDATE_PACKAGE', $2);
