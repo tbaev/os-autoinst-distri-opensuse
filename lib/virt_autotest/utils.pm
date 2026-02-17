@@ -638,10 +638,10 @@ sub create_guest {
     my $macaddress = $guest->{macaddress};
     my $on_reboot = $guest->{on_reboot} // "restart";    # configurable on_reboot policy
     my $extra_params = $guest->{extra_params} // "";    # extra-parameters
-    my $memory = $guest->{memory} // "2048";
+    my $memory = $guest->{memory} // "4096";
     # poo#11786, set maxmemory bigger
     my $maxmemory = $guest->{maxmemory} // $memory + 1536;    # use by default just a bit more, so that we don't waste memory but still use the functionality
-    my $vcpus = $guest->{vcpus} // "2";
+    my $vcpus = $guest->{vcpus} // "4";
     my $maxvcpus = $guest->{maxvcpus} // $vcpus + 1;    # same as for memory, test functionality but don't waste resources
     my $launch_security = $guest->{launch_security} // '';
     # Network configuration: supports 'bridge=br0' (public network) or 'network=default' (NAT virtual network)
@@ -806,9 +806,9 @@ sub import_guest {
     my $disk = $guest->{disk};
     my $macaddress = $guest->{macaddress};
     my $extra_params = $guest->{extra_params} // "";
-    my $memory = $guest->{memory} // "2048";
+    my $memory = $guest->{memory} // "4096";
     my $maxmemory = $guest->{maxmemory} // $memory + 256;    # use by default just a bit more, so that we don't waste memory but still use the functionality
-    my $vcpus = $guest->{vcpus} // "2";
+    my $vcpus = $guest->{vcpus} // "4";
     my $maxvcpus = $guest->{maxvcpus} // $vcpus + 1;    # same as for memory, test functionality but don't waste resources
     my $network_model = $guest->{network_model} // "";
 
