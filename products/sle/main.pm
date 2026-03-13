@@ -612,6 +612,9 @@ sub load_virt_guest_install_tests {
         elsif (get_var("VIRT_SEV_ES_GUEST_INSTALL")) {
             loadtest "virt_autotest/sev_es_guest_verification";
         }
+        elsif (get_var("VIRT_TDX_GUEST_INSTALL")) {
+            loadtest "virt_autotest/tdx_validation";
+        }
         elsif (get_var("VIRT_UEFI_GUEST_INSTALL")) {
             loadtest "virt_autotest/uefi_guest_verification";
         }

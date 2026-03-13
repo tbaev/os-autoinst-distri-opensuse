@@ -341,6 +341,9 @@ if (get_var("REGRESSION", '') =~ /xen/) {
         if (check_var('ENABLE_SEV_SNP', '1')) {
             @allowed_guests = qw(sles15sp7efi);
         }
+        if (check_var('ENABLE_TDX', '1')) {
+            @allowed_guests = qw(sles15sp7efi);
+        }
         if (check_var('ENABLE_SEV_ES', '1')) {
             @allowed_guests = qw(sles15sp6-efi-sev-es sles15sp7-efi-sev-es);
         }
@@ -354,6 +357,8 @@ if (get_var("REGRESSION", '') =~ /xen/) {
         if (check_var('ENABLE_SRIOV_NETWORK_CARD_PCI_PASSTHROUGH', '1')) {
             @allowed_guests = qw(sles15sp7efi sles16efi_online);
         } elsif (check_var('ENABLE_SEV_SNP', '1')) {
+            @allowed_guests = qw(sles15sp7efi sles16efi_full);
+        } elsif (check_var('ENABLE_TDX', '1')) {
             @allowed_guests = qw(sles15sp7efi sles16efi_full);
         } elsif (check_var('ENABLE_SEV_ES', '1')) {
             @allowed_guests = qw(sles15sp7-efi-sev-es sles16efi_full-sev-es);

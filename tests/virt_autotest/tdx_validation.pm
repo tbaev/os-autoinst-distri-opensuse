@@ -21,10 +21,15 @@ package tdx_validation;
 
 use base 'virt_feature_test_base';
 use POSIX 'strftime';
-use testapi qw(:DEFAULT);
-use serial_terminal qw(select_serial_terminal);
+use File::Basename;
+use testapi;
+use IPC::Run;
+use utils;
+use virt_utils;
 use virt_autotest::common;
-use virt_autotest::utils qw(guest_is_sle wait_guest_online is_guest_online execute_over_ssh upload_virt_logs);
+use virt_autotest::utils;
+use version_utils qw(is_sle is_tumbleweed is_alp);
+use Utils::Architectures;
 
 sub run_test {
     my $self = shift;
@@ -39,5 +44,3 @@ sub post_fail_hook {
 }
 
 1;
-
-
