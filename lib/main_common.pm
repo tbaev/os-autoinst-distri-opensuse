@@ -2719,10 +2719,8 @@ sub load_hypervisor_tests {
     }
 
     my %virt_features = get_virt_features_definition();
-    diag("DEBUG HASH KEYS: " . join(', ', keys %virt_features));
 
     for my $test (keys %virt_features) {
-        diag("DEBUG LOOP: Currently processing key -> $test");
         next if $test eq 'ENABLE_SNAPSHOTS';
         my $feature = $virt_features{$test};
         my $modules = $feature->{modules};
@@ -2734,12 +2732,6 @@ sub load_hypervisor_tests {
         # SEV-SNP tests are available from SLE15-SP7 onwards and SLE16+
         if ($test eq 'ENABLE_SEV_SNP') {
             next unless (is_sle('>=15-sp7') || is_sle('>=16'));
-        }
-        diag("Check for ENABLE_TDX");
-        if ($test eq 'ENABLE_TDX') {
-            diag("ENABLE_TDX is true");
-            next unless (is_sle('>=16'));
-            diag("ENABLE_TDX is 16.0");
         }
         check_and_load_mu_virt_features($test, $modules, $hypervisor);
     }
@@ -2832,16 +2824,12 @@ sub load_sles16_mu_virt_tests {
 
         # SEV-SNP tests are available from SLE15-SP7 onwards and SLE16+
         if ($test eq 'ENABLE_SEV_SNP') {
-            diag("SKIP SEV_SNP");
             next unless (is_sle('>=15-sp7') || is_sle('>=16'));
         }
 
         # TDX tests are available from SLE16+
-        diag("Check for ENABLE_TDX");
         if ($test eq 'ENABLE_TDX') {
-            diag("ENABLE_TDX is true");
             next unless (is_sle('>=16'));
-            diag("ENABLE_TDX is true");
         }
 
         # Load the feature using existing function

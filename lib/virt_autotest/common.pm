@@ -291,6 +291,13 @@ if (get_var("REGRESSION", '') =~ /xen/) {
             boot_firmware => 'efi_sev_es',    # sev_es
             launch_security => 'sev,policy=0x06',    # sev_es
             memory_backing => 'locked=on',    # sev_es
+        },
+        'sles16efi_full-tdx' => {
+            name => 'sles16efi_full-tdx',
+            extra_params => '--os-variant sles16',    # Use SLES16 variant
+            distro => 'SLE_16',
+            location => 'http://download.suse.de/install/SLP/SLES-16.0-Full-LATEST/x86_64/DVD1/',    # Network location for live OS
+            launch_security => 'tdx',
         }
     );
     # Filter out guests not allowed for the detected SLE version
@@ -341,9 +348,6 @@ if (get_var("REGRESSION", '') =~ /xen/) {
         if (check_var('ENABLE_SEV_SNP', '1')) {
             @allowed_guests = qw(sles15sp7efi);
         }
-        if (check_var('ENABLE_TDX', '1')) {
-            @allowed_guests = qw(sles15sp7efi);
-        }
         if (check_var('ENABLE_SEV_ES', '1')) {
             @allowed_guests = qw(sles15sp6-efi-sev-es sles15sp7-efi-sev-es);
         }
@@ -358,10 +362,10 @@ if (get_var("REGRESSION", '') =~ /xen/) {
             @allowed_guests = qw(sles15sp7efi sles16efi_online);
         } elsif (check_var('ENABLE_SEV_SNP', '1')) {
             @allowed_guests = qw(sles15sp7efi sles16efi_full);
-        } elsif (check_var('ENABLE_TDX', '1')) {
-            @allowed_guests = qw(sles15sp7efi sles16efi_full);
         } elsif (check_var('ENABLE_SEV_ES', '1')) {
             @allowed_guests = qw(sles15sp7-efi-sev-es sles16efi_full-sev-es);
+        } elsif (check_var('ENABLE_TDX', '1')) {
+            @allowed_guests = qw(sles16efi_full-tdx);
         } elsif (check_var('ENABLE_SNAPSHOTS', '1')) {
             @allowed_guests = qw(sles15sp7efi-snapshot sles16efi_full_snapshot);
         }
