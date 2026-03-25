@@ -13,6 +13,7 @@
 use base 'opensusebasetest';
 use testapi;
 use serial_terminal 'select_serial_terminal';
+use version_utils qw(is_sle);
 use utils qw(zypper_call);
 
 sub configure_himmelblau {
@@ -30,7 +31,10 @@ sub configure_himmelblau {
 }
 
 sub configure_nss {
-    my $NSSWITCH_CONF_PATH = "/usr/etc/nsswitch.conf";
+    my $NSSWITCH_CONF_PATH = "/etc/nsswitch.conf";
+    if (is_sle(">=16")) {
+        assert_script_run("cp /usr/etc/nsswitch.conf $NSSWITCH_CONF_PATH");
+    }
 
     assert_script_run("sed -i -e '0,/passwd:.*/!{0,/passwd:.*/s/passwd:.*/passwd:    files systemd himmelblau/}' $NSSWITCH_CONF_PATH");
     assert_script_run("sed -i -e '0,/group:.*/!{0,/group:.*/s/group:.*/group:    files systemd himmelblau/}' $NSSWITCH_CONF_PATH");
@@ -40,7 +44,11 @@ sub configure_nss {
 }
 
 sub configure_pam {
-    assert_script_run('pam-config --add --himmelblau');
+    if (is_sle(">=16")) {
+        assert_script_run('pam-config --add --himmelblau');
+    } else {
+        assert_script_run('aad-tool configure-pam --really');
+    }
     assert_script_run('sed -i -e "/account requisite pam_unix.so try_first_pass/account sufficient pam_unix.so try_first_pass/g" /etc/pam.d/common-account');
     record_info("PAM configured");
 }
@@ -53,9 +61,16 @@ sub run {
     select_serial_terminal;
 
     # Install Himmelblau
+    zypper_call("ref");
     zypper_call("update");
     zypper_call("lr -U");
-    zypper_call("install himmelblau");
+    if (zypper_call("install himmelblau", exitcode => [0, 104]) == 104) {
+        if (is_sle("<=15-SP6")) {
+            record_soft_failure('bsc#1260384');
+            return;
+        }
+        die "zypper install himmelblau failed";
+    }
 
     # Configure the relevant services
     configure_himmelblau($allowed_domain, $user);

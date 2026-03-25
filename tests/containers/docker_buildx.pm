@@ -20,7 +20,7 @@ my $version;
 
 sub setup {
     my $self = shift;
-    my @pkgs = qw(distribution-registry docker docker-buildx go1.25 openssl);
+    my @pkgs = qw(distribution-registry docker docker-buildx go1.26 openssl);
     push @pkgs, qw(buildkit docker-compose) unless is_sle("<16");
     $self->setup_pkgs(@pkgs);
     install_gotestsum;
@@ -63,7 +63,7 @@ sub run {
         "github.com/docker/buildx/tests::TestIntegration/TestComposeBuildRegistry/worker=remote",
     ) if (is_sle);
 
-    run_command "$env gotestsum --junitfile buildx.xml --format standard-verbose --packages=./tests &> buildx.txt", no_assert => 1, timeout => 1200;
+    run_timeout_command "$env gotestsum --junitfile buildx.xml --format standard-verbose --packages=./tests &> buildx.txt", no_assert => 1, timeout => 1200;
     upload_logs "buildx.txt";
     die "Testsuite failed" if script_run("test -s buildx.xml");
     patch_junit "docker-buildx", $version, "buildx.xml", @xfails;

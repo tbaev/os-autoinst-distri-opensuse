@@ -16,6 +16,7 @@ use Utils::Architectures;
 use containers::bats;
 
 my $version = "";
+my $docker_version = "";
 
 sub run_tests {
     my %params = @_;
@@ -63,6 +64,11 @@ sub run_tests {
     push @xfails, (
         "run.bats::run check /etc/resolv.conf",
     ) unless (is_aarch64 || is_x86_64);
+    push @xfails, (
+        # registry.access.redhat.com/ubi9-micro:latest may fail with:
+        # Fatal glibc error: CPU lacks ISA 3.00 support (POWER9 or later required)
+        "chroot.bats::chroot mount flags",
+    ) if (is_ppc64le);
 
     my $ret = bats_tests($log_file, \%env, \@xfails, 5000);
 
@@ -96,7 +102,18 @@ sub enable_docker {
     record_info("WARNINGS daemon", $warnings) if $warnings;
     $warnings = script_output("docker info -f '{{ range .ClientInfo.Warnings }}{{ println . }}{{ end }}'");
     record_info("WARNINGS client", $warnings) if $warnings;
-    record_info("docker version", script_output("docker version -f json | jq -Mr"));
+    $docker_version = script_output "docker version --format '{{.Client.Version}}'";
+    record_info("docker version", $docker_version);
+}
+
+# Get latest version of package in Tumbleweed
+sub get_latest_version {
+    my $package = shift;
+
+    my $url = "https://mirrorcache.opensuse.org/rest/search/package_locations?ignore_file=json&ignore_path=%2Frepositories%2Fhome%3A&os=tumbleweed&official=1&package=$package";
+    my $jq_script = qq(.data[] | select(.name == "$package" and (.file | test("^$package-[0-9]")) and (.path | startswith("/tumbleweed/repo/oss/"))) | .file | split("-")[1]);
+    my $version = script_output qq(curl -sL "$url" | jq -Mr '$jq_script' | sort -Vr | head -1);
+    return version->parse(numeric_version($version));
 }
 
 # Run conformance tests that compare the output of buildah against Docker's BuildKit
@@ -104,7 +121,7 @@ sub test_conformance {
     install_gotestsum;
     run_command 'cp /usr/bin/busybox-static tests/conformance/testdata/mount-targets/true';
     run_command 'docker rmi -f $(docker images -q) || true';
-    run_command "gotestsum --junitfile conformance.xml --format standard-verbose -- ./tests/conformance/... &> conformance.txt", no_assert => 1, timeout => 1200;
+    run_timeout_command "gotestsum --junitfile conformance.xml --format standard-verbose -- ./tests/conformance/... &> conformance.txt", no_assert => 1, timeout => 1200;
     upload_logs "conformance.txt";
     die "Testsuite failed" if script_run("test -s conformance.xml");
     patch_junit "buildah", $version, "conformance.xml";
@@ -115,7 +132,7 @@ sub run {
     my ($self) = @_;
     select_serial_terminal;
 
-    my @pkgs = qw(buildah docker git-daemon glibc-devel-static go1.25 libgpgme-devel libseccomp-devel make openssl podman selinux-tools);
+    my @pkgs = qw(buildah docker git-daemon glibc-devel-static go1.26 libgpgme-devel libseccomp-devel make openssl podman selinux-tools);
     push @pkgs, "qemu-linux-user" if (is_tumbleweed || is_sle('>=15-SP6'));
     # Packages needed for conformance tests
     push @pkgs, "busybox-static docker-buildx libbtrfs-devel" unless is_sle;
@@ -151,10 +168,11 @@ sub run {
 
     $errors += run_tests(rootless => 0) unless check_var('BATS_IGNORE_ROOT', 'all');
 
-    # Run conformance tests only on demand, when
-    # new buildah & docker packages are published
+    # Run conformance tests only on demand, when new buildah & docker packages are published
     # You need to clone with BATS_IGNORE_USER=all BATS_IGNORE_ROOT=all RUN_TESTS=conformance
-    test_conformance if check_var("RUN_TESTS", "conformance");
+    test_conformance if (check_var("RUN_TESTS", "conformance") || (is_tumbleweed && is_x86_64 &&
+            (get_latest_version("buildah") < version->parse(numeric_version($version)) ||
+                get_latest_version("docker") < version->parse(numeric_version($docker_version)))));
 
     die "buildah tests failed" if ($errors);
 }

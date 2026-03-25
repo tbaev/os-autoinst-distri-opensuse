@@ -20,13 +20,17 @@ use testapi;
 use serial_terminal 'select_serial_terminal';
 use utils;
 use version_utils qw(is_opensuse is_tumbleweed is_sle);
+use package_utils 'install_package';
 use registration qw(add_suseconnect_product get_addon_fullname register_product cleanup_registration);
 use feature 'signatures';
 no warnings 'experimental::signatures';
 
 sub install_dependencies($container_engine) {
     zypper_call("in sudo nscd") unless (is_tumbleweed || is_sle('>=16'));
-    zypper_call("in sssd sssd-ldap openldap2-client sshpass $container_engine");
+    install_package("sssd sssd-ldap openldap2-client sshpass $container_engine", trup_reboot => 1);
+    record_info('bsc#1259250', 'Checking if sssd.conf is present after fresh install');
+    my $sssd_path = ((is_sle('>=16.0') || is_tumbleweed) ? "/usr/etc/sssd/sssd.conf" : "/etc/sssd/sssd.conf");
+    assert_script_run("test -f $sssd_path", fail_message => "bsc#1259250 sssd.conf is not present after fresh install");
     systemctl("enable --now $container_engine") if ($container_engine eq "docker");
     return $container_engine;
 }
@@ -82,7 +86,7 @@ sub configure_sssd_client ($container_engine) {
 
 sub change_and_verify_password ($user, $old_pass, $new_pass) {
     # Change password
-    assert_script_run("sshpass -p '$old_pass' ssh -o StrictHostKeyChecking=no $user\@localhost 'echo -e \"$old_pass\\n$new_pass\\n$new_pass\" | passwd'");
+    script_retry("sshpass -p '$old_pass' ssh -o StrictHostKeyChecking=no $user\@localhost 'echo -e \"$old_pass\\n$new_pass\\n$new_pass\" | passwd'", retry => 3, delay => 10);
 
     # Verify password change
     validate_script_output("ldapwhoami -x -H ldap://ldapserver -D uid=$user,ou=users,dc=sssdtest,dc=com -w $new_pass", sub { m/$user/ });

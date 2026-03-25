@@ -16,7 +16,7 @@ use Mojo::File;
 use Mojo::JSON;
 use Mojo::UserAgent;
 use LTP::utils qw(get_ltproot prepare_whitelist_environment);
-use LTP::install qw(get_required_build_dependencies get_maybe_build_dependencies get_submodules_to_rebuild);
+use LTP::install qw(get_required_build_dependencies get_maybe_build_dependencies);
 use LTP::WhiteList;
 use publiccloud::utils;
 use publiccloud::ssh_interactive 'select_host_console';
@@ -107,12 +107,10 @@ sub partially_build_ltp_from_git {
     $self->install_build_deps($instance);
     $self->prepare_ltp_git($instance, $ltp_dir, $ltp_prefix);
 
-    foreach my $subdir (get_submodules_to_rebuild()) {
-        $instance->ssh_assert_script_run(
-            cmd => "cd $ltp_dir/testcases/$subdir && make -j\$(getconf _NPROCESSORS_ONLN) && sudo make install",
-            timeout => $ltp_subdir_build_timeout
-        );
-    }
+    $instance->ssh_assert_script_run(
+        cmd => "cd $ltp_dir && make -j\$(getconf _NPROCESSORS_ONLN) modules && sudo make -j\$(getconf _NPROCESSORS_ONLN) modules-install",
+        timeout => $ltp_subdir_build_timeout
+    );
     record_info("LTP Partial Build Time", "Time taken build from source: " . (time() - $start) . " seconds");
 }
 
@@ -387,7 +385,11 @@ sub install_ec2_cloudwatch_agent
         );
         $instance->softreboot();
     } else {
-        zypper_call_remote($instance, cmd => "install --no-recommends --allow-unsigned-rpm $download_directory/$rpm_file");
+        if (is_sle(">12-SP5")) {
+            zypper_call_remote($instance, cmd => "install --no-recommends --allow-unsigned-rpm $download_directory/$rpm_file");
+        } else {
+            $instance->ssh_assert_script_run("sudo rpm -Uvh $download_directory/$rpm_file");
+        }
     }
 
     $instance->ssh_assert_script_run("sudo rm -f $download_directory/$rpm_file $download_directory/$rpm_file.sig $download_directory/$gpg_file");
@@ -410,6 +412,7 @@ sub install_ec2_cloudwatch_agent
     );
 }
 
+
 sub run {
     my ($self, $args) = @_;
     my $qam = get_var('PUBLIC_CLOUD_QAM', 0);
@@ -423,10 +426,13 @@ sub run {
 
     select_host_console();
 
+    ($args->{my_provider}, $args->{my_instance}) = $self->prepare_instance($args);
+
     my $instance = $args->{my_instance};
     my $provider = $args->{my_provider};
 
     $self->prepare_scripts();
+    $self->register_instance($instance, $qam);
 
     my $ltp_dir = '/tmp/ltp';
     my $ltp_prefix = '/opt/ltp';
@@ -465,12 +471,30 @@ sub run {
     die('kirk failed') if ($kirk_exit_code);
 }
 
+
+sub prepare_instance {
+    my ($self, $args) = @_;
+    unless ($args->{my_provider} && $args->{my_instance}) {
+        $args->{my_provider} = $self->provider_factory();
+        $args->{my_instance} = $args->{my_provider}->create_instance();
+        $args->{my_instance}->wait_for_guestregister() if (is_ondemand());
+    }
+
+    return ($args->{my_provider}, $args->{my_instance});
+}
+
 sub prepare_scripts {
     assert_script_run("cd $root_dir");
     assert_script_run('curl ' . data_url('publiccloud/restart_instance.sh') . ' -o restart_instance.sh');
     assert_script_run('curl ' . data_url('publiccloud/log_instance.sh') . ' -o log_instance.sh');
     assert_script_run('chmod +x restart_instance.sh');
     assert_script_run('chmod +x log_instance.sh');
+}
+
+sub register_instance {
+    my ($self, $instance, $qam) = @_;
+    registercloudguest($instance) if (is_byos() && !$qam);
+    register_openstack($instance) if is_openstack;
 }
 
 sub install_ltp {
@@ -552,8 +576,14 @@ sub prepare_ltp_cmd {
     $sut .= ':host=' . $instance->public_ip;
     $sut .= ':reset_cmd=\'' . $reset_cmd . '\'';
 
+    my $env_prefix = '';
+    if (defined $env && $env ne '') {
+        my @vars = split /:/, $env;
+        $env_prefix = join(' ', @vars) . ' ';
+    }
+
     my $python_exec = get_python_exec();
-    my $cmd = "$python_exec kirk ";
+    my $cmd = "$env_prefix$python_exec kirk ";
     $cmd .= '--verbose ';
     $cmd .= '--exec-timeout=' . $exec_timeout . ' ';
     $cmd .= '--suite-timeout=' . $ltp_timeout . ' ';
@@ -561,7 +591,6 @@ sub prepare_ltp_cmd {
     $cmd .= '--skip-tests \'' . $skip_tests . '\' ' if $skip_tests;
     $cmd .= '--sut default:com=ssh ';
     $cmd .= '--com=ssh' . $sut . ' ';
-    $cmd .= '--env ' . $env . ' ' if ($env);
     return $cmd;
 }
 

@@ -89,9 +89,13 @@ moby:
   # https://github.com/moby/moby/pull/52116 - integration/container: use page-aligned shm size to fix test on ppc64le
   # https://github.com/moby/moby/pull/52117 - integration/capabilities: Switch to debian:trixie-slim
   # https://github.com/moby/moby/pull/52119 - integration/image: pull ppc64le and s390x in TestSaveAndLoadPlatform
+  # https://github.com/moby/moby/pull/52197 - integration: ignore container Status field in DiskUsage test comparisons
+  # https://github.com/moby/moby/pull/52199 - Fix testsuite when running directly as rootless
   51219:
     merged: "29.0.0"
+  # XXX not merged
   51263:
+    merged: "29.0.0"
   51794:
   51970:
     min: "29.2.0"
@@ -105,6 +109,10 @@ moby:
   52119:
     min: "29.2.0"
     merged: "29.3.0"
+  52197:
+    min: "29.2.0"
+  52199:
+    min: "29.2.0"
 
 netavark:
   # https://github.com/containers/netavark/pull/1191 is needed for 001-basic
@@ -118,7 +126,6 @@ podman:
   # https://github.com/containers/podman/pull/25918 is needed for 195-run-namespaces
   # https://github.com/containers/podman/pull/25942 is needed for 252-quadlet
   # https://github.com/containers/podman/pull/26017 is needed for 030-run
-  # https://github.com/containers/podman/pull/26798 is needed for pasta
   # https://github.com/containers/podman/pull/26920 is needed to drop ncat
   # https://github.com/containers/podman/pull/26921 is needed to drop socat
   # https://github.com/containers/podman/pull/26934 - test/e2e: fix 'block all syscalls' seccomp for runc
@@ -131,6 +138,7 @@ podman:
   # https://github.com/containers/podman/pull/28151 - test/system: fix pod inspect ordering test leak
   # https://github.com/containers/podman/pull/28266 - Fixes for running the e2e testsuite on architectures other than amd64
   # https://github.com/containers/podman/pull/28281 - tests/e2e: Do not try to list /proc/acpi on non-amd64
+  # https://github.com/containers/podman/pull/28338 - test: relax rootless runc pid namespace assertion
   21875:
     merged: "5.0.0"
   24068:
@@ -146,13 +154,12 @@ podman:
   26017:
     merged: "5.6.0"
     min: "5.0.0"
+  26022:
+    merged: "5.6.0"
+    min: "5.4.0"
   26947:
     merged: "5.7.0"
     min: "5.4.0"
-  # XXX: Not merged
-  26798:
-    merged: "5.7.0"
-    min: "5.0.0"
   26920:
     merged: "5.7.0"
   26921:
@@ -175,6 +182,8 @@ podman:
     min: "5.8.0"
   28281:
     min: "5.8.0"
+  28338:
+    min: "5.4.0"
 
 podman-py:
   # https://github.com/containers/podman-py/pull/623 - Fix pytest flag for rootful test
@@ -183,11 +192,20 @@ podman-py:
   637:
 
 runc:
+  # https://github.com/opencontainers/runc/pull/4842 - Update busybox:glibc in integration tests to latest builds
   # https://github.com/opencontainers/runc/pull/5079 - integration: Skip test for new privileges if NoNewPrivs is set
   # https://github.com/opencontainers/runc/pull/5124 - tests/int: Disable coredumps for SCMP_ACT_KILL tests
+  4842:
+    merged: "1.5.0"
+    min: "1.4.0"
   5079:
+    merged: "1.5.0"
   5124:
+    merged: "1.5.0"
 
 skopeo:
+  # https://github.com/containers/skopeo/pull/2830 - integration: Skip TestProxyMetadata on non-amd64 architectures
+  2830:
+    min: "1.20.0"
 
 umoci:

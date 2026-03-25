@@ -1153,12 +1153,15 @@ sub azure_fencing_agents_playbook_args {
         foreach ('spn_application_id', 'spn_application_password') {
             croak "Argument < $_ > missing" unless $args{$_};
         }
+        # the spn secret is stored in file "~/spn_secret.yaml",
+        # together with "-e @filename" to prevent secret leaking into logs
+        save_tmp_file('spn_secret.yaml', "spn_application_id: $args{spn_application_id}\nspn_application_password: $args{spn_application_password}");
+        assert_script_run('curl ' . autoinst_url . '/files/spn_secret.yaml -o ~/spn_secret.yaml');
     }
 
     my $playbook_opts = "-e azure_identity_management=$args{fence_type}";
     $playbook_opts = join(' ', $playbook_opts,
-        "-e spn_application_id=$args{spn_application_id}",
-        "-e spn_application_password=$args{spn_application_password}") if $args{fence_type} eq 'spn';
+        '-e @~/spn_secret.yaml') if $args{fence_type} eq 'spn';
 
     return ($playbook_opts);
 }
@@ -1196,6 +1199,7 @@ sub create_hana_vars_section {
     $hana_vars{sap_domain} = get_var('SAP_DOMAIN', 'qesap.example.com');
     $hana_vars{use_sap_hana_sr_angi} = get_var('USE_SAP_HANA_SR_ANGI', 'false');
     $hana_vars{sap_hana_install_update_firewall} = get_var('SLES4SAP_FIREWALL_PORTS', 'false');
+    $hana_vars{firewall_cfg} = get_var('SLES4SAP_FIREWALL', 'ignore');
     my @hana_sites = get_hana_site_names();
     $hana_vars{primary_site} = $hana_sites[0];
     $hana_vars{secondary_site} = $hana_sites[1];

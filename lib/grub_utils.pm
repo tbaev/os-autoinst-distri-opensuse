@@ -9,7 +9,7 @@ use opensusebasetest qw(handle_uefi_boot_disk_workaround);
 use testapi;
 use Utils::Architectures;
 use utils;
-use version_utils qw(is_sle is_livecd is_bootloader_grub2_bls is_agama is_leap);
+use version_utils qw(is_sle is_livecd get_bootloader is_agama is_leap is_bootloader_sdboot);
 use bootloader_setup qw(stop_grub_timeout boot_into_snapshot);
 use Utils::Backends;
 
@@ -35,9 +35,11 @@ sub grub_test {
     reconnect_mgmt_console if is_pvm;
     handle_installer_medium_bootup();
     unlock_bootloader;
-    # 60 due to rare slowness e.g. multipath poo#11908
-    # 90 as a workaround due to the qemu backend fallout
-    assert_screen(is_bootloader_grub2_bls ? 'grub2-bls' : 'grub2', $timeout);
+    # get_bootloader returns the name of the bootloaders
+    # which is conveniently the same names we use for
+    # their tags
+    my $bootloader_tag = get_bootloader();
+    assert_screen($bootloader_tag, $timeout);
     assert_screen('grub2_timeout') if get_var('AGAMA_PROFILE_OPTIONS', '') =~ /bootloader_timeout/;
     stop_grub_timeout;
     boot_into_snapshot if get_var("BOOT_TO_SNAPSHOT");
@@ -45,7 +47,7 @@ sub grub_test {
     if ((is_aarch64 && is_sle && get_var('PLYMOUTH_DEBUG'))
         || get_var('GRUB_KERNEL_OPTION_APPEND'))
     {
-        bug_workaround_bsc1005313() unless get_var("BOOT_TO_SNAPSHOT");
+        append_kernel_options() unless get_var("BOOT_TO_SNAPSHOT");
     }
     else {
         # avoid timeout for booting to HDD
@@ -75,7 +77,7 @@ sub handle_installer_medium_bootup {
     'opensusebasetest'->handle_uefi_boot_disk_workaround() if (is_aarch64);
 }
 
-sub bug_workaround_bsc1005313 {
+sub append_kernel_options {
     send_key 'e';
     check_screen "linux-line-selected", 2;
     # Move to end of kernel boot parameters line
@@ -92,7 +94,8 @@ sub bug_workaround_bsc1005313 {
     type_string " " . get_var('GRUB_KERNEL_OPTION_APPEND') if get_var('GRUB_KERNEL_OPTION_APPEND');
 
     save_screenshot;
-    send_key 'ctrl-x';
+    my $execute_command = (is_bootloader_sdboot()) ? 'ret' : 'ctrl-x';
+    send_key $execute_command;
 }
 
 1;

@@ -332,6 +332,7 @@ PUBLIC_CLOUD_EC2_ACCOUNT_ID | string | `aws sts get-caller-identity --query "Acc
 PUBLIC_CLOUD_EC2_UPLOAD_AMI | string | "" | Needed to decide which image will be used for helper VM for upload some image. When not specified some predefined value will be used. Overwrite the value for `ec2uploadimg --ec2-ami`.
 PUBLIC_CLOUD_EC2_UPLOAD_SECGROUP | string | "" | Allow to instruct ec2uploadimg script to use some existing security group instead of creating new one. If given, the parameter `--security-group-ids` is passed to `ec2uploadimg`.
 PUBLIC_CLOUD_EC2_UPLOAD_VPCSUBNET | string | "" | Allow to instruct ec2uploadimg script to use some existing VPC instead of creating new one.
+PUBLIC_CLOUD_EC2_NITRO_ENCLAVE | boolean | false | Enable the AWS Nitro Enclave for this instance.
 PUBLIC_CLOUD_EMBARGOED_UPDATES_DETECTED | boolean | true | Internal variable written by the code and readed by the code . Should NOT be set manually
 PUBLIC_CLOUD_FORCE_REGISTRATION | boolean | false | If set, tests/publiccloud/registration.pm will register cloud guest
 PUBLIC_CLOUD_GCE_STACK_TYPE | string | IPV4_ONLY | Network stack type, possible values: IPV4_IPV6 or IPV4_ONLY
@@ -342,6 +343,7 @@ PUBLIC_CLOUD_HDD2_SIZE | integer | "" | If set, the instance will have an additi
 PUBLIC_CLOUD_HDD2_TYPE | string | "" | If PUBLIC_CLOUD_ADDITIONAL_DISK_SIZE is set, this defines the additional disk type (optional). The required value depends on the cloud service provider.
 PUBLIC_CLOUD_IGNORE_EMPTY_REPO | boolean | false | Ignore empty maintenance update repos
 PUBLIC_CLOUD_IGNORE_UNREGISTERED | boolean | false | Ignore any failure related to the fact that system is unregistered.
+PUBLIC_CLOUD_IGNORE_EMPTY_UPDATES | boolean | false | Ignore no rpm list changes in patch_and_reboot
 PUBLIC_CLOUD_IMAGE_ID | string | "" | The image ID we start the instance from
 PUBLIC_CLOUD_IMAGE_LOCATION | string | "" | The URL where the image gets downloaded from. The name of the image gets extracted from this URL.
 PUBLIC_CLOUD_IMAGE_PROJECT | string | "" | Google Compute Engine image project
@@ -436,7 +438,7 @@ Variable        | Type      | Default value | Details
 XFSTESTS        | string    | ---           | Determines the action to be taken. If set to "installation", it runs xfstests installation and then shuts down. If set to <FS_TYPE> (e.g., "btrfs," "xfs," or "ext4"), the test will be executed on the specified file system.
 XFSTESTS_RANGES | string | | sub-tests ranges. This setting is mandatory. Support using "-" to define a range, or use "," to list separate subtests(e.g. xfs/001-999,generic/001). But the final test range will also count subtests defined in XFSTESTS_GROUPLIST, a skill to set subtests only by XFSTESTS_GROUPLIST is to set a minimal XFSTESTS_RANGES with XFSTESTS_GROUPLIST
 NO_SHUFFLE | boolean | 0 | the default sequence to run all subtests is a random sequence, it's designed to reduce the influence between each subtest. Set NO_SHUFFLE=1 to run in order
-XFSTESTS_BLACKLIST | string | | set the sub-tests will not run. Mostly use in the feature not supported, and exclude some critical issues to make whole tests stable. The final skip test list will also count those defined in XFSTESTS_GROUPLIST. It's also support "-" and "," to set skip range
+XFSTESTS_BLACKLIST | string | | set the sub-tests will not run. Mostly use in the feature not supported, and exclude some critical issues to make whole tests stable. The final skip test list will also count those defined in XFSTESTS_GROUPLIST. It's also support "-" and "," to set skip range. Or set the blacklist file url if starts with http:// or https://. For instance: XFSTESTS_BLACKLIST=http://example.com/blacklist.yaml
 XFSTESTS_GROUPLIST | string | | it's an efficient way to set XFSTESTS_RANGES. Most likely use in test whole range in a single test, such as test special mount option. The range is supported in xfstests upstream, to know the whole range of group names could take a look at xfstests upstream README file. This parameter in openqa supports not only "include" tests, but also "exclude" tests. To add a "!" before a group name to exclude all subtests in that group. Here is an example: e.g. XFSTESTS_GROUPLIST=quick,!fuzz,!fuzzers,!realtime (Add all subtests in quick group, and exclude all dangerous subtests in fuzz, fuzzers, realtime groups)
 XFSTESTS_KNOWN_ISSUES | string | | Used to specify a url for a json file with well known xfstests issues. If an error occur which is listed, then the result is overwritten with softfailure.
 

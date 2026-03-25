@@ -22,7 +22,7 @@ use version_utils qw(is_jeos is_opensuse is_released is_sle is_leap is_tumblewee
 use Utils::Architectures;
 use Utils::Systemd qw(systemctl disable_and_stop_service);
 use LTP::utils;
-use LTP::install qw(get_required_build_dependencies get_maybe_build_dependencies get_submodules_to_rebuild);
+use LTP::install qw(get_required_build_dependencies get_maybe_build_dependencies);
 use rpi 'enable_tpm_slb9670';
 use bootloader_setup 'add_grub_xen_replace_cmdline_settings';
 use virt_autotest::utils 'is_xen_host';
@@ -172,12 +172,8 @@ sub prepare_ltp_git {
 
 sub install_selected_from_git {
     prepare_ltp_git;
-
-    assert_script_run('pushd testcases');
-    foreach (get_submodules_to_rebuild()) {
-        assert_script_run("pushd $_ && make && make install && popd", timeout => 600);
-    }
-    assert_script_run("popd");
+    assert_script_run('make -j$(getconf _NPROCESSORS_ONLN) modules', timeout => 600);
+    assert_script_run('make -j$(getconf _NPROCESSORS_ONLN) modules-install');
 }
 
 sub install_from_git {
@@ -316,9 +312,9 @@ sub run {
     # Enables repositories on full installation medium
     zypper_enable_install_dvd if (get_var('FLAVOR') eq 'Full-QR');
 
-    # Lock kernel default on transactional system and RT flavors
+    # Lock kernel default on transactional system, RT flavors and MinimalVM
     # This is workaround for poo#165036 to prevent kernel-default and kernel-default-base installation
-    zypper_call("al kernel-default kernel-default-base") if (is_transactional && (get_var('FLAVOR', '') =~ /Base-RT-Updates|Base-RT|Base-RT-encrypted|Base-Kernel-RT/));
+    zypper_call("al kernel-default kernel-default-base") if (is_transactional && (get_var('FLAVOR', '') =~ /Base-RT-Updates|Base-RT|Base-RT-encrypted|Base-Kernel-RT/) || is_jeos);
 
     # Register Extras repository on SL Micro 6.0+
     add_suseconnect_product('SL-Micro-Extras', get_var('VERSION')) if (is_sle_micro('6.0+'));

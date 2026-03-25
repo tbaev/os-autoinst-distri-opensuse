@@ -22,7 +22,7 @@ my $version;
 
 sub setup {
     my $self = shift;
-    my @pkgs = qw(aardvark-dns apache2-utils buildah catatonit glibc-devel-static go1.25 gpg2 jq libgpgme-devel
+    my @pkgs = qw(aardvark-dns apache2-utils buildah catatonit glibc-devel-static go1.26 gpg2 jq libgpgme-devel
       libseccomp-devel make netavark openssl podman podman-remote skopeo socat sudo systemd-container xfsprogs);
     push @pkgs, qw(criu libcriu2) unless is_sle;
     $oci_runtime = get_var("OCI_RUNTIME", "runc");
@@ -101,7 +101,7 @@ sub run {
     # $default_targets .= " remoteintegration" unless (is_sle || get_var("ROOTLESS"));
     my @targets = split('\s+', get_var('RUN_TESTS', $default_targets));
     foreach my $target (@targets) {
-        run_command "env $env make $target &> $target.txt", no_assert => 1, timeout => 3000;
+        run_timeout_command "$env make $target &> $target.txt", no_assert => 1, timeout => 3000;
         upload_logs "$target.txt";
         assert_script_run "mv report.xml $target.xml";
         die "Testsuite failed" if script_run("test -s $target.xml");

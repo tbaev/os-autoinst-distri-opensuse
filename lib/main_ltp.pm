@@ -12,7 +12,7 @@ use main_common qw(boot_hdd_image load_bootloader_s390x load_kernel_baremetal_te
 use 5.018;
 use Utils::Backends;
 use Utils::Architectures qw(is_s390x);
-use version_utils qw(is_opensuse is_transactional is_sle_micro);
+use version_utils qw(is_opensuse is_transactional is_sle_micro is_jeos);
 use LTP::utils qw(loadtest_kernel shutdown_ltp);
 use main_common 'loadtest';
 # FIXME: Delete the "## no critic (Strict)" line and uncomment "use warnings;"
@@ -51,15 +51,12 @@ sub load_kernel_tests {
             loadtest 'console/suseconnect_scc' if is_sle_micro;
         }
 
-        if (get_var('INSTALL_KOTD')) {
-            loadtest_kernel 'install_kotd';
-        }
-        elsif (get_var('CHANGE_KERNEL_REPO') ||
+        if (get_var('CHANGE_KERNEL_REPO') ||
             get_var('CHANGE_KERNEL_PKG') ||
             get_var('ASSET_CHANGE_KERNEL_RPM')) {
             loadtest_kernel 'change_kernel';
         }
-        if (get_var('FLAVOR', '') =~ /Incidents-Kernel|Updates-Staging|Increments|Maintenance-KOTD|(Default-qcow|Base-RT|Base-ppc-512)-Updates/) {
+        elsif (!get_var('LIBC_LIVEPATCH') && !is_jeos) {
             loadtest_kernel 'update_kernel';
         }
 

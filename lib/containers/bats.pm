@@ -44,6 +44,7 @@ our @EXPORT = qw(
   patch_junit
   patch_sources
   run_command
+  run_timeout_command
   setup_pkgs
   switch_to_root
   switch_to_user
@@ -78,6 +79,17 @@ sub run_command {
     return $no_assert ? script_run $cmd, %args : assert_script_run $cmd, %args;
 }
 
+sub run_timeout_command {
+    my $cmd = shift;
+    my %args = testapi::compat_args(
+        {
+            timeout => 90,
+        }, ['timeout'], @_);
+    my $timeout = delete $args{timeout};
+
+    return run_command("timeout -k 3 $timeout env $cmd", %args, timeout => $timeout + 10);
+}
+
 sub switch_to_root {
     select_serial_terminal;
     push @commands, "### RUN AS root";
@@ -107,6 +119,9 @@ sub configure_docker_tls {
     my $key = "key.pem";
     my $opts = "-req -days 7 -sha256 -in $req -CA $ca_cert -CAkey $ca_key -CAcreateserial -out $cert";
 
+    my $not_before = is_sle("<16") ? "" : " -not_before " . script_output('date -u -d "5 minutes ago" +%Y%m%d%H%M%SZ');
+    $opts .= $not_before;
+
     # Create self-signed CA
     run_command "openssl genrsa -out $ca_key 4096";
     run_command qq(openssl req -new -x509 -days 7 -key $ca_key -sha256 -subj "/CN=CA" -out $ca_cert -addext "basicConstraints=critical,CA:TRUE" -addext "keyUsage=critical,keyCertSign,cRLSign");
@@ -123,6 +138,8 @@ sub configure_docker_tls {
     run_command "mv -f $ca_cert $cert $key ~/.docker/";
     run_command "cp /etc/docker/ca.pem /etc/pki/trust/anchors/";
     run_command "update-ca-certificates";
+    # Older versions of openssl-x509(1) lack -not_before so let's sleep a little while
+    sleep 5 unless $not_before;
     return " --tlsverify --tlscacert=/etc/docker/$ca_cert --tlscert=/etc/docker/$cert --tlskey=/etc/docker/$key";
 }
 
@@ -156,7 +173,10 @@ sub configure_docker {
     record_info "DOCKER_OPTS", $docker_opts;
     run_command "systemctl restart docker";
     run_command "export DOCKER_HOST=tcp://localhost:$port";
-    run_command "export DOCKER_TLS_VERIFY=1" if $args{tls};
+    if ($args{tls}) {
+        run_command 'export DOCKER_CERT_PATH=$HOME/.docker';
+        run_command "export DOCKER_TLS_VERIFY=1";
+    }
     record_info "containerd status", script_output("systemctl status containerd", proceed_on_failure => 1);
     record_info "docker status", script_output("systemctl status docker", proceed_on_failure => 1);
     record_info "docker version", script_output("docker version -f json | jq -Mr");
@@ -239,7 +259,7 @@ sub cleanup_docker {
     script_run 'docker rm -vf $(docker ps -aq)', timeout => $timeout;
     script_run "docker volume prune -a -f", timeout => $timeout;
     script_run "docker system prune -a -f", timeout => $timeout;
-    script_run "unset DOCKER_HOST DOCKER_TLS_VERIFY";
+    script_run "unset DOCKER_CERT_PATH DOCKER_HOST DOCKER_TLS_VERIFY";
     systemctl "restart docker";
 }
 
@@ -269,12 +289,8 @@ sub install_git {
     # We need git 2.47.0+ to use `--ours` with `git apply -3`
     return if (script_run("test -f /etc/zypp/repos.d/Kernel_tools.repo") == 0);
     my $version = get_var("VERSION");
-    if (is_sle('<16')) {
-        $version =~ s/-/_/;
-        $version = "SLE_$version";
-    }
-    # 16.1 is BETA
-    $version = "16.0" if ($version eq "16.1");
+    $version =~ s/-/_/;
+    $version = "SLE_$version";
     run_command "zypper addrepo https://download.opensuse.org/repositories/Kernel:/tools/$version/Kernel:tools.repo";
     run_command "zypper --gpg-auto-import-keys -n install --allow-vendor-change git-core", timeout => 300;
 }
@@ -350,12 +366,6 @@ sub patch_junit {
     }
 }
 
-sub nonewprivs {
-    run_command "zypper ar -f https://download.opensuse.org/repositories/home:/kukuk:/no_new_privs/openSUSE_Tumbleweed/ no_new_privs";
-    run_command "zypper -n --gpg-auto-import-keys install --force-resolution --allow-vendor-change enable-no_new_privs";
-    run_command "systemctl enable --now polkit-agent-helper.socket";
-}
-
 sub setup_pkgs {
     my ($self, @pkgs) = @_;
 
@@ -385,9 +395,15 @@ sub setup_pkgs {
     }
     push @pkgs, qw(jq xz);
     @pkgs = uniq sort @pkgs;
-    push @pkgs, "git" unless is_sle;
+    push @pkgs, "git" unless is_sle("<16.0");
     run_command "zypper --gpg-auto-import-keys -n install --allow-vendor-change @pkgs", timeout => 1200;
-    install_git unless is_tumbleweed;
+    install_git if is_sle("<16.0");
+
+    # Workaround for https://bugzilla.opensuse.org/show_bug.cgi?id=1259147
+    if (is_tumbleweed && is_x86_64 && !get_var("OCI_RUNTIME") && (check_var("BATS_PACKAGE", "buildah") || check_var("BATS_PACKAGE", "podman"))) {
+        run_command "zypper addrepo -f https://download.opensuse.org/history/20260226/tumbleweed/repo/oss/ goodold";
+        run_command "zypper -n install --oldpackage --from goodold libseccomp2";
+    }
 
     configure_oci_runtime $oci_runtime;
 
@@ -422,8 +438,6 @@ EOF
     }
 
     return if $rebooted;
-
-    nonewprivs if get_var("NONEWPRIVS");
 
     foreach my $pkg (split(/\s+/, get_var("TEST_PACKAGES", ""))) {
         run_command "zypper --gpg-auto-import-keys --no-gpg-checks -n install --force-resolution --allow-vendor-change $pkg || rpm -ivh --force --nodeps $pkg";
@@ -475,11 +489,9 @@ sub collect_coredumps {
     script_run('coredumpctl list > coredumpctl.txt');
 
     # Get PID and executable for all dumps
-    my @lines = split /\n/, script_output(q{coredumpctl -q --no-pager --no-legend | awk '$9 == "present" { print $5, $10 }'}, proceed_on_failure => 1);
+    my @pids = split /\n/, script_output(q{coredumpctl -q --no-pager --no-legend | awk '$9 == "present" { print $5 }'}, proceed_on_failure => 1);
 
-    foreach my $line (@lines) {
-        my ($pid, $exe) = split /\s+/, $line;
-
+    foreach my $pid (@pids) {
         # Dumping and compressing coredumps may take some time
         my $out = script_output("coredumpctl info $pid", timeout => 300, proceed_on_failure => 1);
         record_info("COREDUMP", $out);
@@ -596,14 +608,13 @@ sub bats_tests {
     my $tests = @tests ? join(" ", @tests) : $tests_dir{$package};
 
     my $debug = get_var("DEBUG") ? "--trace" : "";
-    my $cmd = "env $env bats $debug --report-formatter junit --tap -T $tests";
+    my $cmd = "$env bats $debug --report-formatter junit --tap -T $tests";
     my $xmlfile = "$tapfile.xml";
     $tapfile .= ".tap.txt";
     $cmd .= " </dev/null | tee -a $tapfile";
 
     run_command "echo $tapfile .. > $tapfile";
-    push @commands, $cmd;
-    my $ret = script_run($cmd, timeout => $timeout);
+    my $ret = run_timeout_command($cmd, no_assert => 1, timeout => $timeout);
     script_run "mv report.xml $xmlfile";
 
     upload_logs($tapfile);

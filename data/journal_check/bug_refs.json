@@ -673,7 +673,8 @@
                 "15-SP5",
                 "15-SP6",
                 "15-SP7",
-                "16.0"
+                "16.0",
+                "16.1"
             ]
         },
         "type": "ignore"
@@ -1739,7 +1740,7 @@
         "type": "ignore"
     },
     "boo#1229935": {
-        "description": "sshd-session.*(error|fatal).*(mm_reap: preauth child terminated|mm_request_receive: read: Broken pipe|mm_request_receive: read: Connection reset by peer)",
+        "description": "sshd.*(error|fatal).*(mm_reap: preauth child terminated|mm_request_receive: read: Broken pipe|mm_request_receive: read: Connection reset by peer|mm_request_send: write: Broken pipe)",
         "products": {
             "opensuse": [
                 "Tumbleweed"
@@ -1749,6 +1750,11 @@
             ],
             "sle": [
                 "16.0"
+            ],
+            "sle-micro": [
+                "6.0",
+                "6.1",
+                "6.2"
             ]
         },
         "type": "bug"
@@ -1876,7 +1882,8 @@
         "description": "kernel: block dm-0: the capability attribute has been deprecated",
         "products": {
             "sle": [
-                "16.0"
+                "16.0",
+                "16.1"
             ]
         },
         "type": "ignore"
@@ -2031,6 +2038,26 @@
         "products": {
             "microos": [
                 "Tumbleweed"
+            ]
+        },
+        "type": "ignore"
+    },
+    "core-PMU-driver": {
+        "description": "core PMU driver",
+        "products": {
+            "sle": [
+                "16.0",
+                "16.1"
+            ]
+        },
+        "type": "ignore"
+    },
+    "forward-time-jump": {
+        "description": "Forward time jump detected",
+        "products": {
+            "sle": [
+                "16.0",
+                "16.1"
             ]
         },
         "type": "ignore"

@@ -37,6 +37,7 @@ ansible:
     sap_hana_install_sid: 'HQ0'
     sap_hana_install_instance_number: '00'
     sap_hana_install_update_firewall: '%HANA_FIREWALL%'
+    firewall_cfg: '%FIREWALL%'
     sap_domain: 'qe-test.example.com'
     primary_site: 'goofy'
     secondary_site: 'miky'
@@ -52,7 +53,7 @@ ansible:
       - sap-hana-install.yaml
       - sap-hana-system-replication.yaml
       - sap-hana-system-replication-hooks.yaml
-      - sap-hana-cluster.yaml -e azure_identity_management=%AZURE_NATIVE_FENCING_AIM% -e spn_application_id=%AZURE_NATIVE_FENCING_APP_ID% -e spn_application_password=%AZURE_NATIVE_FENCING_APP_PASSWORD%
+      - sap-hana-cluster.yaml -e azure_identity_management=%AZURE_NATIVE_FENCING_AIM% -e @~/spn_secret.yaml
     destroy:
       - deregister.yaml
     test:

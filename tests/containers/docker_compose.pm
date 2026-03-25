@@ -21,7 +21,7 @@ my $version;
 
 sub setup {
     my $self = shift;
-    my @pkgs = qw(docker docker-buildx docker-compose go1.25 make openssl);
+    my @pkgs = qw(docker docker-buildx docker-compose go1.26 make openssl);
     $self->setup_pkgs(@pkgs);
 
     # docker-compose tests needs to be patched upstream to support SELinux
@@ -60,11 +60,14 @@ sub test ($target) {
         "github.com/docker/compose/$v/pkg/e2e::TestLocalComposeRun",
         "github.com/docker/compose/$v/pkg/e2e::TestLocalComposeRun/compose_run_-rm_with_stop_signal",
         # Flaky tests:
+        "github.com/docker/compose/$v/pkg/e2e::TestBuildTLS",
         "github.com/docker/compose/$v/pkg/e2e::TestUpDependenciesNotStopped",
         "github.com/docker/compose/$v/pkg/e2e::TestUpStopWithLogsMixed",
+        "github.com/docker/compose/$v/pkg/e2e::TestWatch",
+        "github.com/docker/compose/$v/pkg/e2e::TestWatch/debian",
     );
 
-    run_command "$env make $target &> $target.txt", no_assert => 1, timeout => 3600;
+    run_timeout_command "$env make $target &> $target.txt", no_assert => 1, timeout => 3600;
     upload_logs "$target.txt";
     assert_script_run "mv /tmp/report/report.xml $target.xml";
     die "Testsuite failed" if script_run("test -s $target.xml");

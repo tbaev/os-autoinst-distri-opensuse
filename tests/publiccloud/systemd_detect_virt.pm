@@ -17,6 +17,7 @@ use Utils::Architectures qw(is_aarch64);
 sub systemd_detect_virt_expected_output_virtual {
     my ($self) = @_;
 
+    return "xen" if (get_var("TEST") =~ /_xen$/) || is_ec2_xen();
     return "google" if is_gce;
     return "amazon" if is_ec2;
     return "microsoft" if is_azure;
@@ -98,7 +99,7 @@ sub assert_systemd_detect_virt {
 
     record_info('systemd version', $systemd_version);
 
-    if (get_var('PUBLIC_CLOUD_INSTANCE_TYPE') =~ /-metal$/) {
+    if (get_var('PUBLIC_CLOUD_INSTANCE_TYPE') =~ /metal$/) {
         $self->assert_systemd_detect_virt_metal($rc, $output);
     } else {
         $self->assert_systemd_detect_virt_virtual($rc, $output);

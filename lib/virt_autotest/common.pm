@@ -453,6 +453,8 @@ if (get_var("REGRESSION", '') =~ /xen/) {
 }
 
 our %imports = ();    # imports are virtual machines that we don't install but just import. We test those separately.
+my $win_variant = is_sle('<=15-SP5') ? 'win2k22' : 'win2k25';    # os-variant win2k25 is avaiable from 15sp6 bsc#1259771
+
 if (get_var("REGRESSION", '') =~ /xen/) {
     if (is_sle('>=16')) {
         # SLES 16+ does not support Xen
@@ -462,12 +464,12 @@ if (get_var("REGRESSION", '') =~ /xen/) {
         %imports = (
             'win2k25-bios-xen' => {
                 name => 'win2k25-bios-xen',
-                extra_params => '--connect xen:/// --virt-type xen --hvm --os-variant win2k25',
+                extra_params => "--connect xen:/// --virt-type xen --hvm --os-variant $win_variant",
                 disk => '/var/lib/libvirt/images/win2k25-bios-xen.qcow2',
                 source => '/mnt/virt_images/xen/win2k25-bios-xen.qcow2',
                 macaddress => '52:54:00:78:73:66',
                 version => 'Microsoft Windows Server 2025',
-                memory => 4096,
+                memory => 6144,
                 vcpus => 4,
                 network_model => "e1000",
             },
@@ -479,7 +481,7 @@ if (get_var("REGRESSION", '') =~ /xen/) {
         %imports = (
             'win2k25-efi-kvm' => {
                 name => 'win2k25-efi-kvm',
-                extra_params => '--os-variant win2k25',
+                extra_params => "--os-variant $win_variant",
                 disk => '/var/lib/libvirt/images/win2k25-efi-kvm.qcow2',
                 source => '/mnt/virt_images/kvm/win2k25-efi-kvm.qcow2',
                 macaddress => '52:54:00:78:73:67',
@@ -495,7 +497,7 @@ if (get_var("REGRESSION", '') =~ /xen/) {
         %imports = (
             'win2k25-bios-kvm' => {
                 name => 'win2k25-bios-kvm',
-                extra_params => '--os-variant win2k25',
+                extra_params => "--os-variant $win_variant",
                 disk => '/var/lib/libvirt/images/win2k25-bios-kvm.qcow2',
                 source => '/mnt/virt_images/kvm/win2k25-bios-kvm.qcow2',
                 macaddress => '52:54:00:78:73:66',

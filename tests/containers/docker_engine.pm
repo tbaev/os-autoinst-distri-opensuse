@@ -21,7 +21,7 @@ my @test_dirs;
 
 sub setup {
     my $self = shift;
-    my @pkgs = qw(containerd-ctr distribution-registry docker docker-buildx docker-rootless-extras glibc-devel go1.25 openssl rootlesskit selinux-tools skopeo);
+    my @pkgs = qw(containerd-ctr distribution-registry docker docker-buildx docker-rootless-extras glibc-devel go1.26 openssl rootlesskit selinux-tools skopeo);
     push @pkgs, qw(nftables-devel) unless is_sle("<15-SP5");
     $self->setup_pkgs(@pkgs);
 
@@ -30,7 +30,7 @@ sub setup {
     # Tests use "ctr"
     run_command "cp /usr/sbin/containerd-ctr /usr/local/bin/ctr";
 
-    $version = script_output "docker version --format '{{.Client.Version}}'";
+    $version = script_output "docker version --format '{{.Client.Version}}' 2>/dev/null", proceed_on_failure => 1;
     $version =~ s/-ce$//;
     # Docker v29 changed tag format
     $version = ($version =~ /^2[1-8]/) ? "v$version" : "docker-v$version";
@@ -139,7 +139,7 @@ sub run {
         $env{TEST_CLIENT_BINARY} = "/var/tmp/docker" if ($dir eq "integration-cli");
         my $env = join " ", map { "$_=\"$env{$_}\"" } sort keys %env;
         run_command "pushd $dir";
-        run_command "$env gotestsum --junitfile $report.xml --format standard-verbose ./... -- -tags '$tags' |& tee -a /var/tmp/report.txt", no_assert => 1, timeout => 900;
+        run_timeout_command "$env gotestsum --junitfile $report.xml --format standard-verbose ./... -- -tags '$tags' |& tee -a /var/tmp/report.txt", no_assert => 1, timeout => 900;
         patch_junit "docker", $version, "$report.xml", @xfails;
         parse_extra_log(XUnit => "$report.xml", timeout => 180);
         run_command "popd";

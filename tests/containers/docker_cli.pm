@@ -17,15 +17,21 @@ use Utils::Architectures;
 use containers::bats;
 
 my $version;
+my $port = 2375;
 
 sub setup {
     my $self = shift;
-    my @pkgs = qw(docker docker-buildx go1.25 openssl);
+    my @pkgs = qw(docker docker-buildx go1.26 openssl);
     push @pkgs, qw(docker-compose) unless is_sle("<16");
     $self->setup_pkgs(@pkgs);
     install_gotestsum;
 
-    configure_docker(selinux => 1, tls => 0);
+    # On SLES 15-SP4 & 15-SP5, dockerd fails with:
+    # invalid TLS configuration: failed to append certificates from PEM file: "/etc/docker/ca.pem"
+    my $tls = is_sle("<15-SP6") ? 0 : 1;
+    $port++ if $tls;
+
+    configure_docker(selinux => 1, tls => $tls);
 
     run_command "docker run -d --name registry -p 5000:5000 registry.opensuse.org/opensuse/registry:2";
 
@@ -34,7 +40,7 @@ sub setup {
 
     run_command "echo 127.0.0.1 registry >> /etc/hosts";
 
-    $version = script_output "docker version --format '{{.Client.Version}}'";
+    $version = script_output "docker version --format '{{.Client.Version}}' 2>/dev/null", proceed_on_failure => 1;
     $version =~ s/-ce$//;
     $version = "v$version";
     record_info "docker version", $version;
@@ -67,7 +73,7 @@ sub run {
 
     my %env = (
         DOCKER_CONTENT_TRUST => "",
-        TEST_DOCKER_HOST => "localhost:2375",
+        TEST_DOCKER_HOST => "localhost:$port",
         DOCKER_CLI_E2E_PLUGINS_EXTRA_DIRS => "/var/tmp/cli/build/plugins-linux-$arch",
     );
     my $env = join " ", map { "$_=\"$env{$_}\"" } sort keys %env;
@@ -104,7 +110,7 @@ sub run {
         "github.com/docker/cli/e2e/plugin::TestInstall",
     ) unless (is_x86_64);
 
-    run_command "$env gotestsum --junitfile cli.xml ./e2e/... -- &> cli.txt", no_assert => 1, timeout => 3000;
+    run_timeout_command "$env gotestsum --junitfile cli.xml ./e2e/... -- &> cli.txt", no_assert => 1, timeout => 3000;
     upload_logs "cli.txt";
     die "Testsuite failed" if script_run("test -s cli.xml");
     patch_junit "docker", $version, "cli.xml", @xfails;
