@@ -140,7 +140,7 @@ sub check_tdx_host_parameters {
 
     foreach my $param (keys %required_kernel_params) {
         if ($cmdline =~ /\b$param\b/) {
-            record_info("OK", "Found $param ($required_params{$param})");
+            record_info("OK", "Found $param ($required_kernel_params{$param})");
         }
         else {
             record_info("MISSING", "Parameter: $param not found!", result => 'fail');
@@ -150,7 +150,6 @@ sub check_tdx_host_parameters {
     my %dmesg_tdx_events = (
         'virt/tdx: BIOS enabled: private KeyID range' => 'TDX enabled and KeyIDs partitioned in BIOS',
         'allocated for PAMT' => 'PAMT memory successfully allocated',
-        'proba' => 'Proba parm',
         'virt/tdx: module initialized' => 'TDX kernel module fully initialized'
     );
 
