@@ -191,8 +191,8 @@ sub check_tdx_guests {
     foreach my $guest (@guests) {
         assert_script_run("virsh dumpxml --domain $guest | grep -i \"<launchSecurity type='tdx'\"", fail_message => "Guest $guest is not TDX.");
         record_info("GUEST $guest", "launchSecurity = TDX");
-        validate_script_output("ssh root\@$guest lscpu | grep tdx_guest");
-        validate_script_output("ssh root\@$guest  ls -l /dev/tdx_guest");
+        validate_script_output("ssh root\@$guest lscpu", sub { m/tdx_guest/} );
+        assert_script_run("ssh root\@$guest test -f /dev/tdx_guest");
 
         foreach my $event (keys %dmesg_guest_events) {
             assert_script_run(
