@@ -162,7 +162,7 @@ sub check_tdx_host_parameters {
             record_info("OK", "Found $event ($dmesg_tdx_events{$event})");
         }
         else {
-            record_info("MISSING", "dmesg log: $events not found!", result => 'fail');
+            record_info("MISSING", "dmesg log: $event not found!", result => 'fail');
         }
     }
 
