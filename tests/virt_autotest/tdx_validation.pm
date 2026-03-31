@@ -204,10 +204,20 @@ sub check_tdx_guests {
     }
 }
 
+=head2 post_fail_hook
+
+  post_fail_hook($self)
+
+Test run jumps into this subroutine if it fails somehow. It calls post_fail_hook
+in base class.
+
+=cut
+
 sub post_fail_hook {
     my $self = shift;
 
-    record_info('Failure Hook', "Test failed, collecting logs for diagnosis");
+    $self->SUPER::post_fail_hook;
+    record_info('Failure Hook', "Test failed, collecting logs");
 }
 
 1;
