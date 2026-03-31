@@ -105,7 +105,7 @@ sub check_tdx {
     assert_script_run("rpm -q ucode-intel", fail_message => "ucode-intel package is missing");
     assert_script_run("journalctl -k --grep=microcode");    # Check current microcode revision
 
-    record_info('Valid for TDX', "No tdx errors");
+    record_info('Valid for TDX', "Host is valid for TDX use");
 }
 
 =head2 check_tdx_host_parameters
@@ -192,7 +192,7 @@ sub check_tdx_guests {
         assert_script_run("virsh dumpxml --domain $guest | grep -i \"<launchSecurity type='tdx'\"", fail_message => "Guest $guest is not TDX.");
         record_info("GUEST $guest", "launchSecurity = TDX");
         validate_script_output("ssh root\@$guest lscpu", sub { m/tdx_guest/} );
-        assert_script_run("ssh root\@$guest test -f /dev/tdx_guest");
+        assert_script_run("ssh root\@$guest test -c /dev/tdx_guest");
 
         foreach my $event (keys %dmesg_guest_events) {
             assert_script_run(
