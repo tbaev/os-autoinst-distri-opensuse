@@ -20,14 +20,14 @@
 package tdx_validation;
 
 use base 'virt_feature_test_base';
-use POSIX 'strftime';
-use File::Basename;
+# use POSIX 'strftime';
+# use File::Basename;
 use testapi;
-use IPC::Run;
+# use IPC::Run;
 use utils;
-use virt_utils;
+# use virt_utils;
 use virt_autotest::common;
-use virt_autotest::utils;
+# use virt_autotest::utils;
 use version_utils qw(is_sle);
 use Utils::Architectures;
 
