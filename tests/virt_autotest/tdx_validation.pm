@@ -13,41 +13,22 @@
 #
 # Modes:
 # - Maintenance update: ENABLE_TDX=1
-# - Unified guest installation: VIRT_TDX_GUEST_INSTALL=1
 #
 # Maintainer: QE-Virtualization <qe-virt@suse.de> tbaev@suse.com
 
 package tdx_validation;
 
 use base 'virt_feature_test_base';
-# use POSIX 'strftime';
-# use File::Basename;
 use testapi;
-# use IPC::Run;
 use utils;
-# use virt_utils;
 use virt_autotest::common;
-# use virt_autotest::utils;
 use version_utils qw(is_sle);
 use Utils::Architectures;
-
-=head2 run_test
-
-  run_test($self)
-
-Entry point for the test: 
-1. Checks TDX support on the host
-2. Checks TDX support on each guest
-3. Records overall test status
-
-=cut
 
 sub run_test {
     my $self = shift;
 
     record_info('TDX Test Started', 'TDX verification test started');
-
-    my $is_maintenance_update_mode = get_var("ENABLE_TDX", 1);
 
     # Check if host is valid for TDX test
     $self->check_tdx;
@@ -57,9 +38,6 @@ sub run_test {
     $self->check_tdx_guests;
 
     record_info('TDX Test Completed', 'TDX verification test completed successfully');
-
-    # Upload all collected logs to job logs & assets
-    $self->upload_all_logs();
 
     return $self;
 }
@@ -113,8 +91,6 @@ sub check_tdx {
   check_tdx_host_parameters($self)
 
 Check whether TDX is enabled and active on the host.
-This subroutine has two named argument. 
-Multiple parameters can be passed in as a single string text separated by space.
 
 Required kernel parameters for TDX (should be set by "EXTRABOOTPARAMS" variable) :
 - intel_iommu=on: Enables Intel VT-d to manage hardware memory access and isolate devices.
