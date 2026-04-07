@@ -193,6 +193,7 @@ in base class.
 
 sub post_fail_hook {
     my $self = shift;
+    collect_host_and_guest_logs;
     collect_virt_system_logs();
     $self->SUPER::post_fail_hook;
     record_info('Failure Hook', "Test failed, collecting logs");
