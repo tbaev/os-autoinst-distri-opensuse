@@ -22,6 +22,7 @@ use base 'virt_feature_test_base';
 use testapi;
 use utils;
 use virt_autotest::common;
+use virt_autotest::utils;
 use version_utils qw(is_sle);
 use Utils::Architectures;
 
