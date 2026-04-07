@@ -198,7 +198,7 @@ sub post_fail_hook {
 
     my @guests = keys %virt_autotest::common::guests;
     foreach my $guest (@guests) {
-        collect_host_and_guest_logs($guest, "", "", "_post_fail_hook_$guest");
+       virt_utils::collect_host_and_guest_logs($guest, "", "", "_post_fail_hook_$guest");
     }
     collect_virt_system_logs();
     $self->SUPER::post_fail_hook;
