@@ -161,7 +161,8 @@ sub check_tdx_guests {
     my %dmesg_guest_events = (
         'tdx: Guest detected' => 'Kernel initialized as TDX guest',
         'Memory Encryption Features active: Intel TDX' => 'TDX memory encryption is active',
-        'Detected confidential virtualization tdx' => 'TDX memory encryption is active'
+        'Detected confidential virtualization tdx' => 'TDX memory encryption is active',
+        'trigger fail' => 'trigger fail'
     );
 
     foreach my $guest (@guests) {
@@ -191,7 +192,7 @@ in base class.
 
 sub post_fail_hook {
     my $self = shift;
-
+    collect_virt_system_logs();
     $self->SUPER::post_fail_hook;
     record_info('Failure Hook', "Test failed, collecting logs");
 }
