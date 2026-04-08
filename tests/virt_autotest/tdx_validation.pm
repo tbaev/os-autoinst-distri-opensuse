@@ -196,11 +196,13 @@ sub post_fail_hook {
 
     record_info('Failure Hook', "Test failed, collecting logs");
 
-    my @guests = keys %virt_autotest::common::guests;
     foreach my $guest (@guests) {
-       virt_utils::collect_host_and_guest_logs($guest, "", "", "_post_fail_hook_$guest");
+       record_info("Logs $guest", "Run supportconfig and collect logs from $guest");
+       assert_script_run("ssh root\@$guest 'supportconfig'", timeout => 600);
+       script_run("ssh root\@$guest 'tar -czf /tmp/var_log_${guest}.tar.gz /var/log'");
+       script_run("scp root\@$guest:/tmp/var_log_${guest}.tar.gz /tmp/var_log_${guest}.tar.gz");
+       upload_logs("/tmp/var_log_${guest}.tar.gz", log_name => "var_logs_${guest}.tar.gz");
     }
-    collect_virt_system_logs();
     $self->SUPER::post_fail_hook;
 }
 
