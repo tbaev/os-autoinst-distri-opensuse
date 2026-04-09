@@ -45,44 +45,17 @@ sub run {
     my $count = 0;
 
     # List of guests expected to complete AutoYaST installation stage 1 and 2
-    my @wait_stage_1_install = @guests;
-    my @wait_stage_2_install = @guests;
-
-    # When SEV_ES guests are rebooted by AutoYast installation in the end of stage 1
-    # they will stay in shutdown state, we have to start the guest to continue with stage 2
-    if (check_var('ENABLE_SEV_ES', '1')) {
-        record_info("Installation Stage 1", "Waiting for SEV-ES guests to finish AutoYast stage 1.");
-
-        while (@wait_stage_1_install && $count++ < $retry) {
-            @wait_stage_1_install = grep { script_run("virsh list --name | grep -w $_") == 0 } @wait_stage_1_install;
-
-            # If all guests completed stage 1 of installation exit the loop
-            last unless @wait_stage_1_install;
-            sleep 120;
-        }
-
-        if (@wait_stage_1_install) {
-            record_info("Failed: Stage 1 install timeout", "Timeout waiting for SEV-ES AutoYast stage 1: @wait_stage_1_install");
-            die "Stage 1 installation timeout";
-        }
-
-        record_info("Stage 1 AutoYast completed", "All SEV-ES guests have completed installation stage 1 and are shutdown.");
-        foreach my $guest (@guests) {
-            script_run("virsh start $guest");
-        }
-
-        record_info("Stage 2 start", "Starting SEV-ES guests to continue with stage 2 of installation.");
-    }
+    my @wait_install = @guests;
 
     while ($count++ < $retry) {
-        @wait_stage_2_install = grep { script_run("test -f /tmp/guests_ip/$_") != 0 } @wait_stage_2_install;
+        @wait_install = grep { script_run("test -f /tmp/guests_ip/$_") != 0 } @wait_install;
 
         # If all guests completed stage 2 of installation exit the loop
-        last if @wait_stage_2_install == 0;
+        last if @wait_install == 0;
         sleep 120;
         # If retry number is reached the test will fail
         if ($count == $retry) {
-            record_info("Failed: timeout", "Timeout installation for @wait_stage_2_install");
+            record_info("Failed: timeout", "Timeout installation for @wait_install");
             die;
         }
     }
