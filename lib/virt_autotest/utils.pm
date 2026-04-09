@@ -1012,6 +1012,13 @@ sub collect_virt_system_logs {
         record_info "Directory /var/log/xen/ does not exist.";
     }
 
+    if (script_run("test -d /var/log/libvirt/qemu/") == 0) {
+        assert_script_run 'tar czvf /tmp/qemu.tar.gz /var/log/libvirt/qemu/';
+        upload_asset '/tmp/qemu.tar.gz';
+    } else {
+        record_info "Directory /var/log/libvirt/qemu/ does not exist.";
+    }
+
     if (script_run("ls ~/virt-install_*") == 0) {
         script_run('tar czvf /tmp/virt-install.tar.gz ~/virt-install_*');
         upload_logs("/tmp/virt-install.tar.gz");
