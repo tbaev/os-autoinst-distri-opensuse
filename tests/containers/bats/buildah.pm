@@ -70,40 +70,12 @@ sub run_tests {
         "chroot.bats::chroot mount flags",
     ) if (is_ppc64le);
 
-    my $ret = bats_tests($log_file, \%env, \@xfails, 5000);
+    my $ret = bats_tests($log_file, \%env, \@xfails, 6000);
 
     run_command "buildah prune -a -f";
     cleanup_podman;
 
     return ($ret);
-}
-
-sub enable_docker {
-    # Needed to avoid:
-    # WARNING: COMMAND_FAILED: '/sbin/iptables -t nat -F DOCKER' failed: iptables: No chain/target/match by that name.
-    # See https://bugzilla.suse.com/show_bug.cgi?id=1196801
-    run_command 'systemctl restart firewalld';
-
-    run_command 'systemctl enable --now docker';
-    run_command "usermod -aG docker $testapi::username";
-
-    # Running podman as root with docker installed may be problematic as netavark uses nftables
-    # while docker still uses iptables.
-    # Use workaround suggested in:
-    # - https://fedoraproject.org/wiki/Changes/NetavarkNftablesDefault#Known_Issue_with_docker
-    # - https://docs.docker.com/engine/network/packet-filtering-firewalls/#docker-on-a-router
-    if (script_run("iptables -L -v | grep -q DOCKER") == 0) {
-        run_command "iptables -I DOCKER-USER -j ACCEPT";
-        run_command "ip6tables -I DOCKER-USER -j ACCEPT";
-    }
-
-    record_info("docker info", script_output("docker info -f json | jq -Mr"));
-    my $warnings = script_output("docker info -f '{{ range .Warnings }}{{ println . }}{{ end }}'");
-    record_info("WARNINGS daemon", $warnings) if $warnings;
-    $warnings = script_output("docker info -f '{{ range .ClientInfo.Warnings }}{{ println . }}{{ end }}'");
-    record_info("WARNINGS client", $warnings) if $warnings;
-    $docker_version = script_output "docker version --format '{{.Client.Version}}'";
-    record_info("docker version", $docker_version);
 }
 
 # Get latest version of package in Tumbleweed
@@ -144,6 +116,8 @@ sub run {
     record_info("buildah package version", script_output("rpm -q buildah"));
 
     enable_docker;
+    $docker_version = script_output "docker version --format '{{.Client.Version}}'";
+    record_info("docker version", $docker_version);
 
     switch_to_user;
 

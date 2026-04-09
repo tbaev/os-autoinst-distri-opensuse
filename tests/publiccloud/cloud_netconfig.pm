@@ -12,6 +12,7 @@ use Mojo::Base 'publiccloud::basetest';
 use Test::Assert qw(assert_equals assert_not_equals);
 use testapi;
 use publiccloud::utils qw(is_azure is_ec2 is_gce);
+use version_utils qw(is_sle);
 
 sub run {
     my ($self, $args) = @_;
@@ -26,22 +27,22 @@ sub run {
     $instance->ssh_assert_script_run("test -L $pers_net_rules");
 
     # Get public IP address for eth0
-    my $local_eth0_ip = $instance->ssh_script_output(qq(ip -4 -o a s eth0 primary | grep -Po "inet \\K[\\d.]+"));
+    my $local_eth0_ip = $instance->ssh_script_output(qq(ip -4 -o a s eth0 primary | sed -e 's/.* inet //' -e 's%/.*%%'));
     chomp($local_eth0_ip);
     my $metadata_eth0_ip = $provider->query_metadata($instance, ifNum => '0', addrCount => '0');
     assert_equals($metadata_eth0_ip, $local_eth0_ip, 'Locally assigned eth0 IP does not equal the IP retrieved from CSP metadata service.');
 
     if (is_azure) {
         # Get public IP address for eth1
-        my $local_eth1_ip = $instance->ssh_script_output(qq(ip -4 -o a s eth1 primary | grep -Po "inet \\K[\\d.]+"));
+        my $local_eth1_ip = $instance->ssh_script_output(qq(ip -4 -o a s eth1 primary | sed -e 's/.* inet //' -e 's%/.*%%'));
         chomp($local_eth1_ip);
         my $metadata_eth1_ip = $provider->query_metadata($instance, ifNum => '1', addrCount => '0');
         assert_equals($metadata_eth1_ip, $local_eth1_ip, 'Locally assigned eth1 IP does not equal the IP retrieved from CSP metadata service.');
 
         # Make sure each interface has also secondary IP address
-        my $local_eth0_secondary_ip = $instance->ssh_script_output(qq(ip -4 -o a s dev eth0 secondary | grep -Po "inet \\K[\\d.]+"));
+        my $local_eth0_secondary_ip = $instance->ssh_script_output(qq(ip -4 -o a s dev eth0 secondary | sed -e 's/.* inet //' -e 's%/.*%%'));
         chomp($local_eth0_secondary_ip);
-        my $local_eth1_secondary_ip = $instance->ssh_script_output(qq(ip -4 -o a s dev eth1 secondary | grep -Po "inet \\K[\\d.]+"));
+        my $local_eth1_secondary_ip = $instance->ssh_script_output(qq(ip -4 -o a s dev eth1 secondary | sed -e 's/.* inet //' -e 's%/.*%%'));
         chomp($local_eth1_secondary_ip);
 
         # Check that there is default route for each interface
@@ -55,7 +56,15 @@ sub run {
 
         # Make sure there are IP rules for each IP address
         die('No IP rules for eth0 on primary IP') if ($instance->ssh_script_output("ip rule list all from $local_eth0_ip | wc -l") == 0);
-        die('No IP rules for eth0 on secondary IP') if ($instance->ssh_script_output("ip rule list all from $local_eth0_secondary_ip | wc -l") == 0);
+        my $out = $instance->ssh_script_output("ip rule list all from $local_eth0_secondary_ip | wc -l");
+        if ($out == 0) {
+            if (is_sle(">=16.0")) {
+                record_soft_failure("bsc#1258406 - cloud-netconfig fails to add secondary IPv4 address when broadcast info is missing");
+                return;
+            } else {
+                die('No IP rules for eth0 on secondary IP');
+            }
+        }
         die('No IP rules for eth1 on primary IP') if ($instance->ssh_script_output("ip rule list all from $local_eth1_ip | wc -l") == 0);
         die('No IP rules for eth1 on secondary IP') if ($instance->ssh_script_output("ip rule list all from $local_eth1_secondary_ip | wc -l") == 0);
 
@@ -72,7 +81,7 @@ sub run {
         $instance->ssh_assert_script_run('sudo systemctl start cloud-netconfig.service');
 
         $instance->ssh_assert_script_run("ip addr show dev eth0 secondary");
-        die('There is no secondary address on eth0') if ($instance->ssh_script_output(qq(ip -4 -o a s dev eth0 secondary | grep -Po "inet \\K[\\d.]+" | wc -l)) == 0);
+        die('There is no secondary address on eth0') if ($instance->ssh_script_output(qq(ip -4 -o a s dev eth0 secondary | grep inet | wc -l)) == 0);
         die('There is no default route on eth1') if ($instance->ssh_script_output("ip route show default dev eth1 | wc -l") == 0);
 
         # Remove eth0 secondary address and eth1 default route and check if it reappears
@@ -85,7 +94,7 @@ sub run {
         # Force-run cloud-netconfig service
         $instance->ssh_assert_script_run('sudo systemctl start cloud-netconfig.service');
 
-        die('Secondary IP address in eth1 still present after removed via provider') if ($instance->ssh_script_run(qq(ip -4 -o a s dev eth1 secondary | grep -Po "inet \\K[\\d.]+" | wc -l)) != 0);
+        die('Secondary IP address in eth1 still present after removed via provider') if ($instance->ssh_script_run(qq(ip -4 -o a s dev eth1 secondary | grep inet)) == 0);
     }
 }
 
@@ -123,10 +132,6 @@ sub debug {
         my $resource_group = $provider->get_terraform_output('.resource_group_name.value[0]');
         script_run("az network nic list --resource-group $resource_group");
     }
-}
-
-sub test_flags {
-    return {publiccloud_multi_module => 1};
 }
 
 1;

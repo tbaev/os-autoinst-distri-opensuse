@@ -40,10 +40,6 @@ sub should_fully_build_ltp_from_git {
     return get_var('PUBLIC_CLOUD_LTP_GIT_FULL_BUILD', 0);    # 1 if env var is set, otherwise 0
 }
 
-sub should_partially_build_ltp_from_git {
-    return get_var('PUBLIC_CLOUD_LTP_GIT_BUILD', 0);    # 1 if env var is set, otherwise 0
-}
-
 sub should_partially_build_ltp_from_git_modules_install {
     return get_var('PUBLIC_CLOUD_LTP_BUILD_MODULES', 0);    # 1 if env var is set, otherwise 0
 }
@@ -51,14 +47,29 @@ sub should_partially_build_ltp_from_git_modules_install {
 sub install_build_deps {
     my ($self, $instance) = @_;
 
+    my @deps = get_required_build_dependencies();
+
+    # Remove kernel-default-devel from the list of dependencies since matching kernel version kernel-<flavor>-devel-<ver> package will be added.
+    @deps = grep { $_ ne 'kernel-default-devel' } @deps;
+
+    # Sample value: kernel-default-devel-6.12.0-160000.27.1
+    my $kernel_devel_pkg = $instance->ssh_script_output(cmd => q{
+        rpm -qf /boot/config-$(uname -r) \
+        | sed -r 's/\.[^.]*$//' \
+        | cut -d- -f2- \
+        | awk -F- '{print "kernel-" $1 "-devel-" substr($0, index($0,$2))}'
+    });
+
+    push @deps, $kernel_devel_pkg;
+
     if (is_transactional) {
         $instance->ssh_assert_script_run(
-            cmd => sprintf('sudo transactional-update -n pkg in --no-recommends %s', join(' ', get_required_build_dependencies())),
+            cmd => sprintf('sudo transactional-update -n pkg in --no-recommends %s', join(' ', @deps)),
             timeout => 300
         );
         $instance->softreboot();
     } else {
-        zypper_call_remote($instance, cmd => "install --no-recommends " . join(' ', get_required_build_dependencies()));
+        zypper_call_remote($instance, cmd => "install --no-recommends " . join(' ', @deps));
     }
     zypper_install_available_remote($instance);
 }
@@ -109,21 +120,6 @@ sub partially_build_ltp_from_git {
 
     $instance->ssh_assert_script_run(
         cmd => "cd $ltp_dir && make -j\$(getconf _NPROCESSORS_ONLN) modules && sudo make -j\$(getconf _NPROCESSORS_ONLN) modules-install",
-        timeout => $ltp_subdir_build_timeout
-    );
-    record_info("LTP Partial Build Time", "Time taken build from source: " . (time() - $start) . " seconds");
-}
-
-sub partially_build_ltp_from_git_modules_install {
-    my ($self, $instance, $ltp_dir, $ltp_prefix) = @_;
-
-    my $start = time();
-    my $ltp_subdir_build_timeout = 5 * 60;
-
-    $self->install_build_deps($instance);
-    $self->prepare_ltp_git($instance, $ltp_dir, $ltp_prefix);
-    $instance->ssh_assert_script_run(
-        cmd => "sudo make -C $ltp_dir -j\$(getconf _NPROCESSORS_ONLN) modules-install",
         timeout => $ltp_subdir_build_timeout
     );
     record_info("LTP Partial Build Time", "Time taken build from source: " . (time() - $start) . " seconds");
@@ -443,12 +439,12 @@ sub run {
         $self->fully_build_ltp_from_git($instance, $ltp_dir, $ltp_prefix);
     } else {
         $self->install_ltp($instance, $ltp_repo_name, $ltp_repo_url, $ltp_pkg);
-        $self->partially_build_ltp_from_git_modules_install($instance, $ltp_dir, $ltp_prefix) if should_partially_build_ltp_from_git_modules_install();
-        $self->partially_build_ltp_from_git($instance, $ltp_dir, $ltp_prefix) if should_partially_build_ltp_from_git();
+        $self->partially_build_ltp_from_git($instance, $ltp_dir, $ltp_prefix) if should_partially_build_ltp_from_git_modules_install();
     }
 
     $self->gen_ltp_env($instance, $ltp_pkg);
 
+    my $include_tests_pattern = get_var('LTP_COMMAND_PATTERN');
     my $skip_tests = $self->prepare_skip_tests(\@commands);
 
     $self->prepare_kirk($instance);
@@ -461,7 +457,7 @@ sub run {
     my $log_start_cmd = $root_dir . '/log_instance.sh start ' . instance_log_args($provider, $instance);
     $self->prepare_logging($log_start_cmd);
 
-    my $cmd_run_ltp = $self->prepare_ltp_cmd($instance, $provider, $reset_cmd, $ltp_command, $skip_tests, $env);
+    my $cmd_run_ltp = $self->prepare_ltp_cmd($instance, $provider, $reset_cmd, $ltp_command, $include_tests_pattern, $skip_tests, $env);
 
     $self->dump_kernel_config($instance);
     record_info('LTP START', 'Command launch');
@@ -566,7 +562,7 @@ sub prepare_logging {
 }
 
 sub prepare_ltp_cmd {
-    my ($self, $instance, $provider, $reset_cmd, $ltp_command, $skip_tests, $env) = @_;
+    my ($self, $instance, $provider, $reset_cmd, $ltp_command, $include_tests_pattern, $skip_tests, $env) = @_;
     my $exec_timeout = get_var('LTP_EXEC_TIMEOUT', 1200);
 
     my $sut = ':user=' . $instance->username;
@@ -582,14 +578,16 @@ sub prepare_ltp_cmd {
     }
 
     my $python_exec = get_python_exec();
-    my $cmd = "$env_prefix$python_exec kirk ";
-    $cmd .= '--verbose ';
-    $cmd .= '--exec-timeout=' . $exec_timeout . ' ';
-    $cmd .= '--suite-timeout=' . $ltp_timeout . ' ';
-    $cmd .= '--run-suite ' . $ltp_command . ' ';
-    $cmd .= '--skip-tests \'' . $skip_tests . '\' ' if $skip_tests;
-    $cmd .= '--sut default:com=ssh ';
-    $cmd .= '--com=ssh' . $sut . ' ';
+    my $cmd = "$env_prefix$python_exec kirk";
+    $cmd .= " --verbose";
+    $cmd .= " --exec-timeout=$exec_timeout";
+    $cmd .= " --suite-timeout=$ltp_timeout";
+    $cmd .= " --run-suite $ltp_command";
+    $cmd .= " --run-pattern '$include_tests_pattern'" if $include_tests_pattern;
+    $cmd .= " --skip-tests '$skip_tests'" if $skip_tests;
+    $cmd .= " --sut default:com=ssh";
+    $cmd .= " --com=ssh$sut";
+    $cmd .= " ";
     return $cmd;
 }
 
@@ -619,7 +617,7 @@ sub cleanup {
 sub gen_ltp_env {
     my ($self, $instance, $ltp_pkg) = @_;
     my $ltp_version = get_var('LTP_RELEASE', 'master');
-    unless (should_partially_build_ltp_from_git() || should_fully_build_ltp_from_git()) {
+    unless (should_fully_build_ltp_from_git()) {
         $ltp_version = $instance->ssh_script_output(cmd => qq(rpm -q --qf '%{VERSION}\n' $ltp_pkg));
     }
     $self->{ltp_env} = prepare_whitelist_environment();
