@@ -203,6 +203,12 @@ sub post_fail_hook {
        script_run("scp root\@$guest:/tmp/var_log_${guest}.tar.gz /tmp/var_log_${guest}.tar.gz");
        upload_logs("/tmp/var_log_${guest}.tar.gz", log_name => "var_logs_${guest}.tar.gz");
     }
+    record_info('collect_virt_system_logs;', "Test failed, collecting logs");
+    collect_virt_system_logs;
+    record_info('collect_virt_system_logs;', "Test failed, collecting logs");
+    record_info('collect_guests_supportconfig_and_logs', "Test failed, collecting logs");
+    collect_guests_supportconfig_and_logs;
+    record_info('collect_guests_supportconfig_and_logs;', "Test failed, collecting logs");
     $self->SUPER::post_fail_hook;
 }
 

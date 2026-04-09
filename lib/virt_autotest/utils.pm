@@ -108,6 +108,7 @@ our @EXPORT = qw(
   double_check_xen_role
   check_kvm_modules
   install_product_software
+  collect_guests_supportconfig_and_logs
 );
 
 my %log_cursors;
@@ -2076,6 +2077,31 @@ sub install_product_software {
         $cmd = $cmd . " systemd-coredump" if get_var('COLLECT_COREDUMPS');
         zypper_call($cmd);
         save_screenshot;
+    }
+}
+
+=head2 collect_guests_supportconfig_and_logs
+
+  collect_guests_supportconfig_and_logs();
+
+Runs supportconfig and collects compressed /var/log* from all guests 
+
+=cut
+
+sub collect_guests_supportconfig_and_logs {
+    foreach my $guest (keys %virt_autotest::common::guests) {
+        record_info("Logs $guest", "Run supportconfig and collect logs from $guest");
+        my $var_log_archive = "/tmp/var_log_${guest}.tar.gz";
+        
+        # Run supportconfig on guest
+        script_run("ssh root\@$guest 'supportconfig < /dev/null'", timeout => 600);
+        
+        # Compress /var/log (which now includes the supportconfig log)
+        script_run("ssh root\@$guest 'tar -czf $var_log_archive /var/log'");
+        
+        # Pull the archive to the host and upload to openQA
+        script_run("scp root\@$guest:$var_log_archive $var_log_archive");
+        upload_logs("$var_log_archive", log_name => "var_logs_${guest}.tar.gz");
     }
 }
 
