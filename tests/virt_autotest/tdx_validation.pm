@@ -163,7 +163,6 @@ sub check_tdx_guests {
         'tdx: Guest detected' => 'Kernel initialized as TDX guest',
         'Memory Encryption Features active: Intel TDX' => 'TDX memory encryption is active',
         'Detected confidential virtualization tdx' => 'TDX memory encryption is active',
-        'trigger fail' => 'trigger fail'
     );
 
     foreach my $guest (@guests) {

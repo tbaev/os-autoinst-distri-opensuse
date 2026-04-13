@@ -298,6 +298,7 @@ if (get_var("REGRESSION", '') =~ /xen/) {
             distro => 'SLE_16',
             location => 'http://download.suse.de/install/SLP/SLES-16.0-Full-LATEST/x86_64/DVD1/',    # Network location for live OS
             launch_security => 'tdx',
+            boot_firmware => 'efi',
         }
     );
     # Filter out guests not allowed for the detected SLE version
