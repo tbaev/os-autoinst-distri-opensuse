@@ -438,7 +438,7 @@ if (get_var("REGRESSION", '') =~ /xen/) {
         # SLES 16+ only supports UEFI boot
         %imports = (
             'win2k25-uefi-kvm' => {
-                name => 'win2k25-efi-kvm',
+                name => 'win2k25-uefi-kvm',
                 extra_params => "--os-variant $win_variant",
                 disk => '/var/lib/libvirt/images/win2k25-uefi-kvm.qcow2',
                 source => '/mnt/virt_images/kvm/win2k25-uefi-kvm.qcow2',
