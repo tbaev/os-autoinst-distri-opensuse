@@ -30,7 +30,10 @@ sub run_test {
 
             mouse_set(0, 0);
             assert_and_click 'virt-manager_details';
-            send_key 'super-up';
+            send_key 'alt-space';
+            wait_still_screen 2;
+            send_key 'x';
+            wait_still_screen 2;
             assert_and_click 'virt-manager_add-hardware';
             mouse_set(0, 0);
             assert_and_click 'virt-manager_add-storage';
