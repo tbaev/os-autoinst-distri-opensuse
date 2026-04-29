@@ -30,6 +30,8 @@ sub run_test {
 
             mouse_set(0, 0);
             assert_and_click 'virt-manager_details';
+            mouse_set(5, 5);
+            wait_still_screen 2;
             mouse_dclick;
             wait_still_screen 2;
             assert_and_click 'virt-manager_add-hardware';
