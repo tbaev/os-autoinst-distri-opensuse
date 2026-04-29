@@ -30,9 +30,7 @@ sub run_test {
 
             mouse_set(0, 0);
             assert_and_click 'virt-manager_details';
-            send_key 'alt-spc';
-            wait_still_screen 2;
-            send_key 'x';
+            mouse_dclick;
             wait_still_screen 2;
             assert_and_click 'virt-manager_add-hardware';
             mouse_set(0, 0);
