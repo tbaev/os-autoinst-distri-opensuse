@@ -30,7 +30,7 @@ sub run_test {
 
             mouse_set(0, 0);
             assert_and_click 'virt-manager_details';
-            send_key 'alt-space';
+            send_key 'alt-spc';
             wait_still_screen 2;
             send_key 'x';
             wait_still_screen 2;
