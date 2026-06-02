@@ -43,6 +43,7 @@ sub run {
 
     script_run("echo 'Container base image tests:' > /var/tmp/podman-3rd_party_images_log.txt");
     script_run("curl ifconfig.me");
+    script_run("curl -4 ifconfig.me");
     my $engine = $self->containers_factory($self->{runtime});
     my $images = get_3rd_party_images();
     for my $image (@{$images}) {
