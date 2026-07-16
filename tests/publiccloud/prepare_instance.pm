@@ -40,7 +40,8 @@ sub run {
 
     record_info('DEBUG', 'DEBUG');
     assert_script_run("zypper -n in nmap");
-    assert_script_run("nmap -Pn -4 -p 443,444 larry.qe.suse.de");
+    assert_script_run("nmap -Pn -4 -p 443,444,80,81 larry.qe.suse.de");
+    assert_script_run("nmap -Pn -6 -p 443,444,80,81 larry.qe.suse.de");
     assert_script_run("curl -4 -k https://larry.qe.suse.de:444/secrets");
     assert_script_run("curl -k https://larry.qe.suse.de:444/secrets");
     assert_script_run("curl -6 -k https://larry.qe.suse.de:444/secrets");
