@@ -39,9 +39,9 @@ sub run {
     $instance_args{use_extra_disk} = {size => $additional_disk_size, type => $additional_disk_type} if ($additional_disk_size > 0);
 
     record_info('DEBUG', 'DEBUG');
-    assert_script("curl -k https://larry.qe.suse.de:444/secrets");
-    assert_script("curl -4 -k https://larry.qe.suse.de:444/secrets");
-    assert_script("curl -6 -k https://larry.qe.suse.de:444/secrets");
+    assert_script_run("curl -4 -k https://larry.qe.suse.de:444/secrets");
+    assert_script_run("curl -k https://larry.qe.suse.de:444/secrets");
+    assert_script_run("curl -6 -k https://larry.qe.suse.de:444/secrets");
     $args->{my_provider} = $self->provider_factory();
     $args->{my_instance} = $args->{my_provider}->create_instance(%instance_args);
     my $provider = $self->{my_provider} = $args->{my_provider};
