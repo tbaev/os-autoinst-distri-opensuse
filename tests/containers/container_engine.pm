@@ -131,6 +131,21 @@ sub basic_container_tests {
     ## Note: Leave the tumbleweed container to save some bandwidth. It is used in other test modules as well.
 }
 
+sub check_network_macvlan {
+    my %args = @_;
+    my $runtime = $args{runtime};
+    my $image = "registry.opensuse.org/opensuse/busybox";
+    my $netname = 'macvlan_test';
+
+    record_info "DEBUG: start macvlan test";
+    script_retry("$runtime image pull $image", timeout => 600, retry => 3, delay => 120);
+    validate_script_output("$runtime image ls", qr/busybox/);
+    assert_script_run("$runtime run --rm -it $image sh -c 'busybox --help | head -1'");
+    assert_script_run("ip -c a");
+
+    record_info "DEBUG: lgtm?";
+}
+
 sub run {
     my ($self, $args) = @_;
     die('You must define a engine') unless ($args->{runtime});
@@ -148,6 +163,7 @@ sub run {
     # Test the connectivity of Docker containers
     check_containers_connectivity($engine);
 
+    check_network_macvlan(runtime => $self->{runtime});
     basic_container_tests(runtime => $self->{runtime});
 
     # Build an image from Dockerfile and run it
