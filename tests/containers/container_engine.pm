@@ -151,7 +151,7 @@ sub check_network_macvlan {
     
     # Crate macvlan network
     assert_script_run("$runtime network create -d macvlan -o parent=$dev --subnet=192.168.60.0/24 --gateway=192.168.60.254 $netname");
-    assert_script_run("podman network inspect  $netname");
+    assert_script_run("$runtime network inspect  $netname");
     
     # Create containers with macvlan network
     assert_script_run("$runtime run -td --network $netname --ip 192.168.60.10 --name busybox_1 $image");
