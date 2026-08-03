@@ -159,7 +159,7 @@ sub check_network_macvlan {
 
     #Test macvlan
     assert_script_run("$runtime network ls");
-    assert_script_run("$runtime network inspect macvlan_test");
+    assert_script_run("$runtime network inspect $netname");
     assert_script_run("$runtime container inspect busybox_1");
     assert_script_run("$runtime exec busybox_1 ping -c3 192.168.60.10");
     assert_script_run("$runtime exec busybox_1 ping -c3 192.168.60.11");
