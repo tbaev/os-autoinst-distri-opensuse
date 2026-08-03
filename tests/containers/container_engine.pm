@@ -136,12 +136,35 @@ sub check_network_macvlan {
     my $runtime = $args{runtime};
     my $image = "registry.opensuse.org/opensuse/busybox";
     my $netname = 'macvlan_test';
+    my $nic = script_output(q(ip -4 route show default | awk '{print $5}' | head -n1));
+    my $dev = "$nic.666";
 
     record_info "DEBUG: start macvlan test";
+
     script_retry("$runtime image pull $image", timeout => 600, retry => 3, delay => 120);
     validate_script_output("$runtime image ls", qr/busybox/);
     assert_script_run("$runtime run --rm -it $image sh -c 'busybox --help | head -1'");
-    assert_script_run("ip -c a");
+    
+    # Create new VLAN sub nic for isolation
+    assert_script_run("ip link add link $nic name $dev type vlan id 666");
+    assert_script_run("ip link set $dev up");
+    
+    # Crate macvlan network
+    assert_script_run("$runtime network create -d macvlan -o parent=$dev --subnet=192.168.60.0/24 --gateway=192.168.60.254 $netname");
+    assert_script_run("podman network inspect  my-macvlan-net")
+    
+    # Create containers with macvlan network
+    assert_script_run("$runtime run -td --network $netname --ip 192.168.60.10 --name busybox_1 $image");
+    assert_script_run("$runtime run -td --network $netname --ip 192.168.60.11 --name busybox_2 $image");
+
+    #Test macvlan
+    assert_script_run("$runtime network ls");
+    assert_script_run("$runtime network inspect macvlan_test");
+    assert_script_run("$runtime container inspect busybox_1");
+    assert_script_run("$runtime exec busybox_1 ping -c3 192.168.60.10");
+    assert_script_run("$runtime exec busybox_1 ping -c3 192.168.60.11");
+    assert_script_run("$runtime exec busybox_2 ping -c3 192.168.60.10");
+    assert_script_run("$runtime exec busybox_2 ping -c3 192.168.60.11");
 
     record_info "DEBUG: lgtm?";
 }
