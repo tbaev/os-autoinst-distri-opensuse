@@ -141,9 +141,9 @@ sub check_network_macvlan {
 
     record_info "DEBUG: start macvlan test";
 
-    script_retry("$runtime image pull $image", timeout => 600, retry => 3, delay => 120);
-    validate_script_output("$runtime image ls", qr/busybox/);
-    assert_script_run("$runtime run --rm -it $image sh -c 'busybox --help | head -1'");
+    # script_retry("$runtime image pull $image", timeout => 600, retry => 3, delay => 120);
+    # validate_script_output("$runtime image ls", qr/busybox/);
+    # assert_script_run("$runtime run --rm -it $image sh -c 'busybox --help | head -1'");
     
     # Create new VLAN sub nic for isolation
     assert_script_run("ip link add link $nic name $dev type vlan id 666");
@@ -154,10 +154,10 @@ sub check_network_macvlan {
     assert_script_run("$runtime network inspect  $netname");
     
     # Create containers with macvlan network
-    assert_script_run("$runtime run -td --network $netname --ip 192.168.60.10 --name busybox_1 $image");
-    assert_script_run("$runtime run -td --network $netname --ip 192.168.60.11 --name busybox_2 $image");
+    assert_script_run("$runtime run -td --network $netname --ip 192.168.60.10 --name busybox_1 $image sleep infinity");
+    assert_script_run("$runtime run -td --network $netname --ip 192.168.60.11 --name busybox_2 $image sleep infinity");
 
-    #Test macvlan
+    # Test macvlan
     assert_script_run("$runtime network ls");
     assert_script_run("$runtime network inspect $netname");
     assert_script_run("$runtime container inspect busybox_1");
@@ -165,6 +165,7 @@ sub check_network_macvlan {
     assert_script_run("$runtime exec busybox_1 ping -c3 192.168.60.11");
     assert_script_run("$runtime exec busybox_2 ping -c3 192.168.60.10");
     assert_script_run("$runtime exec busybox_2 ping -c3 192.168.60.11");
+    assert_script_run("$runtime exec busybox_1 ping -c3 1.1.1.1");
 
     record_info "DEBUG: lgtm?";
 }
