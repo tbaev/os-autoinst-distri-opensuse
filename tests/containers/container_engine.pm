@@ -174,7 +174,7 @@ sub check_network_macvlan {
 
     # Clean up
     script_run("$runtime rm -f busybox_1 busybox_2");
-    script_run("$runtime network rm $netname")
+    script_run("$runtime network rm $netname");
     script_run("ip link delete dev $macvlan_dev");
     record_info "DEBUG: lgtm?";
 }
