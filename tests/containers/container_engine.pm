@@ -157,23 +157,25 @@ sub check_network_macvlan {
     assert_script_run("$runtime run -td --network $netname --ip $ip1 --name busybox_1 $image sleep infinity");
     assert_script_run("$runtime run -td --network $netname --ip $ip2 --name busybox_2 $image sleep infinity");
 
-    # Test container connection
-
-    
-
+    # Check if container realy use macvlan network
     assert_script_run("$runtime network ls");
     assert_script_run("$runtime container inspect busybox_1");
     assert_script_run("$runtime container inspect busybox_2");
+    validate_script_output("$runtime container inspect busybox_1", qr/$netname/);
+    validate_script_output("$runtime container inspect busybox_2", qr/$netname/);
     validate_script_output("$runtime exec busybox_1 ip a", qr/$ip1/);
     validate_script_output("$runtime exec busybox_2 ip a", qr/$ip2/);
 
-    assert_script_run("$runtime exec busybox_1 ping -c3 $ip1");
+    # Containers using the macvlan network can reach reach each other
     assert_script_run("$runtime exec busybox_1 ping -c3 $ip2");
     assert_script_run("$runtime exec busybox_2 ping -c3 $ip1");
-    assert_script_run("$runtime exec busybox_2 ping -c3 $ip2");
-    # it should fail
-    assert_script_run("$runtime exec busybox_1 ping -c3 1.1.1.1");
+    # Containers using the macvlan network should not be able to reach 1.1.1.1
+    assert_script_run("! $runtime exec busybox_1 ping -c2 1.1.1.1", fail_message => "container reached the internet, macvlan is not isolated");
 
+    # Clean up
+    script_run("$runtime rm -f busybox_1 busybox_2");
+    script_run("$runtime network rm $netname")
+    script_run("ip link delete dev $macvlan_dev");
     record_info "DEBUG: lgtm?";
 }
 
