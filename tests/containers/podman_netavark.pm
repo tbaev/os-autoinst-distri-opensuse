@@ -218,7 +218,7 @@ sub run {
     my $cur_version = script_output('rpm -q --qf "%{VERSION}\n" netavark');
     # only for netavark v1.6+
     # JeOS's kernel-default-base is missing *macvlan* kernel module
-    if (!is_jeos && package_version_cmp($cur_version, '1.6.0') >= 0) {
+    if (package_version_cmp($cur_version, '1.6.0') >= 0) {
         record_info('TEST4', 'smoke test for netavark dhcp proxy + macvlan');
         $net1->{name} = 'test_macvlan';
         systemctl('enable --now netavark-dhcp-proxy.socket');
